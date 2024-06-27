@@ -1,0 +1,41 @@
+name: rlbinancegym
+channels:
+  - conda-forge
+  - esri
+  - jiayi_anaconda
+  - nvidia
+  - pytorch
+  - defaults
+dependencies:
+  - pip>=21.0.1
+  - setuptools>=51.0.0
+  - numpy>=1.19.2
+  - pandas>=1.1.5,<2.0.0
+  - python-binance==1.0.19
+  - ta-lib>=0.4.19
+  - pycryptodome~=3.11
+  - matplotlib>=3.0.2
+  - stable-baselines3[extra]==2.3.1
+  - pytorch==2.2.0
+  - torchvision==0.17.0
+  - torchaudio==2.2.0
+  - gymnasium-all==0.29.1
+  - python-dotenv>=0.19.1
+  - scikit-learn>=0.23.2
+  - typing-extensions>=3.7.4
+  - pytz>=2020.4
+  - requests
+  - websockets==9.1
+  - psycopg2>=2.9.3
+  - apscheduler
+  - scipy
+  - plotly
+  - marshmallow-dataclass>=8.5.0
+  - sympy
+  - PyYAML>=5.3.1
+  - pip:
+      - git+https://github.com/cubecloud/secureapikey.git
+      - git+https://github.com/cubecloud/mlthread-tools.git
+      - git+https://github.com/cubecloud/dbbinance-storage.git
+      - git+https://github.com/cubecloud/ensembletools.git
+prefix: /home/cubecloud/anaconda3/envs/rlbinancegym
