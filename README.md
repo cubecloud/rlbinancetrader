@@ -1,4 +1,8 @@
 # rlbinancetrader
 
-RL Based trader for BINANCE based on my previous projects
+RL agent for crypto currency pair (BTCUSDT) trading on BINANCE exchange
+
+RL агент для торговли криптовалютной парой BTCUSDT на бирже Binance
+
+
 

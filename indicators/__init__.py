@@ -1,2 +1,2 @@
-from indicators.loadindicators import *
+from indicators.loadindicators import LoadDbIndicators
 

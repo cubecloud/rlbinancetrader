@@ -15,7 +15,7 @@ dependencies:
   - ta-lib>=0.4.19
   - pycryptodome~=3.11
   - matplotlib>=3.0.2
-  - stable-baselines3[extra]==2.3.1
+  - stable-baselines3==2.3.2
   - pytorch==2.2.0
   - torchvision==0.17.0
   - torchaudio==2.2.0
@@ -33,6 +33,7 @@ dependencies:
   - marshmallow-dataclass>=8.5.0
   - sympy
   - PyYAML>=5.3.1
+  - rich
   - pip:
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git
