@@ -18,13 +18,13 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 file_handler = logging.FileHandler('test_rllaboratory.log')
-file_handler.setLevel(logging.INFO)
+file_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.DEBUG)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
@@ -32,8 +32,8 @@ _timeframe = '15m'
 _discretization = '15m'
 _gap_period = '1w'
 
-_start_datetime = datetime.datetime.strptime('2023-07-15 01:00:00', Constants.default_datetime_format)
-# _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
+# _start_datetime = datetime.datetime.strptime('2023-07-15 01:00:00', Constants.default_datetime_format)
+_start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
 _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
 _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
@@ -55,9 +55,9 @@ data_processor_kwargs = dict(start_datetime=_start_datetime,
 
 env_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                   pnl_stop=-0.9,
-                  max_lot_size=0.06,
-                  verbose=0,
-                  log_interval=1,
+                  max_lot_size=0.5,
+                  verbose=1,
+                  log_interval=500,
                   observation_type='indicators',
                   # action_type='box',
                   action_type='discrete',
@@ -79,13 +79,13 @@ dqn_kwargs = dict(policy="MlpPolicy",
 ppo_kwargs = dict(policy="MlpPolicy",
                   verbose=1)
 
-rllab = LabBase(env_cls=BinanceEnvBase,
-                env_kwargs=env_kwargs,
+rllab = LabBase(env_cls=[BinanceEnvBase,],
+                env_kwargs=[env_kwargs,],
                 agents_cls=[DQN, ],
                 agents_kwargs=[dqn_kwargs, ],
                 # agents_cls=[PPO, ],
                 # agents_kwargs=[ppo_kwargs, ],
-                total_timesteps=1_000_000,
+                total_timesteps=500_000,
                 checkpoint_num=25,
                 eval_freq=100_000,
                 experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
