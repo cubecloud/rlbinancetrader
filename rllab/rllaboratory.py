@@ -19,7 +19,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from dataclasses import asdict, dataclass, field, make_dataclass
 from rllab.configtools import ConfigMethods
 
-__version__ = 0.012
+__version__ = 0.016
 
 TZ = timezone('Europe/Moscow')
 
@@ -40,7 +40,8 @@ class LABConfig:
 class LabBase:
     def __init__(self, env_cls: Union[object, List[object,]], agents_cls: Union[object, List[object]],
                  env_kwargs: Union[List[dict,], dict], agents_kwargs: Union[List[dict,], dict],
-                 total_timesteps: int = 500_000, experiment_path: str = './', checkpoint_num: int = 20,
+                 total_timesteps: int = 500_000, experiment_path: str = './',
+                 checkpoint_num: int = 20,
                  eval_freq: int = 50_000, n_eval_episodes: int = 10,
 
                  ):
@@ -132,7 +133,7 @@ class LabBase:
                                                  )
         eval_callback = EvalCallback(self.eval_vecenv_lst[ix],
                                      best_model_save_path=agent_cfg.DIRS["best"],
-                                     n_eval_episodes=10,
+                                     n_eval_episodes=self.n_eval_episodes,
                                      log_path=agent_cfg.DIRS["evaluation"],
                                      eval_freq=int(self.total_timesteps // self.checkpoint_num),
                                      deterministic=True
@@ -150,12 +151,13 @@ class LabBase:
         agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
         # filename = agent_cfg.FILENAME
         agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
-        result = evaluate_policy(agent_obj, self.train_vecenv_lst[ix], n_eval_episodes=self.n_eval_episodes,
+        result = evaluate_policy(agent_obj, self.eval_vecenv_lst[ix], n_eval_episodes=self.n_eval_episodes,
                                  return_episode_rewards=True)
         result = pd.DataFrame(data=result, index=['reward', 'ep_length']).astype(int)
         msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
                f'Evaluation result:\n {result.to_string()}')
         logger.debug(msg)
+        result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
     def __get_env(self, env_cls, env_kwargs):
         env = env_cls(**env_kwargs)
@@ -173,7 +175,7 @@ class LabBase:
         # self.train_vecenv_lst.append(DummyVecEnv([self.__get_env(self.env_classes_lst[ix], self.env_kwargs_lst[ix])]))
 
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        eval_env_kwargs.update({'use_period': 'test', 'verbose': 1, 'log_interval': 1})
+        eval_env_kwargs.update({'use_period': 'test', 'reuse_data_prob': 0.00, 'verbose': 1, 'log_interval': 1})
 
         self.eval_vecenv_lst.append(
             make_vec_env(self.env_classes_lst[ix], n_envs=1, seed=42, env_kwargs=eval_env_kwargs))

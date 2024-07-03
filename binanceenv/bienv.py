@@ -8,6 +8,7 @@ from gymnasium.spaces import Discrete
 from gymnasium.spaces import Box
 from gymnasium.utils import seeding
 
+from dbbinance.fetcher.cachemanager import CacheManager
 from datawizard.dataprocessor import IndicatorProcessor
 from datawizard.dataprocessor import Constants
 
@@ -81,10 +82,29 @@ class DiscreteActionSpace:
         self.__action_space = value
 
 
+class ActionsBins:
+    def __init__(self, box, n_actions):
+        self.box_range = (np.max(box) - np.min(box))
+        self.n_actions = n_actions
+        self.step = self.box_range / n_actions
+        self.bins = np.arange(box[0], box[1] + 1e-7, step=self.step, dtype=np.float32)
+        self.pairs = [(self.bins[ix - 1], self.bins[ix]) for ix in range(1, len(self.bins))]
+
+    def bins_2actions(self, other):
+        for ix in range(self.n_actions):
+            if np.min(self.pairs[ix]) < other < np.max(self.pairs[ix]):
+                break
+        return ix
+
+
 class BoxActionSpace:
     def __init__(self, n_action):
-        self.__action_space = Box(low=np.array([0, 0]), high=np.array([n_action, 1]), dtype=np.float32)
+        self.__action_space = Box(low=-1., high=1, shape=(1,), dtype=np.float32)
+        self.actions_bins_obj = ActionsBins([-1, 1], n_action)
         self.name = 'box'
+
+    def bins_2actions(self, action):
+        return self.actions_bins_obj.bins_2actions(action)
 
     @property
     def action_space(self):
@@ -95,7 +115,14 @@ class BoxActionSpace:
         self.__action_space = value
 
 
+cache_manager_obj = CacheManager(max_memory_gb=1)
+eval_cache_manager_obj = CacheManager(max_memory_gb=1)
+
+
 class BinanceEnvBase(gymnasium.Env):
+    CM = cache_manager_obj
+    eval_CM = eval_cache_manager_obj
+
     count = 0
     target_balance: float = 100_000.
     target_symbol: str = 'USDT'
@@ -111,15 +138,17 @@ class BinanceEnvBase(gymnasium.Env):
 
     def __init__(self, data_processor_kwargs: dict, target_balance: float = 100_000., coin_balance: float = 0.,
                  pnl_stop: float = -0.5, verbose: int = 0, log_interval=500, max_lot_size=0.25,
-                 observation_type='indicators', action_type='discrete', use_period='train', render_mode=None):
+                 observation_type='indicators', action_type='discrete', use_period='train',
+                 reuse_data_prob=0.5, eval_reuse_prob=0.1, render_mode=None):
 
         BinanceEnvBase.count += 1
         self.idnum = int(BinanceEnvBase.count)
         self.data_processor_obj = IndicatorProcessor(**data_processor_kwargs)
         self.max_timesteps = self.data_processor_obj.max_timesteps
         self.max_lot_size = max_lot_size
-
-        logger.info(f"{self.__class__.__name__} #{self.idnum}: MAX_TIMESTEPS = {self.max_timesteps}")
+        self.reuse_data_prob = reuse_data_prob
+        self.eval_reuse_prob = eval_reuse_prob
+        # logger.info(f"{self.__class__.__name__} #{self.idnum}: MAX_TIMESTEPS = {self.max_timesteps}")
         self.use_period = use_period
         self.pnl_stop = pnl_stop
         self.log_interval = log_interval
@@ -143,14 +172,19 @@ class BinanceEnvBase(gymnasium.Env):
             self._take_action_func = self._take_action_train
         else:
             self._take_action_func = self._take_action_test
+            # separated CacheManager for eval environment
+            self.CM = eval_cache_manager_obj
+            self.reuse_data_prob = eval_reuse_prob
 
+        self.action_space_obj = None
         self.observation_space = self.get_observation_space(observation_type=observation_type)
         self.action_space = self.get_action_space(action_type=action_type)  # {0, 1, 2}
 
-        self._action_buy_hold_sell = ["Sell", "Hold", "Buy"]
+        self._action_buy_hold_sell = ["Buy", "Sell", "Hold"]
         self.old_total_assets: float = 0.
         self.initial_total_assets = self.initial_target_balance + (self.initial_coin_balance * self.price)
 
+        self.action_bin_obj = ActionsBins([-1, 1], 3)
         self.actions_lst: list = []
         self.reset()
         self._seed()
@@ -174,11 +208,11 @@ class BinanceEnvBase(gymnasium.Env):
         return observation_space
 
     def get_action_space(self, action_type='discrete'):
-        space_obj = DiscreteActionSpace(3)
+        self.action_space_obj = DiscreteActionSpace(3)
         if action_type == 'box':
-            space_obj = BoxActionSpace(3)
-        action_space = space_obj.action_space
-        self.name = f'{self.name}_{space_obj.name}'
+            self.action_space_obj = BoxActionSpace(n_action=3)
+        action_space = self.action_space_obj.action_space
+        self.name = f'{self.name}_{self.action_space_obj.name}'
         return action_space
 
     @property
@@ -231,55 +265,52 @@ class BinanceEnvBase(gymnasium.Env):
 
     def _box_action_to_int(self, action):
         amount = action[1]
-        # 0 - SELL, 1 - HOLD, 2 - BUY
+        # 0 - BUY, 1 - SELL, 2 - HOLD
         action = math.floor(action[0])
         # if action[0] < 1:
-        #     action = 0  # SELL
+        #     action = 0  # Buy
         # elif action[0] < 2:
-        #     action = 1  # HOLD
+        #     action = 1  # Sell
         # elif action[0] <= 3:
-        #     action = 2  # BUY
+        #     action = 2  # Hold
         return action, amount
 
-    def _take_action_test(self, action, amount):
+    def _take_action_train(self, action, amount):
         old_target_balance = float(self.target_balance)
         old_coin_balance = float(self.coin_balance)
         # action_commission = .0
         # action_symbol = self.target_symbol
         # size = .0
         # msg = str()
-        if action == 0:  # sell
-            # action_symbol = f'{self.coin_symbol}->{self.target_symbol}'
-            # amount - value from Box action space. For Discrete action space it's equal 1.
-            size = old_coin_balance * (1 - self.commission)
-            if size > self.minimum_coin_trade_amount:
-                size *= amount if amount > self.minimum_coin_trade_amount else self.minimum_coin_trade_amount
-                action_commission = old_coin_balance * self.price * self.commission
-                self.target_balance += (size * self.price) - action_commission
-                self.coin_balance -= size
-            # else:
-            #     # penalty 10$ for trading without coin balance
-            #     self.target_balance -= 10 if self.target_balance >= 10 else self.target_balance
-            #     # msg = f'Penalty 10$: old coin balance: {old_coin_balance}, size: {size}, target balance: {self.target_balance}\n'
-
-        if action == 2:  # buy
+        if action == 0:  # buy
             # action_symbol = f'{self.target_symbol}->{self.coin_symbol}'
             # amount - value from Box action space. For Discrete action space it's equal 1.
-            size = (old_target_balance * self.max_lot_size / self.price) * (1 - self.commission)
-            if size > self.minimum_coin_trade_amount:
-                size *= amount if amount > self.minimum_coin_trade_amount else self.minimum_coin_trade_amount
-                action_commission = size / (1 - self.commission) * self.price
-                self.target_balance -= ((size * self.price) + action_commission)
-                self.coin_balance += size
+            size = (old_target_balance / self.price) * (1 - self.commission) * amount
+            action_commission = size * self.price * self.commission
+            self.target_balance -= ((size * self.price) + action_commission)
+            self.coin_balance += size
             # else:
             #     # penalty 10$ for trading without coin balance
             #     self.coin_balance -= (10 / self.price) if self.coin_balance >= (
             #             10 / self.price) else self.coin_balance
             #     # msg = f'Penalty 10$: target balance: {self.target_balance}, size: {size}, coin balance: {self.coin_balance}\n'
+
+        if action == 1:  # sell
+            # action_symbol = f'{self.coin_symbol}->{self.target_symbol}'
+            # amount - value from Box action space. For Discrete action space it's equal 1.
+            size = old_coin_balance * (1 - self.commission) * amount
+            action_commission = old_coin_balance * self.price * self.commission
+            self.target_balance += (size * self.price) - action_commission
+            self.coin_balance -= size
+            # else:
+            #     # penalty 10$ for trading without coin balance
+            #     self.target_balance -= 10 if self.target_balance >= 10 else self.target_balance
+            #     # msg = f'Penalty 10$: old coin balance: {old_coin_balance}, size: {size}, target balance: {self.target_balance}\n'
+
         # what_action = self._action_buy_hold_sell[action]
         # self.account_value.append(self.total_assets)
-        self.reward = self.total_assets - self.initial_total_assets
-        self.pnl = ((self.target_balance + (self.coin_balance * self.price)) / self.initial_total_assets) - 1.
+        # self.reward = self.total_assets - self.initial_total_assets
+        # self.pnl = ((self.target_balance + (self.coin_balance * self.price)) / self.initial_total_assets) - 1.
 
         # if self.verbose:
         #     if self.timecount % self.log_interval == 0 and self.verbose == 2:
@@ -300,13 +331,15 @@ class BinanceEnvBase(gymnasium.Env):
         #                f"\t{self.current_balance}\treward {self.reward:.2f}\tPNL {self.pnl:.5f}")
         #         logger.info(msg)
 
-    def _take_action_train(self, action, amount):
-        self._take_action_test(action, amount)
+    def _take_action_test(self, action, amount):
+        self._take_action_train(action, amount)
 
     def step(self, action):
         amount = 1.
+        old_pnl = float(self.pnl)
         if self.action_type == 'box':
-            action, amount = self._box_action_to_int(action)
+            # action, amount = self._box_action_to_int(action)
+            action = self.action_space_obj.bins_2actions(action)
         self._take_action_func(action, amount)
         self.actions_lst.append(action)
         observation = self._get_obs()
@@ -315,7 +348,12 @@ class BinanceEnvBase(gymnasium.Env):
 
         info = self._get_info()
 
+        # self.reward += (self.total_assets - self.old_total_assets)
+        self.reward = self.total_assets - self.initial_total_assets
+        self.pnl = ((self.target_balance + (self.coin_balance * self.price)) / self.initial_total_assets) - 1.
         self.old_total_assets = float(self.total_assets)
+
+        reward_step = self.pnl - old_pnl
         # delay_modifier = (self.timecount / self.max_timesteps)
         # discounted_reward = self.reward * delay_modifier
         self.timecount += 1
@@ -324,7 +362,7 @@ class BinanceEnvBase(gymnasium.Env):
             terminated = True
             self.timecount -= 1
 
-        return observation, self.reward, terminated, False, info
+        return observation, reward_step, terminated, False, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=self._seed()[0])
@@ -342,13 +380,23 @@ class BinanceEnvBase(gymnasium.Env):
         self.timecount = 0
         self.reward = 0.
         self.actions_lst: list = []
-        self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
-            period_type=self.use_period)
-        if self.ohlcv_df.shape[0] != self.indicators_df.shape[0]:
-            msg = (f"{self.__class__.__name__} #{self.idnum}: ohlcv_df.shape = {self.ohlcv_df.shape}, "
-                   f"indicators_df.shape = {self.indicators_df.shape}")
-            logger.debug(msg)
-            sys.exit('Error: Check data_processor, length of data is not equal!')
+
+        if self.use_period == 'test' and len(self.CM.cache) >= 50 and self.reuse_data_prob < 1.0:
+            self.reuse_data_prob = 1.0
+        if self.reuse_data_prob > random.random() and self.CM.cache:
+            self.ohlcv_df, self.indicators_df = self.CM.cache[random.sample(list(self.CM.cache.keys()), 1)[0]]
+        else:
+            self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
+                period_type=self.use_period)
+            if self.ohlcv_df.shape[0] != self.indicators_df.shape[0]:
+                msg = (f"{self.__class__.__name__} #{self.idnum}: ohlcv_df.shape = {self.ohlcv_df.shape}, "
+                       f"indicators_df.shape = {self.indicators_df.shape}")
+                logger.debug(msg)
+                sys.exit('Error: Check data_processor, length of data is not equal!')
+
+            cm_key = max(self.CM.cache.keys()) + 1 if self.CM.cache else 0
+            self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
+
         self.initial_total_assets = self.initial_target_balance + (self.initial_coin_balance * self.price)
 
         observation = self._get_obs()
