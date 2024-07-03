@@ -97,10 +97,10 @@ class ProcessorBase:
         period_timeframes_len = None
         while not done:
             random_start_datetime = self._get_random_start(minute_timeframes)
-            _timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
-            _timedelta_kwargs = get_timedelta_kwargs(f'{_timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
-                                                     current_timeframe=self.timeframe)
-            random_end_datetime = random_start_datetime + relativedelta(**_timedelta_kwargs)
+            timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
+            timedelta_kwargs = get_timedelta_kwargs(f'{timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
+                                                    current_timeframe=self.timeframe)
+            random_end_datetime = random_start_datetime + relativedelta(**timedelta_kwargs)
             if random_end_datetime <= minute_timeframes[-1]:
                 period_timeframes_len = len(pd.date_range(start=random_start_datetime,
                                                           end=random_end_datetime,
@@ -135,6 +135,7 @@ class IndicatorProcessor(ProcessorBase):
                                                   timeframe=self.timeframe,
                                                   discretization=self.discretization,
                                                   )
+        self.initialized_full_period = False
 
     def get_ohlcv_and_indicators_sample(self, index_type='target_time'):
         start_datetime = self.start_datetime
@@ -151,12 +152,20 @@ class IndicatorProcessor(ProcessorBase):
         _indicators_df = self.loaded_indicators.get_data_df(index_type)
         return _indicators_df
 
+    def check_cache(self, index_type):
+        if not self.initialized_full_period:
+            logger.debug(
+                f"{self.__class__.__name__}: Preload indicator data for full period, "
+                f"start_datetime - end_datetime': {self.start_datetime} - {self.end_datetime}\n")
+            _ = self.get_indicators_df(self.start_datetime, self.end_datetime, index_type=index_type)
+            self.initialized_full_period = True
+
     def get_ohlcv_and_indicators(self, start_datetime, end_datetime, index_type='target_time'):
         logger.debug(
             f"\n{self.__class__.__name__}: Get OHLCV data with start_datetime - end_datetime': {start_datetime} - {end_datetime}")
         _ohlcv_df = self.get_ohlcv_df(start_datetime, end_datetime, symbol_pair=self.symbol_pair, market=self.market)
         logger.debug(
-            f"{self.__class__.__name__}: Preload indicator data with start_datetime - end_datetime': {start_datetime} - {end_datetime}\n")
+            f"{self.__class__.__name__}: load indicator data with start_datetime - end_datetime': {start_datetime} - {end_datetime}\n")
         _indicators_df = self.get_indicators_df(start_datetime, end_datetime, index_type=index_type)
 
         if _ohlcv_df.shape[0] != _indicators_df.shape[0]:
@@ -178,6 +187,8 @@ class IndicatorProcessor(ProcessorBase):
         return _ohlcv_df, _indicators_df
 
     def get_random_ohlcv_and_indicators(self, index_type='target_time', period_type='train'):
+        self.check_cache(index_type)
+
         msg = f"{self.__class__.__name__}: {period_type.upper()} pool timeframes: "
         if period_type == 'train':
             msg = (f"{msg} {self.train_timeframes_num}, "

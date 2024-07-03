@@ -231,12 +231,14 @@ class BinanceEnvBase(gymnasium.Env):
 
     def _box_action_to_int(self, action):
         amount = action[1]
-        if action[0] < 1:
-            action = 0  # SELL
-        elif action[0] < 2:
-            action = 1  # HOLD
-        elif action[0] <= 3:
-            action = 2  # BUY
+        # 0 - SELL, 1 - HOLD, 2 - BUY
+        action = math.floor(action[0])
+        # if action[0] < 1:
+        #     action = 0  # SELL
+        # elif action[0] < 2:
+        #     action = 1  # HOLD
+        # elif action[0] <= 3:
+        #     action = 2  # BUY
         return action, amount
 
     def _take_action_test(self, action, amount):
