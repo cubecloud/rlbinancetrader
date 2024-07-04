@@ -33,8 +33,11 @@ def get_exp_id() -> str:
 @dataclass(init=True)
 class LABConfig:
     EXP_ID: str = field(default_factory=get_exp_id, init=True)
-    EXPERIMENT_PATH: str = str()
-    ENV_NAME: str = str()
+    EXPERIMENT_PATH: str = field(default_factory=str, init=True)
+    ENV_NAME: str = field(default_factory=str, init=True)
+    ALGO: str = field(default_factory=str, init=True)
+    DIRS: dict = field(default_factory=dict, init=True)
+    FILENAME: str = field(default_factory=str, init=True)
 
 
 class LabBase:
@@ -183,14 +186,16 @@ class LabBase:
         agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **self.agents_kwargs[ix])
 
         agent_cfg = LABConfig(**asdict(self.base_cfg))
+        agent_cfg.ALGO = agent_obj.__class__.__name__
+        agent_cfg.FILENAME = f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}'
 
-        agent_cfg.__class__ = make_dataclass(f'{LABConfig.__name__}_{agent_obj.__class__.__name__}',
-                                             fields=[('ALGO', str, agent_obj.__class__.__name__),
-                                                     ('DIRS', dict, field(default_factory=dict, init=False)),
-                                                     ('FILENAME', str,
-                                                      f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}')
-                                                     ],
-                                             bases=(LABConfig,))
+        # agent_cfg.__class__ = make_dataclass(f'{LABConfig.__name__}_{agent_obj.__class__.__name__}',
+        #                                      fields=[('ALGO', str, agent_obj.__class__.__name__),
+        #                                              ('DIRS', dict, field(default_factory=dict, init=False)),
+        #                                              ('FILENAME', str,
+        #                                               f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}')
+        #                                              ],
+        #                                      bases=(LABConfig,))
         self.agents_obj.append(agent_obj)
         dirs = self.create_exp_dirs(agent_cfg)
         agent_cfg.DIRS = dirs
@@ -204,6 +209,10 @@ class LabBase:
     def learn(self):
         for ix in range(len(self.agents_obj)):
             logger.info(
-                f'{self.__class__.__name__}: Start learning agent #{ix:02d}: {self.agents_obj[ix].__class__.__name__}')
+                f'\n{self.__class__.__name__}: Start learning agent #{ix:02d}: {self.agents_obj[ix].__class__.__name__}\n')
             self.learn_agent(ix)
             self.evaluate_agent(ix)
+
+    def load_agent(self, json_path_filename, best=False):
+        config_kwargs = ConfigMethods.load_config(json_path_filename)
+        agent_cfg = LABConfig(**config_kwargs)

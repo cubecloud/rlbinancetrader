@@ -9,6 +9,7 @@ from gymnasium.spaces import Box
 from gymnasium.utils import seeding
 
 from dbbinance.fetcher.cachemanager import CacheManager
+from dbbinance.fetcher.datautils import get_timeframe_bins
 from datawizard.dataprocessor import IndicatorProcessor
 from datawizard.dataprocessor import Constants
 
@@ -97,14 +98,67 @@ class ActionsBins:
         return ix
 
 
-class BoxActionSpace:
+class BinBoxActionSpace:
     def __init__(self, n_action):
         self.__action_space = Box(low=-1., high=1, shape=(1,), dtype=np.float32)
         self.actions_bins_obj = ActionsBins([-1, 1], n_action)
+        self.name = 'binbox'
+
+    def convert2action(self, action):
+        return self.actions_bins_obj.bins_2actions(action)
+
+    @property
+    def action_space(self):
+        return self.__action_space
+
+    @action_space.setter
+    def action_space(self, value):
+        self.__action_space = value
+
+
+# TODO: add amount converter from [-1, 1]
+class BoxActionAmountSpace:
+    def __init__(self, n_action):
+        self.actions_bins_obj = ActionsBins([-1, 1], n_action)
+        self.__action_space = Box(low=np.array([-1, -1]), high=np.array([1, 1]), dtype=np.float32)
+        self.name = 'box_action_amount'
+
+    def convert2action(self, action):
+        return self.actions_bins_obj.bins_2actions(action[0])
+
+    @property
+    def action_space(self):
+        return self.__action_space
+
+    @action_space.setter
+    def action_space(self, value):
+        self.__action_space = value
+
+
+class BoxActionSpace:
+    def __init__(self, n_action):
+        self.__action_space = Box(low=0, high=1, shape=(n_action,), dtype=np.float32)
         self.name = 'box'
 
-    def bins_2actions(self, action):
-        return self.actions_bins_obj.bins_2actions(action)
+    def convert2action(self, action):
+        return np.argmax(action)
+
+    @property
+    def action_space(self):
+        return self.__action_space
+
+    @action_space.setter
+    def action_space(self, value):
+        self.__action_space = value
+
+
+class BoxExtActionSpace:
+    def __init__(self, n_action):
+        self.__action_space = Box(low=-1., high=1, shape=(n_action,), dtype=np.float32)
+        self.name = 'box1_1'
+
+    def convert2action(self, action):
+        return np.argmax(action)
 
     @property
     def action_space(self):
@@ -139,13 +193,18 @@ class BinanceEnvBase(gymnasium.Env):
     def __init__(self, data_processor_kwargs: dict, target_balance: float = 100_000., coin_balance: float = 0.,
                  pnl_stop: float = -0.5, verbose: int = 0, log_interval=500, max_lot_size=0.25,
                  observation_type='indicators', action_type='discrete', use_period='train',
-                 reuse_data_prob=0.5, eval_reuse_prob=0.1, render_mode=None):
+                 reuse_data_prob=0.5, eval_reuse_prob=0.1, seed=41, max_hold_timeframes='3d', penalty_value=10,
+                 render_mode=None):
 
         BinanceEnvBase.count += 1
+
         self.idnum = int(BinanceEnvBase.count)
         self.data_processor_obj = IndicatorProcessor(**data_processor_kwargs)
         self.max_timesteps = self.data_processor_obj.max_timesteps
         self.max_lot_size = max_lot_size
+        self.max_hold_timeframes = int(
+            get_timeframe_bins(max_hold_timeframes) / get_timeframe_bins(self.data_processor_obj.timeframe))
+        self.penalty_value = penalty_value
         self.reuse_data_prob = reuse_data_prob
         self.eval_reuse_prob = eval_reuse_prob
         # logger.info(f"{self.__class__.__name__} #{self.idnum}: MAX_TIMESTEPS = {self.max_timesteps}")
@@ -168,6 +227,7 @@ class BinanceEnvBase(gymnasium.Env):
 
         self.__get_obs_func = None
         self._take_action_func = None
+
         if self.use_period == 'train':
             self._take_action_func = self._take_action_train
         else:
@@ -184,10 +244,10 @@ class BinanceEnvBase(gymnasium.Env):
         self.old_total_assets: float = 0.
         self.initial_total_assets = self.initial_target_balance + (self.initial_coin_balance * self.price)
 
-        self.action_bin_obj = ActionsBins([-1, 1], 3)
+        # self.action_bin_obj = ActionsBins([-1, 1], 3)
         self.actions_lst: list = []
+        self.seed = seed + self.idnum
         self.reset()
-        self._seed()
 
     def __del__(self):
         BinanceEnvBase.count -= 1
@@ -211,6 +271,10 @@ class BinanceEnvBase(gymnasium.Env):
         self.action_space_obj = DiscreteActionSpace(3)
         if action_type == 'box':
             self.action_space_obj = BoxActionSpace(n_action=3)
+        if action_type == 'box1_1':
+            self.action_space_obj = BoxExtActionSpace(n_action=3)
+        elif action_type == 'binbox':
+            self.action_space_obj = BinBoxActionSpace(n_action=3)
         action_space = self.action_space_obj.action_space
         self.name = f'{self.name}_{self.action_space_obj.name}'
         return action_space
@@ -263,19 +327,48 @@ class BinanceEnvBase(gymnasium.Env):
                 # "indicators_df": self.indicators_df
                 }
 
-    def _box_action_to_int(self, action):
-        amount = action[1]
-        # 0 - BUY, 1 - SELL, 2 - HOLD
-        action = math.floor(action[0])
-        # if action[0] < 1:
-        #     action = 0  # Buy
-        # elif action[0] < 2:
-        #     action = 1  # Sell
-        # elif action[0] <= 3:
-        #     action = 2  # Hold
-        return action, amount
+    def _take_action_with_penalty(self, action, amount):
+        old_target_balance = float(self.target_balance)
+        old_coin_balance = float(self.coin_balance)
+
+        if action == 0:  # buy
+            size = (old_target_balance / self.price) * (1 - self.commission)
+            if size > self.minimum_coin_trade_amount:
+                size *= amount if amount > self.minimum_coin_trade_amount else 0
+                action_commission = size * self.price * self.commission
+                self.target_balance -= ((size * self.price) + action_commission)
+                self.coin_balance += size
+            else:
+                # penalty 10$ for trading without coin balance
+                self.coin_balance -= (self.penalty_value / self.price) if self.coin_balance >= (
+                        self.penalty_value / self.price) else self.coin_balance
+
+        elif action == 1:  # sell
+            size = old_coin_balance * (1 - self.commission)
+            if size > self.minimum_coin_trade_amount:
+                size *= amount if amount > self.minimum_coin_trade_amount else 0
+                action_commission = size * self.price * self.commission
+                self.target_balance += (size * self.price) - action_commission
+                self.coin_balance -= size
+            else:
+                # penalty 10$ for trading without coin balance
+                self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
+                # msg = f'Penalty 10$: old coin balance: {old_coin_balance}, size: {size}, target balance: {self.target_balance}\n'
+
+        elif action == 2 and len(self.actions_lst) > self.max_hold_timeframes:  # Hold
+            # Penalty actions for just holding
+            check_actions = np.array(self.actions_lst[-self.max_hold_timeframes:]) - 1
+            if np.all(check_actions):
+                if self.coin_balance* self.price > self.target_balance:
+                    self.coin_balance -= (self.penalty_value / self.price) if self.coin_balance >= (
+                            self.penalty_value / self.price) else self.coin_balance
+                else:
+                    self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
 
     def _take_action_train(self, action, amount):
+        self._take_action_with_penalty(action, amount)
+
+    def _take_action_wo_penalty(self, action, amount):
         old_target_balance = float(self.target_balance)
         old_coin_balance = float(self.coin_balance)
         # action_commission = .0
@@ -337,9 +430,9 @@ class BinanceEnvBase(gymnasium.Env):
     def step(self, action):
         amount = 1.
         old_pnl = float(self.pnl)
-        if self.action_type == 'box':
+        if self.action_type in ['box', 'binbox']:
             # action, amount = self._box_action_to_int(action)
-            action = self.action_space_obj.bins_2actions(action)
+            action = self.action_space_obj.convert2action(action)
         self._take_action_func(action, amount)
         self.actions_lst.append(action)
         observation = self._get_obs()
@@ -365,7 +458,7 @@ class BinanceEnvBase(gymnasium.Env):
         return observation, reward_step, terminated, False, info
 
     def reset(self, seed=None, options=None):
-        super().reset(seed=self._seed()[0])
+        super().reset(seed=seed)
         if self.verbose:
             values, counts = np.unique(self.actions_lst, return_counts=True)
             actions_counted: dict = dict(zip(values, counts))

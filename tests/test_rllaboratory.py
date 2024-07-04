@@ -61,18 +61,48 @@ env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                            observation_type='indicators',
                            reuse_data_prob=0.5,
                            eval_reuse_prob=0.05,
+                           max_hold_timeframes='3d',
+                           penalty_value=10,
                            action_type='discrete',
                            )
 env_box_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                       pnl_stop=-0.9,
                       # max_lot_size=0.5,
-                      verbose=0,
+                      verbose=1,
                       log_interval=500,
-                      observation_type='indicators',
+                      observation_type='indicators_assets',
                       reuse_data_prob=0.4,
                       eval_reuse_prob=0.05,
+                      max_hold_timeframes='3d',
+                      penalty_value=10,
                       action_type='box',
                       )
+
+env_box1_1_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
+                         pnl_stop=-0.9,
+                         # max_lot_size=0.5,
+                         verbose=1,
+                         log_interval=500,
+                         observation_type='indicators',
+                         reuse_data_prob=0.4,
+                         eval_reuse_prob=0.05,
+                         max_hold_timeframes='3d',
+                         penalty_value=10,
+                         action_type='box1_1',
+                         )
+
+env_binbox_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
+                         pnl_stop=-0.9,
+                         # max_lot_size=0.5,
+                         verbose=0,
+                         log_interval=500,
+                         observation_type='indicators',
+                         reuse_data_prob=0.4,
+                         eval_reuse_prob=0.05,
+                         max_hold_timeframes='3d',
+                         penalty_value=10,
+                         action_type='binbox',
+                         )
 
 dqn_kwargs = dict(policy="MlpPolicy",
                   batch_size=64,
@@ -88,15 +118,15 @@ dqn_kwargs = dict(policy="MlpPolicy",
                   verbose=0)
 
 ppo_kwargs = dict(policy="MlpPolicy",
-                  verbose=0)
-
-ddpg_kwargs = dict(policy="MlpPolicy",
                   verbose=1)
 
-rllab = LabBase(env_cls=[BinanceEnvBase, BinanceEnvBase, BinanceEnvBase,],
-                env_kwargs=[env_box_kwargs, env_discrete_kwargs, env_box_kwargs,],
-                agents_cls=[PPO, DQN, DDPG,],
-                agents_kwargs=[ppo_kwargs, dqn_kwargs, ddpg_kwargs],
+ddpg_kwargs = dict(policy="MlpPolicy",
+                   verbose=1)
+
+rllab = LabBase(env_cls=[BinanceEnvBase, ],
+                env_kwargs=[env_box_kwargs, ],
+                agents_cls=[DDPG, ],
+                agents_kwargs=[ddpg_kwargs, ],
                 total_timesteps=4_000_000,
                 checkpoint_num=20,
                 n_eval_episodes=20,

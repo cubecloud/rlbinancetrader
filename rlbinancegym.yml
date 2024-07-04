@@ -39,4 +39,5 @@ dependencies:
       - git+https://github.com/cubecloud/mlthread-tools.git
       - git+https://github.com/cubecloud/dbbinance-storage.git
       - git+https://github.com/cubecloud/ensembletools.git
+      - backtesting>=0.3.3
 prefix: /home/cubecloud/anaconda3/envs/rlbinancegym
