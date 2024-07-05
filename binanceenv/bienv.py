@@ -4,16 +4,19 @@ import random
 import logging
 import gymnasium
 import numpy as np
+import numba
+from numba import jit
+
 from gymnasium.spaces import Discrete
 from gymnasium.spaces import Box
 from gymnasium.utils import seeding
-
+from collections import OrderedDict
 from dbbinance.fetcher.cachemanager import CacheManager
 from dbbinance.fetcher.datautils import get_timeframe_bins
 from datawizard.dataprocessor import IndicatorProcessor
 from datawizard.dataprocessor import Constants
 
-__version__ = 0.013
+__version__ = 0.015
 
 logger = logging.getLogger()
 
@@ -91,6 +94,7 @@ class ActionsBins:
         self.bins = np.arange(box[0], box[1] + 1e-7, step=self.step, dtype=np.float32)
         self.pairs = [(self.bins[ix - 1], self.bins[ix]) for ix in range(1, len(self.bins))]
 
+    @jit(nopython=True)
     def bins_2actions(self, other):
         for ix in range(self.n_actions):
             if np.min(self.pairs[ix]) < other < np.max(self.pairs[ix]):
@@ -169,6 +173,15 @@ class BoxExtActionSpace:
         self.__action_space = value
 
 
+@jit(nopython=True)
+def logarithmic10_scaler(value):
+    if value > 0:
+        _temp = 1 / (1 + (math.e ** -(np.log10(value + 1))))  # original version
+    else:
+        _temp = 0.5 - (1 / (1 + (math.e ** -(np.log10(abs(value) + 1)))) - 0.5)
+    return _temp
+
+
 cache_manager_obj = CacheManager(max_memory_gb=1)
 eval_cache_manager_obj = CacheManager(max_memory_gb=1)
 
@@ -188,6 +201,7 @@ class BinanceEnvBase(gymnasium.Env):
     reward: float = 0.
     timecount: int = 0
     commission: float = .002
+    pnl: float = 0.
     name = 'BinanceEnvBase'
 
     def __init__(self, data_processor_kwargs: dict, target_balance: float = 100_000., coin_balance: float = 0.,
@@ -217,8 +231,6 @@ class BinanceEnvBase(gymnasium.Env):
         self.initial_coin_balance = coin_balance
         self.target_balance = float(self.initial_target_balance)
         self.coin_balance = float(self.initial_coin_balance)
-        self.account_value: list = []
-        self.pnl: float = 0.
 
         self.verbose = verbose
 
@@ -247,6 +259,8 @@ class BinanceEnvBase(gymnasium.Env):
         # self.action_bin_obj = ActionsBins([-1, 1], 3)
         self.actions_lst: list = []
         self.seed = seed + self.idnum
+        self.coin_orders_values: list = [self.initial_coin_balance * self.price, ]
+        self.actions_lst: list = []
         self.reset()
 
     def __del__(self):
@@ -256,7 +270,7 @@ class BinanceEnvBase(gymnasium.Env):
         space_obj = IndicatorsSpace(self.indicators_df.shape[1])
         self.__get_obs_func = self._get_indicators_obs
         if observation_type == 'indicators_assets':
-            space_obj = IndicatorsAndAssetsSpace(self.indicators_df.shape[1], 2)
+            space_obj = IndicatorsAndAssetsSpace(self.indicators_df.shape[1], 3)
             self.__get_obs_func = self._get_assets_indicators_obs
             if self.coin_balance == .0:
                 self.coin_balance = 1e-7
@@ -294,21 +308,21 @@ class BinanceEnvBase(gymnasium.Env):
             f"{self.coin_balance:.4f}\tTotal assets: {self.total_assets} {self.target_symbol}")
         return current_balance
 
+    @property
+    def coin_orders_cost(self):
+        return sum(self.coin_orders_values)
+
     def _get_obs(self):
         data = self.__get_obs_func()
         logger.debug(data)
         return data
 
-    @staticmethod
-    def logarithmic10_scaler(value):
-        result = (1 / (1 + (math.e ** -(np.log10(value + 1))))) - 0.5
-        return result
-
     def _get_assets_indicators_obs(self):
-        target = self.logarithmic10_scaler(self.target_balance)
-        coin = self.logarithmic10_scaler(self.coin_balance)
+        target = logarithmic10_scaler(self.target_balance)
+        coin = logarithmic10_scaler(self.coin_balance * self.price)
+        coin_orders_cost = logarithmic10_scaler(self.coin_orders_cost)
         return np.asarray(
-            np.concatenate([self.indicators_df.iloc[self.timecount].values, [target, coin], ]),
+            np.concatenate([self.indicators_df.iloc[self.timecount].values, [target, coin, coin_orders_cost], ]),
             dtype=np.float32)
 
     def _get_pnl_indicators_obs(self):
@@ -335,35 +349,46 @@ class BinanceEnvBase(gymnasium.Env):
             size = (old_target_balance / self.price) * (1 - self.commission)
             if size > self.minimum_coin_trade_amount:
                 size *= amount if amount > self.minimum_coin_trade_amount else 0
-                action_commission = size * self.price * self.commission
-                self.target_balance -= ((size * self.price) + action_commission)
+                size_price = size * self.price
+                action_commission = size_price * self.commission
+                self.target_balance -= (size_price + action_commission)
                 self.coin_balance += size
+                self.coin_orders_values.append(size_price)
             else:
                 # penalty 10$ for trading without coin balance
-                self.coin_balance -= (self.penalty_value / self.price) if self.coin_balance >= (
-                        self.penalty_value / self.price) else self.coin_balance
+                if self.target_balance > self.penalty_value:
+                    self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
+                else:
+                    penalty = (self.penalty_value / self.price) if self.coin_balance >= (
+                            self.penalty_value / self.price) else self.coin_balance
+                    self.coin_balance -= penalty
+                    self.coin_orders_values.append(-penalty)
 
         elif action == 1:  # sell
             size = old_coin_balance * (1 - self.commission)
             if size > self.minimum_coin_trade_amount:
                 size *= amount if amount > self.minimum_coin_trade_amount else 0
-                action_commission = size * self.price * self.commission
-                self.target_balance += (size * self.price) - action_commission
+                size_price = size * self.price
+                action_commission = size_price * self.commission
+                self.target_balance += (size_price - action_commission)
                 self.coin_balance -= size
+                self.coin_orders_values.append(-size_price)
             else:
                 # penalty 10$ for trading without coin balance
                 self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
                 # msg = f'Penalty 10$: old coin balance: {old_coin_balance}, size: {size}, target balance: {self.target_balance}\n'
 
-        elif action == 2 and len(self.actions_lst) > self.max_hold_timeframes:  # Hold
-            # Penalty actions for just holding
-            check_actions = np.array(self.actions_lst[-self.max_hold_timeframes:]) - 1
-            if np.all(check_actions):
-                if self.coin_balance* self.price > self.target_balance:
-                    self.coin_balance -= (self.penalty_value / self.price) if self.coin_balance >= (
-                            self.penalty_value / self.price) else self.coin_balance
-                else:
-                    self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
+        # elif action == 2 and len(self.actions_lst) > self.max_hold_timeframes:  # Hold
+        #     # Penalty actions for just holding
+        #     check_actions = np.array(self.actions_lst[-self.max_hold_timeframes:]) - 1
+        #     if np.all(check_actions):
+        #         self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
+        #         # if self.coin_balance * self.price > self.target_balance:
+        #         #     self.coin_balance -= (self.penalty_value / self.price) if self.coin_balance >= (
+        #         #             self.penalty_value / self.price) else self.coin_balance
+        #         #     self.coin_orders_values.append(-self.penalty_value)
+        #         # else:
+        #         #     self.target_balance -= self.penalty_value if self.target_balance >= self.penalty_value else self.target_balance
 
     def _take_action_train(self, action, amount):
         self._take_action_with_penalty(action, amount)
@@ -379,9 +404,11 @@ class BinanceEnvBase(gymnasium.Env):
             # action_symbol = f'{self.target_symbol}->{self.coin_symbol}'
             # amount - value from Box action space. For Discrete action space it's equal 1.
             size = (old_target_balance / self.price) * (1 - self.commission) * amount
-            action_commission = size * self.price * self.commission
-            self.target_balance -= ((size * self.price) + action_commission)
+            size_price = size * self.price
+            action_commission = size_price * self.commission
+            self.target_balance -= (size_price + action_commission)
             self.coin_balance += size
+            self.coin_orders_values.append(size_price)
             # else:
             #     # penalty 10$ for trading without coin balance
             #     self.coin_balance -= (10 / self.price) if self.coin_balance >= (
@@ -392,9 +419,11 @@ class BinanceEnvBase(gymnasium.Env):
             # action_symbol = f'{self.coin_symbol}->{self.target_symbol}'
             # amount - value from Box action space. For Discrete action space it's equal 1.
             size = old_coin_balance * (1 - self.commission) * amount
-            action_commission = old_coin_balance * self.price * self.commission
-            self.target_balance += (size * self.price) - action_commission
+            size_price = size * self.price
+            action_commission = size_price * self.commission
+            self.target_balance += (size_price - action_commission)
             self.coin_balance -= size
+            self.coin_orders_values.append(-size_price)
             # else:
             #     # penalty 10$ for trading without coin balance
             #     self.target_balance -= 10 if self.target_balance >= 10 else self.target_balance
@@ -430,8 +459,7 @@ class BinanceEnvBase(gymnasium.Env):
     def step(self, action):
         amount = 1.
         old_pnl = float(self.pnl)
-        if self.action_type in ['box', 'binbox']:
-            # action, amount = self._box_action_to_int(action)
+        if self.action_type in ['box', 'binbox', 'box1_1']:
             action = self.action_space_obj.convert2action(action)
         self._take_action_func(action, amount)
         self.actions_lst.append(action)
@@ -491,6 +519,7 @@ class BinanceEnvBase(gymnasium.Env):
             self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
 
         self.initial_total_assets = self.initial_target_balance + (self.initial_coin_balance * self.price)
+        self.coin_orders_values: list = [self.initial_coin_balance * self.price, ]
 
         observation = self._get_obs()
         info = self._get_info()

@@ -13,9 +13,10 @@ from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3 import A2C, PPO, DQN
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 from dataclasses import asdict, dataclass, field, make_dataclass
 from rllab.configtools import ConfigMethods
 
@@ -174,14 +175,36 @@ class LabBase:
         self.base_cfg.ENV_NAME = env.__class__.__name__
         # del env
         # d_env = DummyVecEnv([lambda: env] * n_envs)
-        self.train_vecenv_lst.append(env)
-        # self.train_vecenv_lst.append(DummyVecEnv([self.__get_env(self.env_classes_lst[ix], self.env_kwargs_lst[ix])]))
-
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
         eval_env_kwargs.update({'use_period': 'test', 'reuse_data_prob': 0.00, 'verbose': 1, 'log_interval': 1})
-
-        self.eval_vecenv_lst.append(
-            make_vec_env(self.env_classes_lst[ix], n_envs=1, seed=42, env_kwargs=eval_env_kwargs))
+        if isinstance(self.agents_classes_lst[ix], A2C):
+            self.train_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=8, seed=42, env_kwargs=self.env_kwargs_lst[ix],
+                             vec_env_cls=SubprocVecEnv))
+            self.eval_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=8, seed=42, env_kwargs=eval_env_kwargs,
+                             vec_env_cls=SubprocVecEnv))
+        elif isinstance(self.agents_classes_lst[ix], PPO):
+            self.train_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=4, seed=42, env_kwargs=self.env_kwargs_lst[ix],
+                             vec_env_cls=SubprocVecEnv))
+            self.eval_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=4, seed=42, env_kwargs=eval_env_kwargs,
+                             vec_env_cls=SubprocVecEnv))
+        elif isinstance(self.agents_classes_lst[ix], DQN):
+            self.train_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=self.env_kwargs_lst[ix],
+                             vec_env_cls=SubprocVecEnv))
+            self.eval_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=eval_env_kwargs,
+                             vec_env_cls=SubprocVecEnv))
+        else:
+            self.train_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=self.env_kwargs_lst[ix],
+                             vec_env_cls=SubprocVecEnv))
+            self.eval_vecenv_lst.append(
+                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=eval_env_kwargs,
+                             vec_env_cls=SubprocVecEnv))
 
         agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **self.agents_kwargs[ix])
 
@@ -189,13 +212,6 @@ class LabBase:
         agent_cfg.ALGO = agent_obj.__class__.__name__
         agent_cfg.FILENAME = f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}'
 
-        # agent_cfg.__class__ = make_dataclass(f'{LABConfig.__name__}_{agent_obj.__class__.__name__}',
-        #                                      fields=[('ALGO', str, agent_obj.__class__.__name__),
-        #                                              ('DIRS', dict, field(default_factory=dict, init=False)),
-        #                                              ('FILENAME', str,
-        #                                               f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}')
-        #                                              ],
-        #                                      bases=(LABConfig,))
         self.agents_obj.append(agent_obj)
         dirs = self.create_exp_dirs(agent_cfg)
         agent_cfg.DIRS = dirs
