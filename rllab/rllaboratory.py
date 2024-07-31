@@ -13,14 +13,14 @@ from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3 import A2C, PPO, DQN
+from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 from dataclasses import asdict, dataclass, field, make_dataclass
 from rllab.configtools import ConfigMethods
 
-__version__ = 0.016
+__version__ = 0.027
 
 TZ = timezone('Europe/Moscow')
 
@@ -44,10 +44,9 @@ class LABConfig:
 class LabBase:
     def __init__(self, env_cls: Union[object, List[object,]], agents_cls: Union[object, List[object]],
                  env_kwargs: Union[List[dict,], dict], agents_kwargs: Union[List[dict,], dict],
+                 agents_n_env: Union[List[int], int, None] = None,
                  total_timesteps: int = 500_000, experiment_path: str = './',
-                 checkpoint_num: int = 20,
-                 eval_freq: int = 50_000, n_eval_episodes: int = 10,
-
+                 checkpoint_num: int = 20, eval_freq: int = 50_000, n_eval_episodes: int = 10,
                  ):
         """
         Get all arguments to instantiate all classes and object inside the Lab
@@ -60,6 +59,8 @@ class LabBase:
             experiment_path (str):  path
             total_timesteps (int):  total timesteps
         """
+        self.policy_n_env_default: dict = {PPO: 3, A2C: 3, DQN: 3, TD3: 3, DDPG: 3, SAC: 2}
+
         self.eval_freq = eval_freq
         self.checkpoint_num = checkpoint_num
         self.n_eval_episodes = n_eval_episodes
@@ -93,6 +94,17 @@ class LabBase:
             self.agents_kwargs_lst = list([agents_kwargs, ])
         else:
             self.agents_kwargs_lst = agents_kwargs
+
+        if agents_n_env is None:
+            self.agents_n_env = []
+            for ix in range(len(self.agents_classes_lst)):
+                self.agents_n_env.append(self.policy_n_env_default.get(self.agents_classes_lst[ix], 1))
+        elif not isinstance(agents_n_env, list):
+            self.agents_n_env = [agents_n_env for _ in range(len(agents_kwargs))]
+        else:
+            self.agents_n_env = agents_n_env
+            assert len(self.agents_n_env) == len(agents_kwargs), \
+                "Error: list of agents n_env is not equal agents list"
 
         logger.info(f'{self.__class__.__name__}: Initialize environment...')
 
@@ -139,16 +151,14 @@ class LabBase:
                                      best_model_save_path=agent_cfg.DIRS["best"],
                                      n_eval_episodes=self.n_eval_episodes,
                                      log_path=agent_cfg.DIRS["evaluation"],
-                                     eval_freq=int(self.total_timesteps // self.checkpoint_num),
+                                     eval_freq=self.eval_freq,
                                      deterministic=True
                                      )
         # Create the callback list
-        callbacks = CallbackList([
-            checkpoint_callback,
-            eval_callback
-        ])
+        callbacks = CallbackList([checkpoint_callback, eval_callback])
 
-        agent_obj.learn(total_timesteps=self.total_timesteps, callback=callbacks, progress_bar=True)
+        agent_obj.learn(total_timesteps=self.total_timesteps, callback=callbacks, log_interval=10000,
+                        progress_bar=False)
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
     def evaluate_agent(self, ix):
@@ -157,7 +167,8 @@ class LabBase:
         agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
         result = evaluate_policy(agent_obj, self.eval_vecenv_lst[ix], n_eval_episodes=self.n_eval_episodes,
                                  return_episode_rewards=True)
-        result = pd.DataFrame(data=result, index=['reward', 'ep_length']).astype(int)
+        result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1]})
+        result = result.astype({"reward": float, "ep_length": int})
         msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
                f'Evaluation result:\n {result.to_string()}')
         logger.debug(msg)
@@ -168,43 +179,30 @@ class LabBase:
         return env
 
     def init_agent(self, ix):
-        n_envs = 1
         env = self.env_classes_lst[ix](**self.env_kwargs_lst[ix])
         logger.info(f'{self.__class__.__name__}: Environment check {self.env_classes_lst[ix].__class__.__name__}')
         check_env(env)
-        self.base_cfg.ENV_NAME = env.__class__.__name__
-        # del env
-        # d_env = DummyVecEnv([lambda: env] * n_envs)
-        eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        eval_env_kwargs.update({'use_period': 'test', 'reuse_data_prob': 0.00, 'verbose': 1, 'log_interval': 1})
-        if isinstance(self.agents_classes_lst[ix], A2C):
-            self.train_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=8, seed=42, env_kwargs=self.env_kwargs_lst[ix],
-                             vec_env_cls=SubprocVecEnv))
-            self.eval_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=8, seed=42, env_kwargs=eval_env_kwargs,
-                             vec_env_cls=SubprocVecEnv))
-        elif isinstance(self.agents_classes_lst[ix], PPO):
-            self.train_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=4, seed=42, env_kwargs=self.env_kwargs_lst[ix],
-                             vec_env_cls=SubprocVecEnv))
-            self.eval_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=4, seed=42, env_kwargs=eval_env_kwargs,
-                             vec_env_cls=SubprocVecEnv))
-        elif isinstance(self.agents_classes_lst[ix], DQN):
-            self.train_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=self.env_kwargs_lst[ix],
-                             vec_env_cls=SubprocVecEnv))
-            self.eval_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=eval_env_kwargs,
-                             vec_env_cls=SubprocVecEnv))
-        else:
-            self.train_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=self.env_kwargs_lst[ix],
-                             vec_env_cls=SubprocVecEnv))
-            self.eval_vecenv_lst.append(
-                make_vec_env(self.env_classes_lst[ix], n_envs=3, seed=42, env_kwargs=eval_env_kwargs,
-                             vec_env_cls=SubprocVecEnv))
+        self.base_cfg.ENV_NAME = f'{env.__class__.__name__}'
+
+        train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
+        train_env_kwargs.update({'use_period': 'train', 'verbose': 0 if self.agents_n_env[ix] > 1 else 1})
+        eval_env_kwargs = copy.deepcopy(train_env_kwargs)
+        eval_env_kwargs.update({'use_period': 'test'})
+
+        train_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
+                                    n_envs=self.agents_n_env[ix],
+                                    seed=42,
+                                    env_kwargs=train_env_kwargs,
+                                    vec_env_cls=SubprocVecEnv if self.agents_n_env[ix] > 1 else DummyVecEnv)
+
+        eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
+                                   n_envs=1,
+                                   seed=43,
+                                   env_kwargs=eval_env_kwargs,
+                                   vec_env_cls=SubprocVecEnv if self.agents_n_env[ix] > 1 else DummyVecEnv)
+
+        self.train_vecenv_lst.append(make_vec_env(**train_vec_env_kwargs))
+        self.eval_vecenv_lst.append(make_vec_env(**eval_vec_env_kwargs))
 
         agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **self.agents_kwargs[ix])
 
@@ -217,6 +215,7 @@ class LabBase:
         agent_cfg.DIRS = dirs
         self.agents_cfg.append(agent_cfg)
         logger.debug(f'{self.__class__.__name__}: Initialized agent: #{ix:02d} {agent_obj.__class__.__name__}')
+        del env
 
     def init_agents(self):
         for ix in range(len(self.agents_classes_lst)):

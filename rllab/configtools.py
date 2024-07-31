@@ -12,7 +12,10 @@ class ConfigMethods:
     def save_config(config, path_filename):
         with open(path_filename, 'w') as f:
             if isinstance(config, dict):
-                json.dump(config, f)
+                try:
+                    json.dump(config, f)
+                except TypeError:
+                    logger.debug(f"Error: object not serializable")
             else:
                 json.dump(asdict(config), f)
         logger.debug(f"Config saved to {path_filename}")
