@@ -179,6 +179,11 @@ class BinanceEnvBase(gymnasium.Env):
             self.__get_obs_func = self._get_assets_close_indicators_obs
             if self.coin_balance == .0:
                 self.coin_balance = 1e-7
+        elif observation_type == 'assets_close_indicators_action_masks':
+            space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 2 + 1 + 2)
+            self.__get_obs_func = self._get_assets_close_indicators_action_masks_obs
+            if self.coin_balance == .0:
+                self.coin_balance = 1e-7
         elif observation_type == 'idx_assets_close_indicators_action_masks':
             space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 2 + 1 + 3)
             self.__get_obs_func = self._get_idx_assets_close_indicators_action_masks_obs
@@ -266,6 +271,17 @@ class BinanceEnvBase(gymnasium.Env):
         coin = new_logarithmic_scaler(self.coin_balance)
         return np.asarray(
             np.concatenate([[target, close], self.indicators_df.iloc[self.timecount].values, [coin]]),
+            dtype=np.float32)
+
+    def _get_assets_close_indicators_action_masks_obs(self):
+        target = new_logarithmic_scaler(self.target_balance)
+        # coin = logarithmic10_scaler(self.coin_balance)
+        close = new_logarithmic_scaler(self.price)
+        # coin_orders_cost = logarithmic10_scaler(self.coin_orders_cost)
+        coin = new_logarithmic_scaler(self.coin_balance)
+        action_masks = self._get_action_masks().astype(np.float32)
+        return np.asarray(
+            np.concatenate([[target, coin, close], self.indicators_df.iloc[self.timecount].values, action_masks]),
             dtype=np.float32)
 
     def _get_idx_assets_close_indicators_action_masks_obs(self):
@@ -406,7 +422,7 @@ class BinanceEnvBase(gymnasium.Env):
         amount = 1.
         info = self._get_info()
         if self.use_period == 'train':
-            self.reward_step = -2e-4
+            self.reward_step = -1e-5
         else:
             self.reward_step = .0
 
@@ -425,14 +441,17 @@ class BinanceEnvBase(gymnasium.Env):
             action, amount = self.action_space_obj.convert2action(action[0])
 
         if masked_action != action:
-            action = masked_action
+            amount = 0.
             self.invalid_action_counter += 1
             if self.use_period == 'train':
                 action_penalty = True
-                self.reward_step += -3e-4
+                if action in [0, 1]:
+                    self.reward_step += -5e-4
+                else:
+                    self.reward_step += -5e-5
         else:
             if self.use_period == 'train':
-                self.reward_step += 2e-4
+                self.reward_step += 1e-5
 
         # valid_actions = self.get_valid_actions(info['action_masks'])
         # if action not in valid_actions:
@@ -465,13 +484,12 @@ class BinanceEnvBase(gymnasium.Env):
         self.reward = self.total_assets - self.initial_total_assets
         if not action_penalty:
             self.reward_step += self.pnl - self.previous_pnl
+            self.gamma_return = self.gamma_return * self.gamma + self.reward_step
         # else:
         #     # penalty for invalid action
         #     self.reward_step += -2e-5
         self.old_total_assets = float(self.total_assets)
         self.previous_pnl = float(self.pnl)
-
-        self.gamma_return = self.gamma_return * self.gamma + self.reward_step
 
         terminated = bool(self.pnl < self.pnl_stop)
         self.timecount += 1

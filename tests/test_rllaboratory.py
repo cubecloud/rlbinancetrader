@@ -97,14 +97,14 @@ if __name__ == '__main__':
                              # max_lot_size=0.5,
                              verbose=1,
                              log_interval=1,
-                             observation_type='idx_assets_close_indicators_action_masks',
+                             observation_type='assets_close_indicators_action_masks',
                              # observation_type='indicators_assets',
-                             reuse_data_prob=0.97,
+                             reuse_data_prob=0.99,
                              eval_reuse_prob=0.99,
                              max_hold_timeframes='2d',
-                             total_timesteps=12_000_000,
+                             total_timesteps=25_000_000,
                              gamma=0.99,
-                             invalid_actions=90,
+                             invalid_actions=200,
                              penalty_value=1e-5,
                              action_type='box1_1',
                              )
@@ -168,19 +168,19 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    # action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=5e-2 * np.ones(3), dt=1e-2)
-    action_noise = NormalActionNoise(mean=np.zeros(3), sigma=0.1 * np.ones(1))
-    td3_policy_kwargs = dict(net_arch=dict(pi=[32, 16, 8],
-                                           qf=[128, 64, 32]))
+    action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=5e-2 * np.ones(3), dt=1e-2)
+    # action_noise = NormalActionNoise(mean=np.zeros(3), sigma=0.1 * np.ones(3))
+    # td3_policy_kwargs = dict(net_arch=dict(pi=[27, 9, 3, 9],
+    #                                        qf=[128, 32, 8, 32]))
     # td3_policy_kwargs = dict(net_arch=dict(pi=[64, 32, 16],
     #                                        qf=[256, 128, 64]))
     td3_kwargs = dict(policy="MlpPolicy",
-                      buffer_size=1_000_000,
-                      policy_kwargs=td3_policy_kwargs,
-                      batch_size=128,
-                      learning_starts=1_000_000,
+                      buffer_size=500_000,
+                      # policy_kwargs=td3_policy_kwargs,
+                      batch_size=256,
+                      learning_starts=500_000,
                       stats_window_size=100,
-                      learning_rate=0.0002,
+                      learning_rate=0.0003,
                       action_noise=action_noise,
                       train_freq=(100, 'step'),
                       device="auto",
@@ -231,7 +231,7 @@ if __name__ == '__main__':
         agents_kwargs=[td3_kwargs],
         agents_n_env=[1],
         env_wrapper='dummy',
-        total_timesteps=12_000_000,
+        total_timesteps=25_000_000,
         checkpoint_num=80,
         n_eval_episodes=20,
         eval_freq=100_000,
