@@ -151,11 +151,11 @@ class LabBase:
         ConfigMethods.save_config(agent_cfg, os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_cfg.json'))
         ConfigMethods.save_config(agent_kwargs,
                                   os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
-        #
-        # checkpoint_callback = CheckpointCallback(save_freq=int(self.total_timesteps // self.checkpoint_num),
-        #                                          save_path=agent_cfg.DIRS["training"],
-        #                                          name_prefix=f'{agent_cfg.FILENAME}_chkp',
-        #                                          )
+
+        checkpoint_callback = CheckpointCallback(save_freq=int(self.total_timesteps // self.checkpoint_num),
+                                                 save_path=agent_cfg.DIRS["training"],
+                                                 name_prefix=f'{agent_cfg.FILENAME}_chkp',
+                                                 )
         eval_callback = EvalCallback(self.eval_vecenv_lst[ix],
                                      best_model_save_path=agent_cfg.DIRS["best"],
                                      n_eval_episodes=self.n_eval_episodes,
@@ -164,9 +164,9 @@ class LabBase:
                                      deterministic=True
                                      )
         # Create the callback list
-        # callbacks = CallbackList([checkpoint_callback, eval_callback])
+        callbacks = CallbackList([checkpoint_callback, eval_callback])
 
-        agent_obj.learn(total_timesteps=self.total_timesteps, callback=eval_callback, log_interval=10000,
+        agent_obj.learn(total_timesteps=self.total_timesteps, callback=callbacks, log_interval=10000,
                         progress_bar=False)
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 

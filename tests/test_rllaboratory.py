@@ -101,10 +101,10 @@ if __name__ == '__main__':
                              # observation_type='indicators_assets',
                              reuse_data_prob=0.99,
                              eval_reuse_prob=0.99,
-                             max_hold_timeframes='2d',
-                             total_timesteps=25_000_000,
+                             max_hold_timeframes='7d',
+                             total_timesteps=16_000_000,
                              gamma=0.99,
-                             invalid_actions=200,
+                             invalid_actions=400,
                              penalty_value=1e-5,
                              action_type='box1_1',
                              )
@@ -114,13 +114,13 @@ if __name__ == '__main__':
                              # max_lot_size=0.5,
                              verbose=1,
                              log_interval=100,
-                             observation_type='idx_assets_close_indicators_action_masks',
-                             reuse_data_prob=0.97,
+                             observation_type='assets_close_indicators_action_masks',
+                             reuse_data_prob=0.99,
                              eval_reuse_prob=0.99,
-                             max_hold_timeframes='2d',
-                             total_timesteps=8_000_000,
+                             max_hold_timeframes='7d',
+                             total_timesteps=16_000_000,
                              gamma=0.99,
-                             invalid_actions=200,
+                             invalid_actions=400,
                              penalty_value=1e-5,
                              action_type='binbox',
                              )
@@ -168,7 +168,8 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=5e-2 * np.ones(3), dt=1e-2)
+    action_noise_box1_1 = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=5e-2 * np.ones(3), dt=1e-2)
+    action_noise_binbox = OrnsteinUhlenbeckActionNoise(mean=np.zeros(1), sigma=1e-1 * np.ones(1), dt=1e-2)
     # action_noise = NormalActionNoise(mean=np.zeros(3), sigma=0.1 * np.ones(3))
     # td3_policy_kwargs = dict(net_arch=dict(pi=[27, 9, 3, 9],
     #                                        qf=[128, 32, 8, 32]))
@@ -180,9 +181,9 @@ if __name__ == '__main__':
                       batch_size=256,
                       learning_starts=500_000,
                       stats_window_size=100,
-                      learning_rate=0.0003,
-                      action_noise=action_noise,
-                      train_freq=(100, 'step'),
+                      learning_rate=0.0001,
+                      action_noise=action_noise_box1_1,
+                      train_freq=(10, 'step'),
                       device="auto",
                       verbose=1)
 
@@ -191,7 +192,7 @@ if __name__ == '__main__':
                       batch_size=256,
                       learning_starts=50_000,
                       stats_window_size=100,
-                      action_noise=action_noise,
+                      action_noise=action_noise_binbox,
                       device="auto",
                       verbose=1)
 
@@ -231,8 +232,8 @@ if __name__ == '__main__':
         agents_kwargs=[td3_kwargs],
         agents_n_env=[1],
         env_wrapper='dummy',
-        total_timesteps=25_000_000,
-        checkpoint_num=80,
+        total_timesteps=16_000_000,
+        checkpoint_num=160,
         n_eval_episodes=20,
         eval_freq=100_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
