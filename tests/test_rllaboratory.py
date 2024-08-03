@@ -58,7 +58,7 @@ if __name__ == '__main__':
                                  minimum_train_size=0.08,
                                  maximum_train_size=0.42,
                                  minimum_test_size=0.8,
-                                 maximum_test_size=0.92,
+                                 maximum_test_size=0.99,
                                  test_size=0.1,
                                  verbose=0,
                                  )
@@ -73,6 +73,7 @@ if __name__ == '__main__':
                                eval_reuse_prob=0.95,
                                max_hold_timeframes='5d',
                                total_timesteps=5_000_000,
+                               invalid_actions=60,
                                penalty_value=7,
                                action_type='discrete',
                                )
@@ -86,6 +87,7 @@ if __name__ == '__main__':
                           eval_reuse_prob=0.95,
                           max_hold_timeframes='5d',
                           total_timesteps=5_000_000,
+                          invalid_actions=60,
                           penalty_value=7,
                           action_type='box',
                           )
@@ -95,13 +97,15 @@ if __name__ == '__main__':
                              # max_lot_size=0.5,
                              verbose=1,
                              log_interval=1,
-                             observation_type='assets_close_indicators',
+                             observation_type='idx_assets_close_indicators_action_masks',
                              # observation_type='indicators_assets',
-                             reuse_data_prob=0.66,
-                             eval_reuse_prob=0.2,
-                             max_hold_timeframes='36h',
-                             total_timesteps=8_000_000,
-                             penalty_value=10,
+                             reuse_data_prob=0.97,
+                             eval_reuse_prob=0.99,
+                             max_hold_timeframes='2d',
+                             total_timesteps=12_000_000,
+                             gamma=0.99,
+                             invalid_actions=90,
+                             penalty_value=1e-5,
                              action_type='box1_1',
                              )
 
@@ -110,12 +114,14 @@ if __name__ == '__main__':
                              # max_lot_size=0.5,
                              verbose=1,
                              log_interval=100,
-                             observation_type='indicators_assets',
-                             reuse_data_prob=0.5,
-                             eval_reuse_prob=0.95,
-                             max_hold_timeframes='5d',
-                             total_timesteps=5_000_000,
-                             penalty_value=7,
+                             observation_type='idx_assets_close_indicators_action_masks',
+                             reuse_data_prob=0.97,
+                             eval_reuse_prob=0.99,
+                             max_hold_timeframes='2d',
+                             total_timesteps=8_000_000,
+                             gamma=0.99,
+                             invalid_actions=200,
+                             penalty_value=1e-5,
                              action_type='binbox',
                              )
 
@@ -162,16 +168,21 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=0.15 * np.ones(3), dt=1e-2)
-    # action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
-
+    # action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=5e-2 * np.ones(3), dt=1e-2)
+    action_noise = NormalActionNoise(mean=np.zeros(3), sigma=0.1 * np.ones(1))
+    td3_policy_kwargs = dict(net_arch=dict(pi=[32, 16, 8],
+                                           qf=[128, 64, 32]))
+    # td3_policy_kwargs = dict(net_arch=dict(pi=[64, 32, 16],
+    #                                        qf=[256, 128, 64]))
     td3_kwargs = dict(policy="MlpPolicy",
-                      buffer_size=500_000,
+                      buffer_size=1_000_000,
+                      policy_kwargs=td3_policy_kwargs,
                       batch_size=128,
-                      learning_starts=30_000,
+                      learning_starts=1_000_000,
                       stats_window_size=100,
+                      learning_rate=0.0002,
                       action_noise=action_noise,
-                      # train_freq=(1, 'step'),
+                      train_freq=(100, 'step'),
                       device="auto",
                       verbose=1)
 
@@ -219,11 +230,11 @@ if __name__ == '__main__':
         agents_cls=[TD3],
         agents_kwargs=[td3_kwargs],
         agents_n_env=[1],
-        total_timesteps=8_000_000,
+        env_wrapper='dummy',
+        total_timesteps=12_000_000,
         checkpoint_num=80,
         n_eval_episodes=20,
         eval_freq=100_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
-
 
     rllab.learn()

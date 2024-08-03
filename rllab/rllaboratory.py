@@ -18,6 +18,8 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 from dataclasses import asdict, dataclass, field, make_dataclass
+from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
+
 from rllab.configtools import ConfigMethods
 
 __version__ = 0.027
@@ -25,6 +27,8 @@ __version__ = 0.027
 TZ = timezone('Europe/Moscow')
 
 logger = logging.getLogger()
+
+ACTION_NOISE: dict = {'ornstein_uhlenbeck': OrnsteinUhlenbeckActionNoise, 'normal': NormalActionNoise}
 
 
 def get_exp_id() -> str:
@@ -41,10 +45,14 @@ class LABConfig:
     FILENAME: str = field(default_factory=str, init=True)
 
 
+env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv}
+
+
 class LabBase:
     def __init__(self, env_cls: Union[object, List[object,]], agents_cls: Union[object, List[object]],
                  env_kwargs: Union[List[dict,], dict], agents_kwargs: Union[List[dict,], dict],
                  agents_n_env: Union[List[int], int, None] = None,
+                 env_wrapper: str = 'dummy',
                  total_timesteps: int = 500_000, experiment_path: str = './',
                  checkpoint_num: int = 20, eval_freq: int = 50_000, n_eval_episodes: int = 10,
                  ):
@@ -70,6 +78,7 @@ class LabBase:
         self.env_kwargs = env_kwargs
         self.base_cfg = LABConfig()
         self.base_cfg.EXPERIMENT_PATH = experiment_path
+        self.env_wrapper = env_wrapper_dict.get(env_wrapper, DummyVecEnv)
 
         if not isinstance(env_cls, list):
             self.env_classes_lst = list([env_cls, ])
@@ -142,11 +151,11 @@ class LabBase:
         ConfigMethods.save_config(agent_cfg, os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_cfg.json'))
         ConfigMethods.save_config(agent_kwargs,
                                   os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
-
-        checkpoint_callback = CheckpointCallback(save_freq=int(self.total_timesteps // self.checkpoint_num),
-                                                 save_path=agent_cfg.DIRS["training"],
-                                                 name_prefix=f'{agent_cfg.FILENAME}_chkp',
-                                                 )
+        #
+        # checkpoint_callback = CheckpointCallback(save_freq=int(self.total_timesteps // self.checkpoint_num),
+        #                                          save_path=agent_cfg.DIRS["training"],
+        #                                          name_prefix=f'{agent_cfg.FILENAME}_chkp',
+        #                                          )
         eval_callback = EvalCallback(self.eval_vecenv_lst[ix],
                                      best_model_save_path=agent_cfg.DIRS["best"],
                                      n_eval_episodes=self.n_eval_episodes,
@@ -155,9 +164,9 @@ class LabBase:
                                      deterministic=True
                                      )
         # Create the callback list
-        callbacks = CallbackList([checkpoint_callback, eval_callback])
+        # callbacks = CallbackList([checkpoint_callback, eval_callback])
 
-        agent_obj.learn(total_timesteps=self.total_timesteps, callback=callbacks, log_interval=10000,
+        agent_obj.learn(total_timesteps=self.total_timesteps, callback=eval_callback, log_interval=10000,
                         progress_bar=False)
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
@@ -191,15 +200,15 @@ class LabBase:
 
         train_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                     n_envs=self.agents_n_env[ix],
-                                    seed=42,
+                                    seed=env.get_seed(),
                                     env_kwargs=train_env_kwargs,
-                                    vec_env_cls=SubprocVecEnv if self.agents_n_env[ix] > 1 else DummyVecEnv)
+                                    vec_env_cls=self.env_wrapper if self.agents_n_env[ix] > 1 else DummyVecEnv)
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,
-                                   seed=43,
+                                   seed=env.get_seed(),
                                    env_kwargs=eval_env_kwargs,
-                                   vec_env_cls=SubprocVecEnv if self.agents_n_env[ix] > 1 else DummyVecEnv)
+                                   vec_env_cls=self.env_wrapper if self.agents_n_env[ix] > 1 else DummyVecEnv)
 
         self.train_vecenv_lst.append(make_vec_env(**train_vec_env_kwargs))
         self.eval_vecenv_lst.append(make_vec_env(**eval_vec_env_kwargs))
