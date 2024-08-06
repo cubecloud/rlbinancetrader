@@ -37,6 +37,7 @@ dependencies:
   - numba
   - nbformat
   - ipykernel
+  - pyfolio-reloaded
   - pip:
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git

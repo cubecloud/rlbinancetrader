@@ -49,12 +49,18 @@ env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv}
 
 
 class LabBase:
-    def __init__(self, env_cls: Union[object, List[object,]], agents_cls: Union[object, List[object]],
-                 env_kwargs: Union[List[dict,], dict], agents_kwargs: Union[List[dict,], dict],
+    def __init__(self,
+                 env_cls: Union[object, List[object,]],
+                 agents_cls: Union[object, List[object]],
+                 env_kwargs: Union[List[dict,], dict],
+                 agents_kwargs: Union[List[dict,], dict],
                  agents_n_env: Union[List[int], int, None] = None,
                  env_wrapper: str = 'dummy',
-                 total_timesteps: int = 500_000, experiment_path: str = './',
-                 checkpoint_num: int = 20, eval_freq: int = 50_000, n_eval_episodes: int = 10,
+                 total_timesteps: int = 500_000,
+                 experiment_path: str = './',
+                 checkpoint_num: int = 20,
+                 eval_freq: int = 50_000,
+                 n_eval_episodes: int = 10,
                  ):
         """
         Get all arguments to instantiate all classes and object inside the Lab
@@ -64,8 +70,13 @@ class LabBase:
             agents_cls (class or list):     agents classes
             env_kwargs (dict or list):      kwargs for environment
             agents_kwargs (dict or list):   kwargs for each agent
-            experiment_path (str):  path
-            total_timesteps (int):  total timesteps
+            agents_n_env (int, list, None): n of environment or list
+            env_wrapper: (str)              'dummy' or 'subproc'
+            total_timesteps (int):          total timesteps
+            experiment_path (str):          path
+            checkpoint_num (int):           n of checkpoints to save
+            eval_freq (int):                frequency of evaluation
+            n_eval_episodes (int):          n of episodes to evaluate
         """
         self.policy_n_env_default: dict = {PPO: 3, A2C: 3, DQN: 3, TD3: 3, DDPG: 3, SAC: 2}
 
@@ -213,6 +224,7 @@ class LabBase:
         self.train_vecenv_lst.append(make_vec_env(**train_vec_env_kwargs))
         self.eval_vecenv_lst.append(make_vec_env(**eval_vec_env_kwargs))
 
+        logger.info(f'{self.__class__.__name__}: Creating agent: #{ix:02d} { self.agents_classes_lst[ix].__class__}')
         agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **self.agents_kwargs[ix])
 
         agent_cfg = LABConfig(**asdict(self.base_cfg))

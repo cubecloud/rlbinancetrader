@@ -68,12 +68,12 @@ if __name__ == '__main__':
                                # max_lot_size=0.5,
                                verbose=1,
                                log_interval=500,
-                               observation_type='indicators_assets',
-                               reuse_data_prob=0.5,
-                               eval_reuse_prob=0.95,
+                               observation_type='assets_close_indicators_action_masks',
+                               reuse_data_prob=0.99,
+                               eval_reuse_prob=0.99,
                                max_hold_timeframes='5d',
-                               total_timesteps=5_000_000,
-                               invalid_actions=60,
+                               total_timesteps=8_000_000,
+                               invalid_actions=200,
                                penalty_value=7,
                                action_type='discrete',
                                )
@@ -82,12 +82,12 @@ if __name__ == '__main__':
                           # max_lot_size=0.5,
                           verbose=1,
                           log_interval=100,
-                          observation_type='indicators_assets',
-                          reuse_data_prob=0.5,
-                          eval_reuse_prob=0.95,
+                          observation_type='assets_close_indicators_action_masks',
+                          reuse_data_prob=0.99,
+                          eval_reuse_prob=0.99,
                           max_hold_timeframes='5d',
-                          total_timesteps=5_000_000,
-                          invalid_actions=60,
+                          total_timesteps=8_000_000,
+                          invalid_actions=200,
                           penalty_value=7,
                           action_type='box',
                           )
@@ -102,9 +102,9 @@ if __name__ == '__main__':
                              reuse_data_prob=0.99,
                              eval_reuse_prob=0.99,
                              max_hold_timeframes='7d',
-                             total_timesteps=16_000_000,
+                             total_timesteps=8_000_000,
                              gamma=0.99,
-                             invalid_actions=400,
+                             invalid_actions=5000,
                              penalty_value=1e-5,
                              action_type='box1_1',
                              )
@@ -118,9 +118,9 @@ if __name__ == '__main__':
                              reuse_data_prob=0.99,
                              eval_reuse_prob=0.99,
                              max_hold_timeframes='7d',
-                             total_timesteps=16_000_000,
+                             total_timesteps=8_000_000,
                              gamma=0.99,
-                             invalid_actions=400,
+                             invalid_actions=5000,
                              penalty_value=1e-5,
                              action_type='binbox',
                              )
@@ -131,28 +131,28 @@ if __name__ == '__main__':
                       exploration_fraction=0.95,
                       exploration_final_eps=0.05,
                       exploration_initial_eps=1.0,
-                      buffer_size=100_000,
-                      learning_starts=100_001,
-                      # train_freq=(10, 'step'),
+                      buffer_size=200_000,
+                      learning_starts=200_001,
+                      train_freq=(10, 'step'),
                       # train_freq=(1, 'episode'),
                       device='cpu',
                       verbose=1)
 
-    ppo_policy_kwargs = dict(net_arch=dict(pi=[32, 32],
-                                           vf=[64, 64]))
+    # ppo_policy_kwargs = dict(net_arch=dict(pi=[32, 32],
+    #                                        vf=[64, 64]))
 
     ppo_kwargs = dict(policy="MlpPolicy",
-                      policy_kwargs=ppo_policy_kwargs,
-                      batch_size=32,
+                      # policy_kwargs=ppo_policy_kwargs,
+                      batch_size=256,
                       stats_window_size=10000,
                       normalize_advantage=True,
-                      use_sde=True,
+                      use_sde=False,
                       sde_sample_freq=10,
                       device='cpu',
                       verbose=1)
 
     ddpg_kwargs = dict(policy="MlpPolicy",
-                       stats_window_size=10000,
+                       # stats_window_size=10000,
                        device='cpu',
                        verbose=1)
 
@@ -181,8 +181,8 @@ if __name__ == '__main__':
                       batch_size=256,
                       learning_starts=500_000,
                       stats_window_size=100,
-                      learning_rate=0.0001,
-                      action_noise=action_noise_box1_1,
+                      learning_rate=0.0002,
+                      action_noise=action_noise_binbox,
                       train_freq=(10, 'step'),
                       device="auto",
                       verbose=1)
@@ -201,9 +201,9 @@ if __name__ == '__main__':
     #     env_kwargs=[env_box1_1_kwargs, env_box1_1_kwargs, env_discrete_kwargs],
     #     agents_cls=[PPO, DDPG, DQN],
     #     agents_kwargs=[ppo_kwargs, ddpg_kwargs, dqn_kwargs],
-    #     agents_n_env=[3, 3, 3],
-    #     total_timesteps=5_000_000,
-    #     checkpoint_num=50,
+    #     agents_n_env=[1, 1, 1],
+    #     total_timesteps=8_000_000,
+    #     checkpoint_num=80,
     #     n_eval_episodes=20,
     #     eval_freq=100_000,
     #     experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
@@ -213,29 +213,29 @@ if __name__ == '__main__':
     # del rllab
     # gc.collect()
 
-    # rllab = LabBase(
-    #     env_cls=[BinanceEnvBase, BinanceEnvBase, BinanceEnvBase],
-    #     env_kwargs=[env_box1_1_kwargs, env_box1_1_kwargs, env_box1_1_kwargs],
-    #     agents_cls=[TD3, SAC, A2C],
-    #     agents_kwargs=[td3_kwargs, sac_kwargs, a2c_kwargs],
-    #     agents_n_env=[1, 1, 2],
-    #     total_timesteps=5_000_000,
-    #     checkpoint_num=100,
-    #     n_eval_episodes=20,
-    #     eval_freq=50_000,
-    #     experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
-
     rllab = LabBase(
         env_cls=[BinanceEnvBase],
         env_kwargs=[env_box1_1_kwargs],
-        agents_cls=[TD3],
-        agents_kwargs=[td3_kwargs],
+        agents_cls=[PPO],
+        agents_kwargs=[ppo_kwargs],
         agents_n_env=[1],
-        env_wrapper='dummy',
-        total_timesteps=16_000_000,
-        checkpoint_num=160,
+        total_timesteps=8_000_000,
+        checkpoint_num=80,
         n_eval_episodes=20,
         eval_freq=100_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
+
+    # rllab = LabBase(
+    #     env_cls=[BinanceEnvBase],
+    #     env_kwargs=[env_binbox_kwargs],
+    #     agents_cls=[TD3],
+    #     agents_kwargs=[td3_kwargs],
+    #     agents_n_env=[1],
+    #     env_wrapper='dummy',
+    #     total_timesteps=8_000_000,
+    #     checkpoint_num=80,
+    #     n_eval_episodes=20,
+    #     eval_freq=100_000,
+    #     experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
 
     rllab.learn()

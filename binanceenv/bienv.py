@@ -88,6 +88,7 @@ class BinanceEnvBase(gymnasium.Env):
                  gamma=0.99,
                  render_mode=None):
 
+
         BinanceEnvBase.count += 1
 
         self.idnum = int(BinanceEnvBase.count)
@@ -158,11 +159,11 @@ class BinanceEnvBase(gymnasium.Env):
         self.action_symbol = str()
         self.order_closed = False
         self.reward_step = .0
-        self.eps_reward = .0
-        self.previous_pnl = .0
-        self.order_pnl = .0
+        self.previous_pnl: float = .0
+        self.order_pnl: float = .0
         self.all_actions = np.asarray(list(range(3)))
-        self.invalid_action_counter = 0
+        self.invalid_action_counter: int = 0
+        self.episode_reward: float = 0.
         self.reset()
 
     def __del__(self):
@@ -213,8 +214,8 @@ class BinanceEnvBase(gymnasium.Env):
             self.action_space_obj = BoxExtActionSpace(n_action=3)
         elif action_type == 'binbox':
             self.action_space_obj = BinBoxActionSpace(n_action=3, low=-1, high=1)
-        elif action_type == 'sell_buy_amount':
-            self.action_space_obj = SellBuyAmount(assets_qty=1)
+        elif action_type == 'sell_buy_hold_amount':
+            self.action_space_obj = SellBuyHoldAmount(actions=3)
         else:
             sys.exit(f'Error: Unknown action type {action_type}!')
         action_space = self.action_space_obj.action_space
@@ -415,9 +416,9 @@ class BinanceEnvBase(gymnasium.Env):
         return self.all_actions[action_masks]
 
     def step(self, action):
-        truncated = False
-        terminated = False
-        masked_action = 0
+        # truncated = False
+        # terminated = False
+        # masked_action = 0
         action_penalty = False
         amount = 1.
         info = self._get_info()
@@ -436,22 +437,34 @@ class BinanceEnvBase(gymnasium.Env):
         elif self.action_type == 'box1_1':
             masked_action, masked_amount = self.action_space_obj.convert2action(action, info['action_masks'])
             action, amount = self.action_space_obj.convert2action(action, None)
+            if masked_action != action:
+                amount = 0.
+                self.invalid_action_counter += 1
+                if self.use_period == 'train':
+                    action_penalty = True
+                    if action in [0, 1]:
+                        self.reward_step += -5e-4
+                    else:
+                        self.reward_step += -5e-5
+            else:
+                if self.use_period == 'train':
+                    self.reward_step += 1e-5
 
         elif self.action_type in ['sell_buy_amount', 'binbox']:
+            valid_actions = self.get_valid_actions(info['action_masks'])
             action, amount = self.action_space_obj.convert2action(action[0])
-
-        if masked_action != action:
-            amount = 0.
-            self.invalid_action_counter += 1
-            if self.use_period == 'train':
-                action_penalty = True
-                if action in [0, 1]:
-                    self.reward_step += -5e-4
-                else:
-                    self.reward_step += -5e-5
-        else:
-            if self.use_period == 'train':
-                self.reward_step += 1e-5
+            if action not in valid_actions:
+                amount = 0.
+                self.invalid_action_counter += 1
+                if self.use_period == 'train':
+                    action_penalty = True
+                    if action in [0, 1]:
+                        self.reward_step += -5e-4
+                    else:
+                        self.reward_step += -5e-5
+            else:
+                if self.use_period == 'train':
+                    self.reward_step += 1e-5
 
         # valid_actions = self.get_valid_actions(info['action_masks'])
         # if action not in valid_actions:
@@ -484,10 +497,9 @@ class BinanceEnvBase(gymnasium.Env):
         self.reward = self.total_assets - self.initial_total_assets
         if not action_penalty:
             self.reward_step += self.pnl - self.previous_pnl
-            self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-        # else:
-        #     # penalty for invalid action
-        #     self.reward_step += -2e-5
+            if self.use_period == 'train':
+                self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+
         self.old_total_assets = float(self.total_assets)
         self.previous_pnl = float(self.pnl)
 
@@ -498,6 +510,8 @@ class BinanceEnvBase(gymnasium.Env):
             if self.use_period == 'train':
                 self.reward_step = self.gamma_return
             self.timecount -= 1
+
+        self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
 
@@ -512,7 +526,7 @@ class BinanceEnvBase(gymnasium.Env):
             actions_counted: dict = dict(zip(values, counts))
             msg = (f"{self.__class__.__name__} #{self.idnum} {self.use_period}: "
                    f"Ep.length(shape): {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.cache):03d}/"
-                   f"inv_act#: {self.invalid_action_counter:03d}/g_return: {self.gamma_return:.4f}"
+                   f"inv_act#: {self.invalid_action_counter:03d}/Ep.reward: {self.episode_reward:.4f}"
                    # f"\tepsilon: {self.eps_threshold:.6f}"
                    f"\tprofit {self.reward:.1f}"
                    # f"\teps_reward {self.eps_reward:.5f}"
@@ -558,7 +572,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.initial_total_assets = self.initial_target_balance + (self.initial_coin_balance * self.price)
         self.coin_orders_values = .0
         self.order_closed = False
-        self.eps_reward = .0
+        self.episode_reward: float = .0
         self.gamma_return = .0
 
         observation = self._get_obs()
@@ -568,7 +582,7 @@ class BinanceEnvBase(gymnasium.Env):
     def close(self):
         if self.verbose:
             if self.verbose:
-                msg = (f"Episode length: {self.timecount}\treward {self.reward:.2f}\tAssets: "
+                msg = (f"Ep.length: {self.timecount}\treward {self.reward:.2f}\tAssets: "
                        f"{self.current_balance}\tPNL {self.pnl:.6f}\tclose")
                 logger.info(msg)
 

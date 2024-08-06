@@ -1,7 +1,7 @@
 import numpy as np
 import numba
 from numba import jit
-from typing import Tuple, Union
+from typing import Tuple, Union, Dict
 
 from gymnasium.spaces import Discrete
 from gymnasium.spaces import Box
@@ -93,10 +93,12 @@ class DiscreteActionSpace:
         self.__action_space = value
 
 
-class SellBuyAmount:
-    def __init__(self, assets_qty):
-        self.__action_space = Box(low=-2., high=2., shape=(assets_qty,), dtype=np.float32)
-        self.name = 'sell_buy_amount'
+class SellBuyHoldAmount:
+    def __init__(self, actions):
+        # self.__action_space = Box(low=0, high=1., shape=(assets_qty,), dtype=np.float32)
+        self.__action_space: Dict = {"Action": Discrete(actions),
+                                     "Amount": Box(low=0, high=1, shape=(1,), dtype=np.float32)}
+        self.name = 'sell_buy_hold_amount'
 
     @staticmethod
     def __get_action_amount(action: int) -> Tuple[int, float]:
