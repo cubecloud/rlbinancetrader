@@ -12,13 +12,19 @@ from numba import jit
 # from gymnasium.spaces import Box
 from gymnasium.utils import seeding
 # from collections import OrderedDict
-from dbbinance.fetcher.cachemanager import CacheManager
+
+from binanceenv.cache import CacheManager
+from binanceenv.cache import cache_manager_obj
+from binanceenv.cache import eval_cache_manager_obj
+
 from dbbinance.fetcher.datautils import get_timeframe_bins
+from dbbinance.fetcher.cachemanager import mlp_mutex
+
 from datawizard.dataprocessor import IndicatorProcessor
 # from datawizard.dataprocessor import Constants
 from binanceenv.spaces import *
 
-__version__ = 0.027
+__version__ = 0.029
 
 logger = logging.getLogger()
 
@@ -46,28 +52,25 @@ def abs_logarithmic_scaler(value):
     return _temp
 
 
-cache_manager_obj = CacheManager(max_memory_gb=1)
-eval_cache_manager_obj = CacheManager(max_memory_gb=1)
-
-
 class BinanceEnvBase(gymnasium.Env):
     # CM = cache_manager_obj
     # eval_CM = eval_cache_manager_obj
 
     count = 0
-    target_balance: float = 100_000.
     target_symbol: str = 'USDT'
 
-    coin_balance: float = 0.
     coin_symbol: str = 'BTC'
     minimum_coin_trade_amount = 0.00001
 
-    reward: float = 0.
-
     commission: float = .002
     name = 'BinanceEnvBase'
+    total_timesteps_counter: int = 1
+    previous_cm_key_num = 0
 
-    def __init__(self, data_processor_kwargs: dict, target_balance: float = 100_000., coin_balance: float = 0.,
+    def __init__(self,
+                 data_processor_kwargs: dict,
+                 target_balance: float = 100_000.,
+                 coin_balance: float = 0.,
                  pnl_stop: float = -0.5,
                  verbose: int = 0,
                  log_interval=500,
@@ -86,8 +89,8 @@ class BinanceEnvBase(gymnasium.Env):
                  eps_end=0.01,
                  eps_decay=0.2,
                  gamma=0.99,
+                 cache_obj: Union[CacheManager, None] = None,
                  render_mode=None):
-
 
         BinanceEnvBase.count += 1
 
@@ -116,6 +119,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
 
         self.timecount: int = 0
+        self.target_balance = target_balance
+        self.reward = 0.
         self.initial_target_balance = target_balance
         self.initial_coin_balance = coin_balance
         self.target_balance = float(self.initial_target_balance)
@@ -129,12 +134,16 @@ class BinanceEnvBase(gymnasium.Env):
         self.__get_obs_func = None
         self._take_action_func = None
 
+        self.CM = cache_obj
         if self.use_period == 'train':
-            self.CM = cache_manager_obj
+            # using external cache_manager for multiprocessing or multithreading
+            if cache_obj is None:
+                self.CM = cache_manager_obj
             self._take_action_func = self._take_action_train
         else:
             # separated CacheManager for eval environment
-            self.CM = eval_cache_manager_obj
+            if cache_obj is None:
+                self.CM = eval_cache_manager_obj
             self._take_action_func = self._take_action_test
             self.reuse_data_prob = eval_reuse_prob
 
@@ -148,13 +157,12 @@ class BinanceEnvBase(gymnasium.Env):
 
         # self.action_bin_obj = ActionsBins([-1, 1], 3)
         self.actions_lst: list = []
-        self.seed = self.get_seed(seed) + self.idnum
+        self.np_random = None
+        self.seed = self.get_seed(seed + self.idnum)
         self.coin_orders_values: float = .0
         self.actions_lst: list = []
-        self.previous_cm_key = tuple()
         self.min_coin_trade = self.minimum_coin_trade_amount + (self.commission * self.minimum_coin_trade_amount)
         self.total_timesteps = total_timesteps
-        self.total_timesteps_counter: int = 1
 
         self.action_symbol = str()
         self.order_closed = False
@@ -252,7 +260,7 @@ class BinanceEnvBase(gymnasium.Env):
 
     def _get_obs(self):
         data = self.__get_obs_func()
-        logger.debug(data)
+        # logger.debug(data)
         return data
 
     def _get_assets_indicators_obs(self):
@@ -442,10 +450,12 @@ class BinanceEnvBase(gymnasium.Env):
                 self.invalid_action_counter += 1
                 if self.use_period == 'train':
                     action_penalty = True
-                    if action in [0, 1]:
+                    if action == 0:
                         self.reward_step += -5e-4
+                    elif action == 1:
+                        self.reward_step += -3e-4
                     else:
-                        self.reward_step += -5e-5
+                        self.reward_step += -5e-6
             else:
                 if self.use_period == 'train':
                     self.reward_step += 1e-5
@@ -466,28 +476,6 @@ class BinanceEnvBase(gymnasium.Env):
                 if self.use_period == 'train':
                     self.reward_step += 1e-5
 
-        # valid_actions = self.get_valid_actions(info['action_masks'])
-        # if action not in valid_actions:
-        #     if self.use_period == 'train':
-        #         # amount = .0
-        #         action = self.np_random.choice(valid_actions, 1)[0]
-        #         if action in [0, 1]:
-        #             action_penalty = False
-        #             # self.reward_step -= 1e-5
-        #         else:
-        #             action_penalty = True
-        #             # self.reward_step -= 2e-5
-        #         # truncated = bool(self.invalid_action_counter >= self.invalid_actions)
-        #     else:
-        #         action = 2  # hold
-        #     self.invalid_action_counter += 1
-        # else:
-        #     if self.use_period == 'train':
-        #         if action in [0, 1]:
-        #             self.reward_step += 1e-5
-        #         else:
-        #             self.reward_step += 1e-7
-
         truncated = bool(self.invalid_action_counter >= self.invalid_actions)
         self.actions_lst.append(action)
         self._take_action_func(action, amount)
@@ -495,10 +483,12 @@ class BinanceEnvBase(gymnasium.Env):
         observation = self._get_obs()
 
         self.reward = self.total_assets - self.initial_total_assets
-        if not action_penalty:
-            self.reward_step += self.pnl - self.previous_pnl
-            if self.use_period == 'train':
-                self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+        if self.use_period == 'train':
+            if not action_penalty:
+                self.reward_step += (self.pnl - self.previous_pnl)
+            self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+        else:
+            self.reward_step += (self.pnl - self.previous_pnl)
 
         self.old_total_assets = float(self.total_assets)
         self.previous_pnl = float(self.pnl)
@@ -508,7 +498,7 @@ class BinanceEnvBase(gymnasium.Env):
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
             if self.use_period == 'train':
-                self.reward_step = self.gamma_return
+                self.reward_step += self.gamma_return
             self.timecount -= 1
 
         self.episode_reward += self.reward_step
@@ -516,10 +506,8 @@ class BinanceEnvBase(gymnasium.Env):
         return observation, self.reward_step, terminated, truncated, info
 
     def reset(self, seed=None, options=None):
-        if seed is None:
-            self.seed = self.get_seed()
-        super().reset(seed=seed)
-        self.total_timesteps_counter += self.timecount
+        with mlp_mutex:
+            self.total_timesteps_counter += self.timecount
 
         if self.verbose:
             values, counts = np.unique(self.actions_lst, return_counts=True)
@@ -549,13 +537,13 @@ class BinanceEnvBase(gymnasium.Env):
         # else:
         #     self.eps_threshold = self.calc_eps_treshold()
 
-        if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= 20:
+        if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= 30:
             while True:
-                cm_key = tuple(self.np_random.choice(list(self.CM.cache.keys()), 1)[0])
-                if cm_key != self.previous_cm_key:
+                cm_key_num = self.np_random.integers(len(self.CM.cache))
+                if cm_key_num != self.previous_cm_key_num:
                     break
-            self.ohlcv_df, self.indicators_df = self.CM.cache[cm_key]
-            self.previous_cm_key = cm_key
+            self.ohlcv_df, self.indicators_df = self.CM.cache[list(self.CM.cache.keys())[cm_key_num]]
+            self.previous_cm_key_num = cm_key_num
         else:
             self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
                 period_type=self.use_period)
@@ -567,7 +555,7 @@ class BinanceEnvBase(gymnasium.Env):
 
             cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
             self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
-            self.previous_cm_key = cm_key
+            self.previous_cm_key_num = len(self.CM.cache)
 
         self.initial_total_assets = self.initial_target_balance + (self.initial_coin_balance * self.price)
         self.coin_orders_values = .0
