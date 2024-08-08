@@ -37,11 +37,14 @@ dependencies:
   - numba
   - nbformat
   - ipykernel
-  - pyfolio-reloaded
+#  - pyfolio-reloaded
+  - optuna
+  - cmaes
+  - plotly
   - pip:
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git
       - git+https://github.com/cubecloud/dbbinance-storage.git
       - git+https://github.com/cubecloud/ensembletools.git
-      - backtesting>=0.3.3
+      - git+https://github.com/cubecloud/backtesting_optuna.git
 prefix: /home/cubecloud/anaconda3/envs/rlbinancegym

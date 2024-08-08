@@ -64,31 +64,33 @@ if __name__ == '__main__':
                                  )
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                               pnl_stop=-0.20,
+                               pnl_stop=-0.50,
                                # max_lot_size=0.5,
                                verbose=1,
                                log_interval=500,
                                observation_type='assets_close_indicators_action_masks',
-                               reuse_data_prob=0.99,
+                               reuse_data_prob=0.98,
                                eval_reuse_prob=0.99,
                                max_hold_timeframes='5d',
                                total_timesteps=8_000_000,
-                               invalid_actions=200,
-                               penalty_value=7,
+                               gamma=0.99,
+                               invalid_actions=5000,
+                               penalty_value=1e-4,
                                action_type='discrete',
                                )
     env_box_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                          pnl_stop=-0.6,
+                          pnl_stop=-0.5,
                           # max_lot_size=0.5,
                           verbose=1,
                           log_interval=100,
                           observation_type='assets_close_indicators_action_masks',
-                          reuse_data_prob=0.99,
+                          reuse_data_prob=0.98,
                           eval_reuse_prob=0.99,
                           max_hold_timeframes='5d',
                           total_timesteps=8_000_000,
+                          gamma=0.99,
                           invalid_actions=200,
-                          penalty_value=7,
+                          penalty_value=1e-5,
                           action_type='box',
                           )
 
@@ -115,7 +117,7 @@ if __name__ == '__main__':
                              verbose=1,
                              log_interval=100,
                              observation_type='assets_close_indicators_action_masks',
-                             reuse_data_prob=0.99,
+                             reuse_data_prob=0.97,
                              eval_reuse_prob=0.99,
                              max_hold_timeframes='7d',
                              total_timesteps=8_000_000,
@@ -151,9 +153,19 @@ if __name__ == '__main__':
                       device='cuda',
                       verbose=1)
 
+    action_noise_box1_1 = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=1e-1 * np.ones(3), dt=1e-2)
+    normal_action_noise_box1_1 = NormalActionNoise(mean=np.zeros(3), sigma=1e-1 * np.ones(3))
+    action_noise_binbox = OrnsteinUhlenbeckActionNoise(mean=np.zeros(1), sigma=1e-1 * np.ones(1), dt=1e-2)
+
     ddpg_kwargs = dict(policy="MlpPolicy",
+                       batch_size=128,
+                       buffer_size=100_000,
+                       learning_starts=100_001,
+                       action_noise=action_noise_binbox,
+                       learning_rate=0.0002,
                        # stats_window_size=10000,
-                       device='cpu',
+                       device='auto',
+                       train_freq=(10, 'step'),
                        verbose=1)
 
     a2c_policy_kwargs = dict(net_arch=dict(pi=[32, 32],
@@ -163,13 +175,12 @@ if __name__ == '__main__':
                       policy_kwargs=a2c_policy_kwargs,
                       stats_window_size=10_000,
                       use_rms_prop=False,
-                      use_sde=True,
-                      sde_sample_freq=10,
+                      # use_sde=True,
+                      # sde_sample_freq=10,
                       device="auto",
                       verbose=1)
 
-    action_noise_box1_1 = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=5e-2 * np.ones(3), dt=1e-2)
-    action_noise_binbox = OrnsteinUhlenbeckActionNoise(mean=np.zeros(1), sigma=1e-1 * np.ones(1), dt=1e-2)
+
     # action_noise = NormalActionNoise(mean=np.zeros(3), sigma=0.1 * np.ones(3))
     # td3_policy_kwargs = dict(net_arch=dict(pi=[27, 9, 3, 9],
     #                                        qf=[128, 32, 8, 32]))
@@ -182,7 +193,7 @@ if __name__ == '__main__':
                       learning_starts=500_000,
                       stats_window_size=100,
                       learning_rate=0.0002,
-                      action_noise=action_noise_binbox,
+                      action_noise=action_noise_box1_1,
                       train_freq=(10, 'step'),
                       device="auto",
                       verbose=1)
@@ -192,7 +203,7 @@ if __name__ == '__main__':
                       batch_size=256,
                       learning_starts=50_000,
                       stats_window_size=100,
-                      action_noise=action_noise_binbox,
+                      action_noise=action_noise_box1_1,
                       device="auto",
                       verbose=1)
 
@@ -216,9 +227,9 @@ if __name__ == '__main__':
     rllab = LabBase(
         env_cls=[BinanceEnvBase],
         env_kwargs=[env_box1_1_kwargs],
-        agents_cls=[PPO],
-        agents_kwargs=[ppo_kwargs],
-        agents_n_env=[3],
+        agents_cls=[SAC],
+        agents_kwargs=[sac_kwargs],
+        agents_n_env=[1],
         env_wrapper='dummy',
         total_timesteps=8_000_000,
         checkpoint_num=80,

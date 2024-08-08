@@ -187,8 +187,22 @@ class LabBase:
                         progress_bar=False)
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
+    def backtesting(self, ix):
+        agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
+        vec_env = self.eval_vecenv_lst[ix]
+
+        episode_rewards = .0
+        obs = vec_env.reset()
+        while True:
+            action, _states = agent_obj.predict(obs)
+            obs, rewards, dones, info = vec_env.step(action)
+            episode_rewards += rewards
+            if dones.any():
+                break
+
     def evaluate_agent(self, ix):
         agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
+
         # filename = agent_cfg.FILENAME
         agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
         result = evaluate_policy(agent_obj, self.eval_vecenv_lst[ix], n_eval_episodes=self.n_eval_episodes,

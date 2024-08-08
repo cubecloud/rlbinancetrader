@@ -84,6 +84,14 @@ class DiscreteActionSpace:
         self.__action_space = Discrete(n_action, seed=42)  # {0, 1, 2}
         self.name = 'discrete'
 
+    def convert2action(self, action, masked_actions=None):
+        amount = 1.
+        if masked_actions is None:
+            act = np.argmax(action)
+        else:
+            act = np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
+        return act, amount
+
     @property
     def action_space(self):
         return self.__action_space
@@ -181,8 +189,8 @@ class ActionsBins:
         for ix in range(len(self.pairs)):
             if np.min(self.pairs[ix]) <= value <= np.max(self.pairs[ix]):
                 amount = abs(value - np.max(self.pairs[ix])) / self.step if value < 0 and (
-                        np.min(self.pairs[ix]) < 0 and np.max(self.pairs[ix]) < 0) else value - np.min(
-                    self.pairs[ix]) / self.step
+                        np.min(self.pairs[ix]) < 0 and np.max(self.pairs[ix]) < 0) else abs(value - np.min(
+                    self.pairs[ix])) / self.step
                 break
         return ix, amount
 

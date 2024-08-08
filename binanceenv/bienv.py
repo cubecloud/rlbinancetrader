@@ -431,7 +431,7 @@ class BinanceEnvBase(gymnasium.Env):
         amount = 1.
         info = self._get_info()
         if self.use_period == 'train':
-            self.reward_step = -1e-5
+            self.reward_step = -self.penalty_value
         else:
             self.reward_step = .0
 
@@ -475,6 +475,21 @@ class BinanceEnvBase(gymnasium.Env):
             else:
                 if self.use_period == 'train':
                     self.reward_step += 1e-5
+
+        elif self.action_type == 'discrete':
+            valid_actions = self.get_valid_actions(info['action_masks'])
+            if action not in valid_actions:
+                amount = 0.
+                self.invalid_action_counter += 1
+                if self.use_period == 'train':
+                    action_penalty = True
+                    if action in [0, 1]:
+                        self.reward_step += -5 * self.penalty_value * 10
+                    else:
+                        self.reward_step += -5 * self.penalty_value
+            else:
+                if self.use_period == 'train':
+                    self.reward_step += self.penalty_value
 
         truncated = bool(self.invalid_action_counter >= self.invalid_actions)
         self.actions_lst.append(action)
