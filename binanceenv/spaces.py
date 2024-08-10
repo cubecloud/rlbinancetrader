@@ -7,6 +7,7 @@ from gymnasium.spaces import Discrete
 from gymnasium.spaces import Box
 
 actions_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2}
+actions_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold"}
 
 
 class IndicatorsSpace:

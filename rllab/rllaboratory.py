@@ -65,6 +65,7 @@ class LabBase:
                  checkpoint_num: int = 20,
                  eval_freq: int = 50_000,
                  n_eval_episodes: int = 10,
+                 verbose: int = 1
                  ):
         """
         Get all arguments to instantiate all classes and object inside the Lab
@@ -95,6 +96,7 @@ class LabBase:
         self.base_cfg.EXPERIMENT_PATH = experiment_path
         self.env_wrapper = env_wrapper
         self.env_wrapper_cls = env_wrapper_dict.get(env_wrapper, DummyVecEnv)
+        self.verbose = verbose
 
         if not isinstance(env_cls, list):
             self.env_classes_lst = list([env_cls, ])
@@ -225,7 +227,7 @@ class LabBase:
         self.base_cfg.ENV_NAME = f'{env.__class__.__name__}'
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        train_env_kwargs.update({'use_period': 'train', 'verbose': 1 if self.agents_n_env[ix] > 1 else 1, })
+        train_env_kwargs.update({'use_period': 'train', 'verbose': 1 if self.agents_n_env[ix] > 1 else self.verbose, })
 
         """ Rlock object can't be copied """
         eval_env_kwargs = copy.deepcopy(train_env_kwargs)
@@ -235,7 +237,8 @@ class LabBase:
             eval_env_kwargs.update({'cache_obj': eval_cache_manager_obj})
 
         eval_env_kwargs.update({'use_period': 'test',
-                                'verbose': 1 if self.env_wrapper == 'subproc' or self.agents_n_env[ix] > 1 else 1,
+                                'verbose': 1 if self.env_wrapper == 'subproc' or self.agents_n_env[
+                                    ix] > 1 else self.verbose,
                                 }
                                )
 

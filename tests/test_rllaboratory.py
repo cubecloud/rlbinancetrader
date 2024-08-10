@@ -15,10 +15,11 @@ from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckA
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 # from torch.nn import Tanh, Softmax, LeakyReLU, ReLU
 from binanceenv.bienv import BinanceEnvBase
+from binanceenv.bienv import BinanceEnvCash
 from rllab.rllaboratory import LabBase
 from multiprocessing import freeze_support
 
-__version__ = 0.041
+__version__ = 0.045
 
 logger = logging.getLogger()
 
@@ -35,6 +36,8 @@ if __name__ == '__main__':
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
+    logging.getLogger('numba').setLevel(logging.INFO)
+    logging.getLogger('LoadDbIndicators').setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
@@ -79,7 +82,7 @@ if __name__ == '__main__':
                                action_type='discrete',
                                )
     env_box_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                          pnl_stop=-0.5,
+                          pnl_stop=-0.9,
                           # max_lot_size=0.5,
                           verbose=1,
                           log_interval=100,
@@ -95,9 +98,9 @@ if __name__ == '__main__':
                           )
 
     env_box1_1_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                             pnl_stop=-0.5,
+                             pnl_stop=-0.9,
                              # max_lot_size=0.5,
-                             verbose=1,
+                             verbose=2,
                              log_interval=1,
                              observation_type='assets_close_indicators_action_masks',
                              # observation_type='indicators_assets',
@@ -180,7 +183,6 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-
     # action_noise = NormalActionNoise(mean=np.zeros(3), sigma=0.1 * np.ones(3))
     # td3_policy_kwargs = dict(net_arch=dict(pi=[27, 9, 3, 9],
     #                                        qf=[128, 32, 8, 32]))
@@ -204,6 +206,7 @@ if __name__ == '__main__':
                       learning_starts=50_000,
                       stats_window_size=100,
                       action_noise=action_noise_box1_1,
+                      train_freq=(10, 'step'),
                       device="auto",
                       verbose=1)
 
@@ -225,17 +228,19 @@ if __name__ == '__main__':
     # gc.collect()
 
     rllab = LabBase(
-        env_cls=[BinanceEnvBase],
+        env_cls=[BinanceEnvCash],
         env_kwargs=[env_box1_1_kwargs],
         agents_cls=[SAC],
         agents_kwargs=[sac_kwargs],
         agents_n_env=[1],
         env_wrapper='dummy',
-        total_timesteps=8_000_000,
+        total_timesteps=12_000_000,
         checkpoint_num=80,
         n_eval_episodes=20,
         eval_freq=100_000,
-        experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
+        experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
+        verbose=1
+    )
 
     # rllab = LabBase(
     #     env_cls=[BinanceEnvBase],
