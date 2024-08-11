@@ -24,7 +24,7 @@ from datawizard.dataprocessor import IndicatorProcessor
 # from datawizard.dataprocessor import Constants
 from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
-from binanceenv.orderbook import OrderBook
+from binanceenv.orderbook import Asset
 
 __version__ = 0.037
 
@@ -130,10 +130,11 @@ class BinanceEnvBase(gymnasium.Env):
         self.reward = 0.
         self.target = TargetCash(symbol='USDT', initial_cash=target_balance)
 
-        self.asset = OrderBook(asset_symbol='BTC',
-                               asset_commission=.002,
-                               asset_minimum_trade=0.00001,
-                               target_obj=self.target)
+        self.asset = Asset(symbol='BTC',
+                           asset_commission=.002,
+                           asset_minimum_trade=0.00001,
+                           target_obj=self.target,
+                           initial_balance=(0., 0., 0.))
 
         # self.initial_target_balance = self.target.initial_cash
         # self.initial_coin_balance = coin_balance
@@ -174,7 +175,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.np_random = None
         self.seed = self.get_seed(seed + self.idnum)
         self.actions_lst: list = []
-        self.min_coin_trade = self.asset.minimum_trade + (self.asset.commission * self.asset.minimum_trade)
+        self.min_coin_trade = self.asset.orders.minimum_trade + (
+                self.asset.orders.commission * self.asset.orders.minimum_trade)
         self.total_timesteps = total_timesteps
 
         self.action_symbol = str()
@@ -375,30 +377,25 @@ class BinanceEnvBase(gymnasium.Env):
         old_coin_balance = float(self.asset.balance.size)
         action_commission = .0
         action_symbol = self.target.symbol
+        order_cash = 0.
         msg = str()
         size = 0.
 
         """buy or sell stock"""
         if action == 0:  # Buy
             self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
-            max_amount = (self.cash / self.price) / (1. + self.asset.commission)
-            size = min(max(self.asset.minimum_trade, amount * max_amount), max_amount)
-            self.asset.buy(size, self.price)
-            action_commission = self.asset.book[-1].order_commission
-            # size_price = self.price * size
-            # action_commission = size_price * self.commission
-            # self.cash -= (size_price + action_commission)
-            # self.coin_balance += size
+            max_amount = (self.cash / self.price) / (1. + self.asset.orders.commission)
+            size = min(max(self.asset.orders.minimum_trade, amount * max_amount), max_amount)
+            self.asset.orders.buy(size, self.price)
+            action_commission = self.asset.orders.book[-1].order_commission
+            order_cash = self.asset.orders.book[-1].order_cash
 
         elif action == 1:  # Sell
             self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
             size = min(max(self.min_coin_trade, amount * self.asset.balance.size), self.asset.balance.size)
-            self.asset.sell(size, self.price)
-            action_commission = self.asset.book[-1].order_commission
-            # size_price = self.price * size
-            # action_commission = size_price * self.commission
-            # self.target_balance += (size_price - action_commission)
-            # self.coin_balance -= size
+            self.asset.orders.sell(size, self.price)
+            action_commission = self.asset.orders.book[-1].order_commission
+            order_cash = self.asset.orders.book[-1].order_cash
 
         if self.verbose == 2:
             if self.timecount % self.log_interval == 0:
@@ -417,9 +414,9 @@ class BinanceEnvBase(gymnasium.Env):
                     f"{(old_target_balance + (old_coin_balance * self.price)):.1f} {self.target.symbol}")
                 msg = (f"{ohlcv}\n{msg}"
                        f"\tAction num: {action}\t{old_balance} "
-                       f"\tACTION => {actions_dict[action]}: size:{size:.4f}({amount:.3f}) "
-                       f"{action_symbol}, commission: {action_commission:.6f}"
-                       f"\t{self.current_balance}\tprofit {self.reward:.2f}\tPNL {self.pnl:.5f}")
+                       f"\tACTION => {actions_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f}) "
+                       f"{self.action_symbol}, commission: {action_commission:.2f}"
+                       f"\t{self.current_balance}\tprofit {self.reward_step:.2f}\tPNL {self.pnl:.5f}")
                 logger.info(msg)
 
     def _take_action_train(self, action, amount):
@@ -549,6 +546,7 @@ class BinanceEnvBase(gymnasium.Env):
         # self.target_balance = float(self.initial_target_balance)
         # self.coin_balance = float(self.initial_coin_balance)
         self.timecount: int = 0
+
         self.reward = 0.
         self.reward_step = 0.
         self.actions_lst: list = []
@@ -588,7 +586,6 @@ class BinanceEnvBase(gymnasium.Env):
         self.order_closed = False
         self.episode_reward: float = .0
         self.gamma_return = .0
-
         observation = self._get_obs()
         info = self._get_info()
         return observation, info
@@ -646,11 +643,14 @@ class BinanceEnvCash(BinanceEnvBase):
         self.order_closed: bool = False
         self.order_opened_pnl: float = 0.
         self.order_closed_pnl: float = 0.
+        self.buy_and_hold_pnl = 0.
+        self.buy_and_hold_start_size = 0.
 
     def _take_action(self, action, amount):
         old_target_balance = float(self.cash)
         old_coin_balance = float(self.asset.balance.size)
         action_commission = .0
+        order_cash: float = 0.
         # action_symbol = self.target.symbol
         msg = str()
         size = 0.
@@ -658,11 +658,12 @@ class BinanceEnvCash(BinanceEnvBase):
         """buy or sell stock"""
         if action == 0:  # Buy
             self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
-            max_amount = (self.cash / self.price) / (1. + self.asset.commission)
-            size = min(max(self.asset.minimum_trade, amount * max_amount), max_amount)
+            max_amount = (self.cash / self.price) / (1. + self.asset.orders.commission)
+            size = min(max(self.asset.orders.minimum_trade, amount * max_amount), max_amount)
             if size != 0:
-                self.asset.buy(size, self.price)
-                action_commission = self.asset.balance.book[-1].order_commission
+                self.asset.orders.buy(size, self.price)
+                action_commission = self.asset.orders.book[-1].order_commission
+                order_cash = self.asset.orders.book[-1].order_cash
                 # self.order_opened_pnl = float(self.pnl)
                 self.order_opened = True
                 self.order_closed = False
@@ -671,11 +672,12 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
             size = min(max(self.min_coin_trade, amount * self.asset.balance.size), self.asset.balance.size)
             if size != 0:
-                self.asset.sell(size, self.price)
+                self.asset.orders.sell(size, self.price)
                 self.order_opened = False
                 self.order_closed = True
-                action_commission = self.asset.balance.book[-1].order_commission
-
+                action_commission = self.asset.orders.book[-1].order_commission
+                order_cash = self.asset.orders.book[-1].order_cash
+                self.reward_step = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
 
         if self.verbose == 2:
             if self.timecount % self.log_interval == 0:
@@ -694,7 +696,7 @@ class BinanceEnvCash(BinanceEnvBase):
                     f"{(old_target_balance + (old_coin_balance * self.price)):.1f} {self.asset.symbol}")
                 msg = (f"{ohlcv}\n{msg}"
                        f"\tAction num: {action}\t{old_balance} "
-                       f"\tACTION => {actions_reversed_dict[action]}: size:{size:.4f}({amount:.3f}) "
+                       f"\tACTION => {actions_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f}) "
                        f"{self.action_symbol}, commission: {action_commission:.2f}"
                        f"\t{self.current_balance}\tprofit {self.reward_step:.2f}\tPNL {self.pnl:.5f}")
                 logger.info(msg)
@@ -715,39 +717,37 @@ class BinanceEnvCash(BinanceEnvBase):
 
         observation = self._get_obs()
 
-        self.total_reward = self.total_assets - self.initial_total_assets
-
         truncated = bool(self.invalid_action_counter >= self.invalid_actions)
         terminated = bool(self.pnl < self.pnl_stop)
 
-        if self.order_closed:
-            self.reward_step = self.asset.balance.book[-1].order_cash - (
-                        self.asset.balance.book[-1].size * self.asset.balance.price)
-            self.reward_step = new_logarithmic_scaler(self.reward_step)
-            # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-            self.order_closed = False
-
+        # don't move. must be before increasing timecount
+        self.total_reward = self.total_assets - self.initial_total_assets
         self.timecount += 1
 
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
-            self.timecount -= 1
-            if not self.order_closed and self.order_opened:
-                self.reward_step = (self.asset.balance.size * self.price) - (
-                        self.asset.balance.size * self.asset.balance.price)
-                self.reward_step = new_logarithmic_scaler(self.reward_step)
-                # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+            # self.reward_step += (self.asset.balance.size * self.price) - (
+            #         self.asset.balance.size * self.asset.balance.price)
+            # self.reward_step = new_logarithmic_scaler(self.reward_step)
+            # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
             # self.reward_step += self.gamma_return
-
-        elif terminated or truncated:
+        if terminated or truncated:
             self.timecount -= 1
-            if not self.order_closed and self.order_opened:
-                self.reward_step = (self.asset.balance.size * self.price) - (
-                        self.asset.balance.size * self.asset.balance.price)
-                self.reward_step = new_logarithmic_scaler(self.reward_step)
-                # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+            # self.buy_and_hold_pnl = (self.buy_and_hold_start_size * self.price) / self.initial_total_assets - 1
+            # self.reward_step += self.pnl - self.buy_and_hold_pnl
+            # if not self.order_closed and self.order_opened:
+            # self.asset.orders.sell(self.asset.balance.size, self.price)
+            # self.reward_step += (self.asset.orders.book[-1].order_cash - (
+            #         self.asset.orders.book[-1].size * self.asset.balance.price))
+            # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
             # self.reward_step += self.gamma_return
-
         self.episode_reward += self.reward_step
+        self.reward_step = new_logarithmic_scaler(self.reward_step)
 
         return observation, self.reward_step, terminated, truncated, info
+
+    def reset(self, **kwargs):
+        observation, info = super().reset(**kwargs)
+        self.buy_and_hold_pnl = 0.
+        self.buy_and_hold_start_size += self.asset.balance.size + (self.initial_cash / self.price) * (1 - self.asset.orders.commission)
+        return observation, info
