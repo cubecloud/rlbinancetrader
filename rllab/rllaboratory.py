@@ -65,7 +65,8 @@ class LabBase:
                  checkpoint_num: int = 20,
                  eval_freq: int = 50_000,
                  n_eval_episodes: int = 10,
-                 verbose: int = 1
+                 deterministic=True,
+                 verbose: int = 1,
                  ):
         """
         Get all arguments to instantiate all classes and object inside the Lab
@@ -82,6 +83,7 @@ class LabBase:
             checkpoint_num (int):           n of checkpoints to save
             eval_freq (int):                frequency of evaluation
             n_eval_episodes (int):          n of episodes to evaluate
+            deterministic (bool):           deterministic or stochastic
         """
 
         self.policy_n_env_default: dict = {PPO: 3, A2C: 3, DQN: 3, TD3: 3, DDPG: 3, SAC: 2}
@@ -90,6 +92,7 @@ class LabBase:
         self.n_eval_episodes = n_eval_episodes
         self.experiment_path = experiment_path
         self.total_timesteps = total_timesteps
+        self.deterministic = deterministic
         self.env_cls = env_cls
         self.env_kwargs = env_kwargs
         self.base_cfg = LABConfig()
@@ -208,7 +211,7 @@ class LabBase:
         # filename = agent_cfg.FILENAME
         agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
         result = evaluate_policy(agent_obj, self.eval_vecenv_lst[ix], n_eval_episodes=self.n_eval_episodes,
-                                 return_episode_rewards=True)
+                                 deterministic=self.deterministic, return_episode_rewards=True)
         result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1]})
         result = result.astype({"reward": float, "ep_length": int})
         msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '

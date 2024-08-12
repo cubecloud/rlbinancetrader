@@ -58,11 +58,11 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.08,
-                                 maximum_train_size=0.42,
+                                 minimum_train_size=0.09,
+                                 maximum_train_size=0.18,
                                  minimum_test_size=0.8,
                                  maximum_test_size=0.99,
-                                 test_size=0.1,
+                                 test_size=0.12,
                                  verbose=0,
                                  )
 
@@ -100,18 +100,18 @@ if __name__ == '__main__':
     env_box1_1_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                              pnl_stop=-0.9,
                              # max_lot_size=0.5,
-                             verbose=2,
+                             verbose=1,
                              log_interval=1,
                              seed=42,
                              observation_type='assets_close_indicators_action_masks',
-                             # observation_type='indicators_assets',
+                             stable_cache_data_n=45,
                              reuse_data_prob=0.99,
                              eval_reuse_prob=0.99,
-                             max_hold_timeframes='7d',
+                             max_hold_timeframes='30d',
                              total_timesteps=8_000_000,
                              gamma=0.99,
-                             invalid_actions=5000,
-                             penalty_value=1e-5,
+                             invalid_actions=2000,
+                             penalty_value=5e-5,
                              action_type='box1_1',
                              )
 
@@ -201,11 +201,14 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
+    sac_policy_kwargs = dict(net_arch=[256, 256, 256])
     sac_kwargs = dict(policy="MlpPolicy",
                       buffer_size=500_000,
+                      learning_starts=100_000,
+                      policy_kwargs=sac_policy_kwargs,
                       batch_size=256,
-                      learning_starts=50_000,
                       stats_window_size=100,
+                      learning_rate=0.0002,
                       action_noise=action_noise_box1_1,
                       train_freq=(10, 'step'),
                       device="auto",
@@ -231,8 +234,8 @@ if __name__ == '__main__':
     rllab = LabBase(
         env_cls=[BinanceEnvCash],
         env_kwargs=[env_box1_1_kwargs],
-        agents_cls=[TD3],
-        agents_kwargs=[td3_kwargs],
+        agents_cls=[SAC],
+        agents_kwargs=[sac_kwargs],
         agents_n_env=[3],
         env_wrapper='dummy',
         total_timesteps=8_000_000,
@@ -240,6 +243,7 @@ if __name__ == '__main__':
         n_eval_episodes=20,
         eval_freq=100_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
+        deterministic=True,
         verbose=1
     )
 

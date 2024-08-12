@@ -27,10 +27,11 @@ version = 0.009
 #     return Balance(_asset_size, _asset_cost, _asset_price)
 
 class TargetCash:
-    def __init__(self, symbol: str, initial_cash: float):
+    def __init__(self, symbol: str = 'USDT', initial_cash: float = 100_000, minimum_trade: float = 5.):
         self.symbol = symbol
         self.initial_cash = initial_cash
         self.cash = initial_cash
+        self.minimum_trade = minimum_trade
 
     def reset(self):
         self.cash = self.initial_cash
@@ -53,17 +54,18 @@ class Balance:
 class Asset:
     def __init__(self,
                  target_obj: TargetCash,
-                 asset_commission: float,
-                 asset_minimum_trade: float,
+                 commission: float,
+                 minimum_trade: float,
                  symbol='BTC',
                  initial_balance: tuple = (0., 0., 0.)):
         self.symbol = symbol
         self.target = target_obj
         self.initial_balance = Bal(*initial_balance)
         self.balance = Balance(initial_balance=initial_balance)
+        self.minimum_trade = minimum_trade
         self.orders = OrdersBook(symbol=self.symbol,
-                                 asset_commission=asset_commission,
-                                 asset_minimum_trade=asset_minimum_trade,
+                                 commission=commission,
+                                 minimum_trade=minimum_trade,
                                  target_obj=self.target,
                                  balance_obj=self.balance)
 
@@ -77,12 +79,12 @@ class Asset:
 
 
 class OrdersBook:
-    def __init__(self, symbol, asset_commission, asset_minimum_trade,
+    def __init__(self, symbol, commission, minimum_trade,
                  target_obj: TargetCash, balance_obj: Balance):
         self.target = target_obj
         self.symbol = symbol
-        self.commission = asset_commission
-        self.minimum_trade = asset_minimum_trade
+        self.commission = commission
+        self.minimum_trade = minimum_trade
         self.book: List[Order,] = []
         self.balance = balance_obj
         self.last_index = 0
