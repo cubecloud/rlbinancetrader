@@ -94,6 +94,7 @@ if __name__ == '__main__':
                           stable_cache_data_n=100,
                           reuse_data_prob=0.991,
                           eval_reuse_prob=0.999,
+                          lookback_window='2h',
                           max_hold_timeframes='30d',
                           total_timesteps=24_000_000,
                           gamma=0.9999,

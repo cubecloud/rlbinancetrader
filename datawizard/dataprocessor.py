@@ -137,9 +137,9 @@ class IndicatorProcessor(ProcessorBase):
                                                   )
         self.initialized_full_period = False
 
-    def get_ohlcv_and_indicators_sample(self, index_type='target_time'):
+    def get_ohlcv_and_indicators_sample(self, timedelta='1d', index_type='target_time'):
         start_datetime = self.start_datetime
-        _timedelta_kwargs = get_timedelta_kwargs('1d', current_timeframe=self.timeframe)
+        _timedelta_kwargs = get_timedelta_kwargs(timedelta, current_timeframe=self.timeframe)
         end_datetime = start_datetime + relativedelta(**_timedelta_kwargs)
         _ohlcv_df, _indicators_df = self.get_ohlcv_and_indicators(start_datetime, end_datetime, index_type)
         return _ohlcv_df, _indicators_df

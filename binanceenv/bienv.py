@@ -6,7 +6,7 @@ import gymnasium
 import numpy as np
 import numba
 from numba import jit
-# from typing import Union
+from typing import Union
 
 # from gymnasium.spaces import Discrete
 # from gymnasium.spaces import Box
@@ -18,6 +18,7 @@ from binanceenv.cache import cache_manager_obj
 from binanceenv.cache import eval_cache_manager_obj
 
 from dbbinance.fetcher.datautils import get_timeframe_bins
+from dbbinance.fetcher.datautils import get_nearest_timeframe
 from dbbinance.fetcher.cachemanager import mlp_mutex
 
 from datawizard.dataprocessor import IndicatorProcessor
@@ -70,23 +71,25 @@ class BinanceEnvBase(gymnasium.Env):
                  coin_balance: float = 0.,
                  pnl_stop: float = -0.5,
                  verbose: int = 0,
-                 log_interval=500,
-                 observation_type='indicators',
-                 action_type='discrete',
-                 use_period='train',
-                 stable_cache_data_n=30,
-                 reuse_data_prob=0.99,
-                 eval_reuse_prob=0.99,
-                 seed=41,
-                 max_lot_size=0.25,
+                 log_interval: int = 500,
+                 observation_type: str = 'indicators',
+                 action_type: str = 'discrete',
+                 use_period: str = 'train',
+                 stable_cache_data_n: int =30,
+                 reuse_data_prob: float = 0.99,
+                 eval_reuse_prob: float = 0.99,
+                 seed: int = 41,
+                 lookback_window: Union[str, int, None] = None,
+                 # TODO inplement max lot size
+                 max_lot_size: float = 0.25,
                  max_hold_timeframes='72h',
-                 penalty_value=10,
-                 invalid_actions=60,
+                 penalty_value: float = 1e-5,
+                 invalid_actions: int = 60,
                  total_timesteps: int = 3_000_000,
-                 eps_start=0.95,
-                 eps_end=0.01,
-                 eps_decay=0.2,
-                 gamma=0.99,
+                 eps_start: float = 0.99,
+                 eps_end: float = 0.01,
+                 eps_decay: float = 0.2,
+                 gamma: float = 0.99,
                  cache_obj: Union[CacheManager, None] = None,
                  render_mode=None):
 
@@ -97,8 +100,16 @@ class BinanceEnvBase(gymnasium.Env):
         self.max_timesteps = self.data_processor_obj.max_timesteps
         self.max_lot_size = max_lot_size
 
+        if lookback_window is None:
+            self.lookback_timeframes: int = 0
+        elif isinstance(lookback_window, int):
+            self.lookback_timeframes = lookback_window
+        elif isinstance(lookback_window, str):
+            self.lookback_timeframes = int(
+                get_timeframe_bins(lookback_window) // get_timeframe_bins(self.data_processor_obj.timeframe))
+
         self.max_hold_timeframes = int(
-            get_timeframe_bins(max_hold_timeframes) / get_timeframe_bins(self.data_processor_obj.timeframe))
+            get_timeframe_bins(max_hold_timeframes) // get_timeframe_bins(self.data_processor_obj.timeframe))
         self.invalid_actions = invalid_actions
         self.penalty_value = penalty_value
         self.stable_cache_data_n = stable_cache_data_n
@@ -129,9 +140,10 @@ class BinanceEnvBase(gymnasium.Env):
                            initial_balance=(0., 0., 0.))
 
         self.verbose = verbose
-
-        self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_ohlcv_and_indicators_sample(
-            index_type='target_time')
+        timedelta = get_nearest_timeframe(
+            self.lookback_timeframes * get_timeframe_bins(self.data_processor_obj.timeframe) + get_timeframe_bins('2d'))
+        self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_ohlcv_and_indicators_sample(timedelta=timedelta,
+                                                                                                    index_type='target_time')
 
         self.__get_obs_func = None
         self._take_action_func = None
