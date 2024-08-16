@@ -27,7 +27,7 @@ version = 0.009
 #     return Balance(_asset_size, _asset_cost, _asset_price)
 
 class TargetCash:
-    def __init__(self, symbol: str = 'USDT', initial_cash: float = 100_000, minimum_trade: float = 5.):
+    def __init__(self, symbol: str = 'USDT', initial_cash: float = 100_000., minimum_trade: float = 5.):
         self.symbol = symbol
         self.initial_cash = initial_cash
         self.cash = initial_cash
@@ -41,11 +41,11 @@ class Balance:
     def __init__(self, initial_balance: tuple = (0., 0., 0.)):
         self.__initial_balance = initial_balance
         self.size, self.cost, self.price = self.__initial_balance
-        self.arr = np.asarray(list(self.__initial_balance), dtype=np.float32)
+        self.arr = np.array(list(self.__initial_balance), dtype=np.float32)
 
     def reset(self):
         self.size, self.cost, self.price = self.__initial_balance
-        self.arr = np.asarray(list(self.__initial_balance), dtype=np.float32)
+        self.arr = np.array(list(self.__initial_balance), dtype=np.float32)
 
     def __str__(self):
         return f'size={self.size}, cost={self.cost}, price={self.price}'
@@ -130,7 +130,7 @@ class OrdersBook:
                     self.balance.cost = self.balance.size * self.balance.price
                 last_index = ix
             self.last_index = last_index + 1
-            self.balance.arr = np.asarray([self.balance.size, self.balance.cost, self.balance.price], dtype=np.float32)
+            self.balance.arr = np.array([self.balance.size, self.balance.cost, self.balance.price], dtype=np.float32)
 
     def show(self):
         print(self.book)
@@ -141,8 +141,8 @@ class OrdersBook:
 
 
 if __name__ == '__main__':
-    _target_obj = TargetCash(symbol='USDT', initial_cash=100_000)
-    asset = Asset(symbol='BTC', asset_commission=.002, asset_minimum_trade=0.00001, target_obj=_target_obj)
+    _target_obj = TargetCash(symbol='USDT', initial_cash=100_000.)
+    asset = Asset(symbol='BTC', commission=.002, minimum_trade=0.00001, target_obj=_target_obj)
 
     asset.orders.buy(1., 30000)
     print('Balance:', asset.balance)

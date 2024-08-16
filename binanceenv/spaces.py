@@ -141,9 +141,11 @@ class BoxActionSpace:
 
     def convert2action(self, action, masked_actions=None):
         if masked_actions is None:
-            return np.argmax(action)
+            act = np.argmax(action)
         else:
-            return np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
+            act = np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
+        amount = action[act]
+        return act, amount
 
     @property
     def action_space(self):
@@ -187,13 +189,46 @@ class ActionsBins:
 
     def bins_2actions(self, value) -> Tuple[int, float]:
         amount = 0
+        ix = 1
         for ix in range(len(self.pairs)):
             if np.min(self.pairs[ix]) <= value <= np.max(self.pairs[ix]):
                 amount = abs(value - np.max(self.pairs[ix])) / self.step if value < 0 and (
                         np.min(self.pairs[ix]) < 0 and np.max(self.pairs[ix]) < 0) else abs(value - np.min(
                     self.pairs[ix])) / self.step
                 break
-        return ix, amount
+        if ix == 0:
+            act = actions_dict['Sell']
+        elif ix == 2:
+            act = actions_dict['Buy']
+        else:
+            act = actions_dict['Hold']
+        return act, amount
+
+
+class TwoActionsSpace:
+    def __init__(self, low=-1., high=1.):
+        self.__action_space = Box(low=low, high=high, shape=(1,), dtype=np.float32)
+        self.name = 'two_actions'
+
+    def convert2action(self, action: np.ndarray, masked_actions=None):
+        amount = abs(action[0])
+        if action[0] < 0:
+            act = actions_dict['Sell']
+        else:
+            act = actions_dict['Buy']
+        if masked_actions is not None:
+            if not masked_actions[act]:
+                amount = 0.
+                act = actions_dict['Hold']
+        return act, amount
+
+    @property
+    def action_space(self):
+        return self.__action_space
+
+    @action_space.setter
+    def action_space(self, value):
+        self.__action_space = value
 
 
 class BinBoxActionSpace:

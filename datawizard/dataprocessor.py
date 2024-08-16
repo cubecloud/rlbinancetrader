@@ -47,7 +47,7 @@ class ProcessorBase:
         self.train_timeframes_num = int(len(all_period_timeframes) * (1 - test_size))
         self.test_timeframes_num = len(all_period_timeframes) - self.train_timeframes_num
 
-        msg = (f"TRAIN pool timeframes: {self.train_timeframes_num}, "
+        msg = (f"FULL pool timeframes: {self.train_timeframes_num}, "
                f"Pool period: {all_period_timeframes[0]} - {all_period_timeframes[self.train_timeframes_num]}")
         logger.info(msg)
         assert self.train_timeframes_num >= 50, f'Error: train_timeframes_num is to LOW {self.train_timeframes_num}'
