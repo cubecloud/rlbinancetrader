@@ -16,6 +16,7 @@ from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 # from torch.nn import Tanh, Softmax, LeakyReLU, ReLU
 from binanceenv.bienv import BinanceEnvBase
 from binanceenv.bienv import BinanceEnvCash
+from customnn.mlpextractor import MlpExtractorNN
 from rllab.rllaboratory import LabBase
 from multiprocessing import freeze_support
 import torch
@@ -90,17 +91,19 @@ if __name__ == '__main__':
                           seed=42,
                           target_balance=100_000.,
                           target_minimum_trade=100.,
-                          observation_type='assets_close_indicators',
+                          observation_type='lookback_assets_close_indicators',
                           stable_cache_data_n=100,
-                          reuse_data_prob=0.991,
+                          reuse_data_prob=0.99,
                           eval_reuse_prob=0.999,
                           lookback_window='2h',
                           max_hold_timeframes='30d',
                           total_timesteps=24_000_000,
-                          gamma=0.9999,
+                          gamma=0.999995,
                           invalid_actions=15_000,
-                          penalty_value=1e-5,
+                          penalty_value=1e-6,
                           action_type='box',
+                          # index_type='target_time',
+                          index_type='prediction_time',
                           )
 
     env_box1_1_3_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
@@ -112,12 +115,12 @@ if __name__ == '__main__':
                                target_balance=100_000.,
                                target_minimum_trade=100.,
                                observation_type='assets_close_indicators',
-                               stable_cache_data_n=100,
+                               stable_cache_data_n=50,
                                reuse_data_prob=0.995,
                                eval_reuse_prob=0.999,
                                max_hold_timeframes='30d',
                                total_timesteps=6_000_000,
-                               gamma=0.9999,
+                               gamma=0.99999,
                                invalid_actions=15_000,
                                penalty_value=1e-5,
                                action_type='box1_1_3',
@@ -190,7 +193,7 @@ if __name__ == '__main__':
                       verbose=1)
 
     action_noise_box1_1 = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=1e-1 * np.ones(3), dt=1e-2)
-    action_noise_box = OrnsteinUhlenbeckActionNoise(mean=5e-1 * np.ones(3), sigma=4e-1 * np.ones(3), dt=1e-2)
+    action_noise_box = OrnsteinUhlenbeckActionNoise(mean=5e-1 * np.ones(3), sigma=4.99e-1 * np.ones(3), dt=1e-2)
     normal_action_noise_box1_1 = NormalActionNoise(mean=np.zeros(3), sigma=1e-1 * np.ones(3))
     action_noise_binbox = OrnsteinUhlenbeckActionNoise(mean=np.zeros(1), sigma=1e-1 * np.ones(1), dt=1e-2)
 
@@ -234,27 +237,30 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    net_arch = dict(pi=[128, 64, 32],
-                    qf=[400, 300, 200]
-                    )
-    sac_policy_kwargs = dict(activation_fn=torch.nn.ReLU,
+    net_arch = [300, 200]
+    sac_policy_kwargs = dict(activation_fn=torch.nn.LeakyReLU,
                              net_arch=net_arch)
+    # sac_policy_kwargs = dict(
+    #     features_extractor_class=MlpExtractorNN,
+    #     features_extractor_kwargs=dict(features_dim=32),
+    # )
     sac_kwargs = dict(policy="MlpPolicy",
                       buffer_size=3_000_000,
-                      learning_starts=1_600_001,
+                      learning_starts=100_000,
                       policy_kwargs=sac_policy_kwargs,
-                      batch_size=512,
+                      batch_size=2048,
                       stats_window_size=100,
+                      ent_coef=0.1,
                       learning_rate=0.0003,
                       action_noise=action_noise_box,
-                      train_freq=(1200, 'step'),
-                      gradient_steps=1024,
+                      train_freq=(10, 'step'),
                       device="auto",
                       verbose=1)
 
     # rllab = LabBase(
     #     env_cls=[BinanceEnvBase, BinanceEnvBase, BinanceEnvBase],
     #     env_kwargs=[env_box1_1_kwargs, env_box1_1_kwargs, env_discrete_kwargs],
+    #     agents_cls=[PPO, DDPG, DQN],
     #     agents_cls=[PPO, DDPG, DQN],
     #     agents_kwargs=[ppo_kwargs, ddpg_kwargs, dqn_kwargs],
     #     agents_n_env=[1, 1, 1],
@@ -281,6 +287,7 @@ if __name__ == '__main__':
         n_eval_episodes=50,
         eval_freq=25_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
+        # TODO change to False to check
         deterministic=True,
         verbose=1
     )

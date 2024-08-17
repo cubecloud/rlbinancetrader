@@ -26,7 +26,7 @@ from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckA
 
 from rllab.configtools import ConfigMethods
 
-__version__ = 0.027
+__version__ = 0.029
 
 TZ = timezone('Europe/Moscow')
 
@@ -115,6 +115,7 @@ class LabBase:
         assert len(self.agents_classes_lst) == len(agents_kwargs), \
             "Error: list of agents kwargs is not equal agents list"
 
+        env_kwargs.update({'deterministic': self.deterministic})
         if not isinstance(env_kwargs, list):
             self.env_kwargs_lst = list([env_kwargs, ])
         else:

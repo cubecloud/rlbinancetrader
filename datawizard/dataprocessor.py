@@ -19,7 +19,6 @@ logger = logging.getLogger()
 
 
 class ProcessorBase:
-    max_timesteps = 365 * Constants.binsizes['1d']
 
     def __init__(self, start_datetime, end_datetime, timeframe, discretization,
                  symbol_pair='BTCUSDT', market='spot',
@@ -38,7 +37,6 @@ class ProcessorBase:
         self.verbose = verbose
         self.fetcher = get_datafetcher()
 
-        self.max_timesteps = self.max_timesteps // Constants.binsizes[self.timeframe]
         """ get all data from start_datetime until end_datetime to fill datafetcher with RAW data cache """
         self.ohlcv_df = self.get_ohlcv_df(self.start_datetime, self.end_datetime, self.symbol_pair, self.market)
         all_period_timeframes = pd.date_range(start=self.start_datetime, end=self.end_datetime,

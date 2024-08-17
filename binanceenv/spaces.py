@@ -62,6 +62,26 @@ class AssetsCloseIndicatorsSpace:
         self.__observation_space = value
 
 
+class LookbackAssetsCloseIndicatorsSpace:
+    def __init__(self, ind_num, assets_data, lookback):
+        # low = np.zeros((assets_num + ind_num,))
+        # high = np.ones((assets_num + ind_num,))
+        # low[:assets_num] = 0.0
+        # high[:assets_num] = 1.0
+        self.__observation_space = Box(low=0.0, high=1.0, shape=((ind_num + assets_data + 1) * lookback, ),
+                                       dtype=np.float32,
+                                       seed=42)
+        self.name = 'lookback_assets_close_indicators'
+
+    @property
+    def observation_space(self):
+        return self.__observation_space
+
+    @observation_space.setter
+    def observation_space(self, value):
+        self.__observation_space = value
+
+
 class IndicatorsAndPNLSpace:
     def __init__(self, ind_num, pnl_num):
         low = np.zeros((pnl_num + ind_num,))
