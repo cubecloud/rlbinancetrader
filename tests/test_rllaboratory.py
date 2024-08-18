@@ -61,9 +61,9 @@ if __name__ == '__main__':
                                  symbol_pair='BTCUSDT',
                                  market='spot',
                                  minimum_train_size=0.037,
-                                 maximum_train_size=0.045,
+                                 maximum_train_size=0.1,
                                  minimum_test_size=0.35,
-                                 maximum_test_size=0.47,
+                                 maximum_test_size=0.5,
                                  test_size=0.12,
                                  verbose=0,
                                  )
@@ -93,12 +93,12 @@ if __name__ == '__main__':
                           target_minimum_trade=100.,
                           observation_type='lookback_assets_close_indicators',
                           stable_cache_data_n=100,
-                          reuse_data_prob=0.99,
+                          reuse_data_prob=0.98,
                           eval_reuse_prob=0.999,
                           lookback_window='2h',
                           max_hold_timeframes='30d',
-                          total_timesteps=24_000_000,
-                          gamma=0.999995,
+                          total_timesteps=8_000_000,
+                          gamma=0.9995,
                           invalid_actions=15_000,
                           penalty_value=1e-6,
                           action_type='box',
@@ -237,21 +237,25 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    net_arch = [300, 200]
-    sac_policy_kwargs = dict(activation_fn=torch.nn.LeakyReLU,
-                             net_arch=net_arch)
+    # net_arch = [300, 200]
+    # net_arch = [dict(qf=[256, 128], pi=[256, 16])]
+    # sac_policy_kwargs = dict(activation_fn=torch.nn.ReLU,
+    #                          net_arch=net_arch)
+
     # sac_policy_kwargs = dict(
     #     features_extractor_class=MlpExtractorNN,
-    #     features_extractor_kwargs=dict(features_dim=32),
+    #     features_extractor_kwargs=dict(features_dim=256),
+    #     share_features_extractor=True,
+    #     # net_arch=net_arch,
     # )
     sac_kwargs = dict(policy="MlpPolicy",
                       buffer_size=3_000_000,
-                      learning_starts=100_000,
-                      policy_kwargs=sac_policy_kwargs,
+                      learning_starts=1_000_000,
+                      # policy_kwargs=sac_policy_kwargs,
                       batch_size=2048,
                       stats_window_size=100,
-                      ent_coef=0.1,
-                      learning_rate=0.0003,
+                      ent_coef=0.001,
+                      learning_rate=0.0002,
                       action_noise=action_noise_box,
                       train_freq=(10, 'step'),
                       device="auto",
@@ -282,14 +286,13 @@ if __name__ == '__main__':
         agents_kwargs=[sac_kwargs],
         agents_n_env=[4],
         env_wrapper='dummy',
-        total_timesteps=24_000_000,
-        checkpoint_num=240,
+        total_timesteps=8_000_000,
+        checkpoint_num=80,
         n_eval_episodes=50,
         eval_freq=25_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
-        # TODO change to False to check
-        deterministic=True,
-        verbose=1
+        deterministic=False,
+        verbose=0
     )
 
     # rllab = LabBase(

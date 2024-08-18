@@ -1,3 +1,4 @@
+import random
 import numpy as np
 import numba
 from numba import jit
@@ -68,7 +69,7 @@ class LookbackAssetsCloseIndicatorsSpace:
         # high = np.ones((assets_num + ind_num,))
         # low[:assets_num] = 0.0
         # high[:assets_num] = 1.0
-        self.__observation_space = Box(low=0.0, high=1.0, shape=((ind_num + assets_data + 1) * lookback, ),
+        self.__observation_space = Box(low=0.0, high=1.0, shape=((ind_num + assets_data + 1) * lookback,),
                                        dtype=np.float32,
                                        seed=42)
         self.name = 'lookback_assets_close_indicators'
@@ -156,16 +157,18 @@ class SellBuyHoldAmount:
 
 class BoxActionSpace:
     def __init__(self, n_action):
+        self.n_action = n_action
         self.__action_space = Box(low=0, high=1, shape=(n_action,), dtype=np.float32)
         self.name = 'box'
 
-    def convert2action(self, action, masked_actions=None):
+    def convert2action(self, action, masked_actions=None) -> Tuple[float, float]:
         if masked_actions is None:
             act = np.argmax(action)
         else:
             act = np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
         amount = action[act]
         return act, amount
+
 
     @property
     def action_space(self):

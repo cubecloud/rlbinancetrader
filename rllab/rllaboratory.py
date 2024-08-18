@@ -115,16 +115,21 @@ class LabBase:
         assert len(self.agents_classes_lst) == len(agents_kwargs), \
             "Error: list of agents kwargs is not equal agents list"
 
-        env_kwargs.update({'deterministic': self.deterministic})
         if not isinstance(env_kwargs, list):
+            env_kwargs.update({'deterministic': self.deterministic})
             self.env_kwargs_lst = list([env_kwargs, ])
         else:
             self.env_kwargs_lst = env_kwargs
+            for kwargs in self.env_kwargs_lst:
+                kwargs.update({'deterministic': self.deterministic})
 
         if not isinstance(agents_kwargs, list):
+            agents_kwargs.update({'tensorboard_log': os.path.join(self.base_cfg.EXPERIMENT_PATH, 'TB')})
             self.agents_kwargs_lst = list([agents_kwargs, ])
         else:
             self.agents_kwargs_lst = agents_kwargs
+            for kwargs in self.agents_kwargs_lst:
+                kwargs.update({'tensorboard_log': os.path.join(self.base_cfg.EXPERIMENT_PATH, 'TB')})
 
         if agents_n_env is None:
             self.agents_n_env = []
@@ -150,6 +155,7 @@ class LabBase:
 
     def create_exp_dirs(self, cfg: LABConfig):
         dirs = dict()
+        dirs['tb'] = os.path.join(cfg.EXPERIMENT_PATH, 'TB')
         dirs['exp'] = os.path.join(cfg.EXPERIMENT_PATH,
                                    cfg.ENV_NAME,
                                    cfg.ALGO,
@@ -158,6 +164,7 @@ class LabBase:
         dirs['training'] = os.path.join(dirs['exp'], 'training')
         dirs['evaluation'] = os.path.join(dirs['exp'], 'evaluation')
         dirs['best'] = os.path.join(dirs['exp'], 'best')
+        os.makedirs(dirs['tb'], exist_ok=True)
         os.makedirs(dirs['training'], exist_ok=True)
         os.makedirs(dirs['evaluation'], exist_ok=True)
 
@@ -184,13 +191,13 @@ class LabBase:
                                      n_eval_episodes=self.n_eval_episodes,
                                      log_path=agent_cfg.DIRS["evaluation"],
                                      eval_freq=self.eval_freq,
-                                     deterministic=True
+                                     deterministic=self.deterministic
                                      )
         # Create the callback list
         callbacks = CallbackList([checkpoint_callback, eval_callback])
 
         agent_obj.learn(total_timesteps=self.total_timesteps, callback=callbacks, log_interval=10000,
-                        progress_bar=False)
+                        progress_bar=False, tb_log_name=f'{agent_cfg.EXP_ID}')
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
     def backtesting(self, ix):
@@ -206,17 +213,29 @@ class LabBase:
             if dones.any():
                 break
 
-    def evaluate_agent(self, ix):
+    def evaluate_agent(self, ix, verbose=1):
         agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
 
+        """ Create independent evaluation env """
+        eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
+        eval_env_kwargs.update({'use_period': 'test', 'verbose': verbose})
+        eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
+                                   n_envs=1,
+                                   seed=42,
+                                   env_kwargs=eval_env_kwargs,
+                                   vec_env_cls=DummyVecEnv)
+
+        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
+
         # filename = agent_cfg.FILENAME
-        agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
-        result = evaluate_policy(agent_obj, self.eval_vecenv_lst[ix], n_eval_episodes=self.n_eval_episodes,
+        agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
+        result = evaluate_policy(agent_obj, eval_vec_env, n_eval_episodes=self.n_eval_episodes,
                                  deterministic=self.deterministic, return_episode_rewards=True)
+
         result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1]})
         result = result.astype({"reward": float, "ep_length": int})
         msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
-               f'Evaluation result:\n {result.to_string()}')
+               f'Evaluation result on BEST model:\n {result.to_string()}')
         logger.debug(msg)
         result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
@@ -231,7 +250,10 @@ class LabBase:
         self.base_cfg.ENV_NAME = f'{env.__class__.__name__}'
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        train_env_kwargs.update({'use_period': 'train', 'verbose': 1 if self.agents_n_env[ix] > 1 else self.verbose, })
+        train_env_kwargs.update({'use_period': 'train',
+                                 'verbose': self.verbose,
+                                 }
+                                )
 
         """ Rlock object can't be copied """
         eval_env_kwargs = copy.deepcopy(train_env_kwargs)
@@ -240,11 +262,7 @@ class LabBase:
             train_env_kwargs.update({'cache_obj': cache_manager_obj})
             eval_env_kwargs.update({'cache_obj': eval_cache_manager_obj})
 
-        eval_env_kwargs.update({'use_period': 'test',
-                                'verbose': 1 if self.env_wrapper == 'subproc' or self.agents_n_env[
-                                    ix] > 1 else self.verbose,
-                                }
-                               )
+        eval_env_kwargs.update({'use_period': 'test', 'verbose': self.verbose})
 
         train_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                     n_envs=self.agents_n_env[ix],

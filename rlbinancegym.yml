@@ -41,6 +41,7 @@ dependencies:
   - optuna
   - cmaes
   - plotly
+  - tensorboard
   - pip:
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git

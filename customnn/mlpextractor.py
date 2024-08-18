@@ -14,26 +14,18 @@ class MlpExtractorNN(BaseFeaturesExtractor):
     def __init__(self, observation_space: Box, features_dim: int = 256):
         super().__init__(observation_space, features_dim)
         self.mlp_extractor = nn.Sequential(
-            nn.Linear(observation_space.shape[0], 768),
+            nn.Linear(observation_space.shape[0], 512),
             nn.ReLU(),
-            nn.Linear(768, 128),
+            nn.Linear(512, 64),
             nn.ReLU(),
-            nn.Linear(128, 32),
-            nn.ReLU(),
-            nn.Linear(32, 16),
+            nn.Linear(64, 512),
             nn.ReLU(),
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(16, features_dim),
+            nn.Linear(512, features_dim),
             nn.ReLU())
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         return self.linear(self.mlp_extractor(observations))
 
-# policy_kwargs = dict(
-#     features_extractor_class=CustomCNN,
-#     features_extractor_kwargs=dict(features_dim=128),
-# )
-# model = PPO("CnnPolicy", "BreakoutNoFrameskip-v4", policy_kwargs=policy_kwargs, verbose=1)
-# model.learn(1000)
