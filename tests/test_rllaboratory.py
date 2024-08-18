@@ -18,10 +18,11 @@ from binanceenv.bienv import BinanceEnvBase
 from binanceenv.bienv import BinanceEnvCash
 from customnn.mlpextractor import MlpExtractorNN
 from rllab.rllaboratory import LabBase
+from rllab.labtools import CoSheduller
 from multiprocessing import freeze_support
 import torch
 
-__version__ = 0.045
+__version__ = 0.048
 
 logger = logging.getLogger()
 
@@ -252,10 +253,14 @@ if __name__ == '__main__':
                       buffer_size=3_000_000,
                       learning_starts=1_000_000,
                       # policy_kwargs=sac_policy_kwargs,
-                      batch_size=2048,
+                      batch_size=1536,
                       stats_window_size=100,
-                      ent_coef=0.001,
-                      learning_rate=0.0002,
+                      ent_coef=0.0001,
+                      learning_rate=CoSheduller(warmup=1_000_000,
+                                                learning_rate=2e-4,
+                                                min_learning_rate=1e-5,
+                                                total_epochs=8_000_000,
+                                                epsilon=1000)(),
                       action_noise=action_noise_box,
                       train_freq=(10, 'step'),
                       device="auto",

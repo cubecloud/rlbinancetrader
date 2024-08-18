@@ -26,7 +26,7 @@ from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckA
 
 from rllab.configtools import ConfigMethods
 
-__version__ = 0.029
+__version__ = 0.032
 
 TZ = timezone('Europe/Moscow')
 
@@ -196,8 +196,12 @@ class LabBase:
         # Create the callback list
         callbacks = CallbackList([checkpoint_callback, eval_callback])
 
-        agent_obj.learn(total_timesteps=self.total_timesteps, callback=callbacks, log_interval=10000,
-                        progress_bar=False, tb_log_name=f'{agent_cfg.EXP_ID}')
+        agent_obj.learn(total_timesteps=self.total_timesteps,
+                        callback=callbacks,
+                        log_interval=1000,
+                        progress_bar=False,
+                        tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.EXP_ID}')
+
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
     def backtesting(self, ix):
@@ -229,8 +233,11 @@ class LabBase:
 
         # filename = agent_cfg.FILENAME
         agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
-        result = evaluate_policy(agent_obj, eval_vec_env, n_eval_episodes=self.n_eval_episodes,
-                                 deterministic=self.deterministic, return_episode_rewards=True)
+        result = evaluate_policy(agent_obj,
+                                 eval_vec_env,
+                                 n_eval_episodes=self.n_eval_episodes,
+                                 deterministic=self.deterministic,
+                                 return_episode_rewards=True)
 
         result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1]})
         result = result.astype({"reward": float, "ep_length": int})
@@ -262,7 +269,10 @@ class LabBase:
             train_env_kwargs.update({'cache_obj': cache_manager_obj})
             eval_env_kwargs.update({'cache_obj': eval_cache_manager_obj})
 
-        eval_env_kwargs.update({'use_period': 'test', 'verbose': self.verbose})
+        eval_env_kwargs.update({'use_period': 'test',
+                                'verbose': self.verbose,
+                                'stable_cache_data_n': self.n_eval_episodes
+                                })
 
         train_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                     n_envs=self.agents_n_env[ix],

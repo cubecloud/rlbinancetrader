@@ -181,6 +181,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.actions_lst: list = []
         self.np_random = None
         self.seed = self.get_seed(seed + self.idnum)
+
         self.actions_lst: list = []
         self.min_coin_trade = self.asset.orders.minimum_trade + (
                 self.asset.orders.commission * self.asset.orders.minimum_trade)
@@ -194,6 +195,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.all_actions = np.asarray(list(range(3)))
         self.invalid_action_counter: int = 0
         self.episode_reward: float = 0.
+        self.key_list: list = []
 
     def __del__(self):
         BinanceEnvBase.count -= 1
@@ -579,9 +581,12 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
 
         if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= self.stable_cache_data_n:
-            key = list(self.CM.cache.keys())[0]
+            if not self.key_list:
+                self.key_list = list(self.CM.cache.keys())
+                self.np_random.shuffle(self.key_list)
+            key = self.key_list[0]
             self.ohlcv_df, self.indicators_df = self.CM.cache[key]
-            self.CM.cache.move_to_end(key)
+            self.key_list = self.key_list[1:]
         else:
             self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
                 index_type=self.index_type, period_type=self.use_period)
