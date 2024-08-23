@@ -3,8 +3,10 @@ import sys
 import logging
 
 import pandas as pd
+
 from datetime import timezone
 from dateutil.relativedelta import relativedelta
+from typing import Union
 
 from dbbinance.fetcher.getfetcher import get_datafetcher
 from dbbinance.fetcher.datautils import convert_timeframe_to_freq
@@ -21,7 +23,8 @@ logger = logging.getLogger()
 class ProcessorBase:
 
     def __init__(self, start_datetime, end_datetime, timeframe, discretization,
-                 symbol_pair='BTCUSDT', market='spot',
+                 symbol_pair='BTCUSDT',
+                 market='spot',
                  minimum_train_size: float = 0.05,
                  maximum_train_size: float = 0.4,
                  minimum_test_size: float = 0.15,
@@ -34,31 +37,72 @@ class ProcessorBase:
         self.discretization = discretization
         self.market = market
         self.symbol_pair = symbol_pair
+        self.__initial_minimum_train_size = minimum_train_size
+        self.__initial_minimum_test_size = minimum_test_size
+        self.__initial_maximum_train_size = maximum_train_size
+        self.__initial_maximum_test_size = maximum_test_size
         self.verbose = verbose
         self.fetcher = get_datafetcher()
 
         """ get all data from start_datetime until end_datetime to fill datafetcher with RAW data cache """
         self.ohlcv_df = self.get_ohlcv_df(self.start_datetime, self.end_datetime, self.symbol_pair, self.market)
-        all_period_timeframes = pd.date_range(start=self.start_datetime, end=self.end_datetime,
-                                              freq=convert_timeframe_to_freq(self.timeframe)).to_series().to_list()
+        self.all_period_timeframes = pd.date_range(start=self.start_datetime, end=self.end_datetime,
+                                                   freq=convert_timeframe_to_freq(self.timeframe)).to_series().to_list()
 
-        self.train_timeframes_num = int(len(all_period_timeframes) * (1 - test_size))
-        self.test_timeframes_num = len(all_period_timeframes) - self.train_timeframes_num
+        self.train_timeframes_num = int(len(self.all_period_timeframes) * (1 - test_size))
+        self.test_timeframes_num = len(self.all_period_timeframes) - self.train_timeframes_num
 
         msg = (f"FULL pool timeframes: {self.train_timeframes_num}, "
-               f"Pool period: {all_period_timeframes[0]} - {all_period_timeframes[self.train_timeframes_num]}")
+               f"Pool period: {self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num]}")
         logger.info(msg)
         assert self.train_timeframes_num >= 50, f'Error: train_timeframes_num is to LOW {self.train_timeframes_num}'
         assert self.test_timeframes_num >= 50, f'Error: test_timeframes_num is to LOW {self.test_timeframes_num}'
+        self.minimum_train_timeframes_num: Union[int, None] = None
+        self.maximum_train_timeframes_num: Union[int, None] = None
+        self.minimum_test_timeframes_num: Union[int, None] = None
+        self.maximum_test_timeframes_num: Union[int, None] = None
+        self.train_minute_timeframes_series: Union[pd.DataFrame, None] = None
+        self.test_minute_timeframes_series: Union[pd.DataFrame, None] = None
+
+        self.change_train_test_timeframes_num(minimum_train_size, maximum_train_size, minimum_test_size,
+                                              maximum_test_size)
+
+
+    @property
+    def initial_minimum_train_size(self):
+        return self.__initial_minimum_train_size
+
+    @property
+    def initial_minimum_test_size(self):
+        return self.__initial_minimum_test_size
+
+    @property
+    def initial_maximum_train_size(self):
+        return self.__initial_maximum_train_size
+
+    @property
+    def initial_maximum_test_size(self):
+        return self.__initial_maximum_test_size
+
+    def change_train_test_timeframes_num(self, minimum_train_size: float = 0.05, maximum_train_size: float = 0.4,
+                                         minimum_test_size: float = 0.15, maximum_test_size: float = 0.7, ):
+
+        self.change_train_timeframes_num(minimum_train_size, maximum_train_size)
+        self.change_test_timeframes_num(minimum_test_size, maximum_test_size)
+
+    def change_train_timeframes_num(self, minimum_train_size: float = 0.05, maximum_train_size: float = 0.4, ):
         self.minimum_train_timeframes_num = int(self.train_timeframes_num * minimum_train_size)
         self.maximum_train_timeframes_num = int(self.train_timeframes_num * maximum_train_size)
+
+        self.train_minute_timeframes_series = pd.date_range(start=self.start_datetime,
+                                                            end=self.all_period_timeframes[self.train_timeframes_num],
+                                                            freq=convert_timeframe_to_freq('1m')).to_series()
+
+    def change_test_timeframes_num(self, minimum_test_size: float = 0.15, maximum_test_size: float = 0.7, ):
         self.minimum_test_timeframes_num = int(self.test_timeframes_num * minimum_test_size)
         self.maximum_test_timeframes_num = int(self.test_timeframes_num * maximum_test_size)
 
-        self.train_minute_timeframes_series = pd.date_range(start=self.start_datetime,
-                                                            end=all_period_timeframes[self.train_timeframes_num],
-                                                            freq=convert_timeframe_to_freq('1m')).to_series()
-        self.test_minute_timeframes_series = pd.date_range(start=all_period_timeframes[self.train_timeframes_num],
+        self.test_minute_timeframes_series = pd.date_range(start=self.all_period_timeframes[self.train_timeframes_num],
                                                            end=self.end_datetime,
                                                            freq=convert_timeframe_to_freq('1m')).to_series()
 
@@ -78,7 +122,7 @@ class ProcessorBase:
     def _get_random_start_end(self, minute_timeframes_series):
         return tuple(minute_timeframes_series.sample(n=2))
 
-    def _get_random_start(self, minute_timeframes_series):
+    def _get_random_start(self, minute_timeframes_series: Union[pd.DataFrame, None]):
         return minute_timeframes_series.sample(n=2)[0]
 
     def _get_random_period(self, period_type='train'):

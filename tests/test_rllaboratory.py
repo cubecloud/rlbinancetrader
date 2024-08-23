@@ -22,7 +22,7 @@ from rllab.labtools import CoSheduller
 from multiprocessing import freeze_support
 import torch
 
-__version__ = 0.048
+__version__ = 0.051
 
 logger = logging.getLogger()
 
@@ -51,9 +51,16 @@ if __name__ == '__main__':
     _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
-    _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
-    _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
-    _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
+    _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
+    # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
+    # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
+    #
+    # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
+
+    total_timesteps = 16_000_000
+    buffer_size = 1_000_000
+    learning_start = 750_000
+    batch_size = 1024
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -61,11 +68,11 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.037,
-                                 maximum_train_size=0.1,
+                                 minimum_train_size=0.027,
+                                 maximum_train_size=0.053,
                                  minimum_test_size=0.35,
                                  maximum_test_size=0.5,
-                                 test_size=0.12,
+                                 test_size=0.13,
                                  verbose=0,
                                  )
 
@@ -93,15 +100,20 @@ if __name__ == '__main__':
                           target_balance=100_000.,
                           target_minimum_trade=100.,
                           observation_type='lookback_assets_close_indicators',
-                          stable_cache_data_n=100,
-                          reuse_data_prob=0.98,
-                          eval_reuse_prob=0.999,
+                          # observation_type='indicators_close',
+                          stable_cache_data_n=120,
+                          reuse_data_prob=0.95,
+                          eval_reuse_prob=0.9999,
+                          # lookback_window=None,
                           lookback_window='2h',
                           max_hold_timeframes='30d',
-                          total_timesteps=8_000_000,
+                          total_timesteps=total_timesteps,
+                          eps_start=0.99,
+                          eps_end=0.01,
+                          eps_decay=0.2,
                           gamma=0.9995,
                           invalid_actions=15_000,
-                          penalty_value=1e-6,
+                          penalty_value=1e-5,
                           action_type='box',
                           # index_type='target_time',
                           index_type='prediction_time',
@@ -194,9 +206,11 @@ if __name__ == '__main__':
                       verbose=1)
 
     action_noise_box1_1 = OrnsteinUhlenbeckActionNoise(mean=np.zeros(3), sigma=1e-1 * np.ones(3), dt=1e-2)
-    action_noise_box = OrnsteinUhlenbeckActionNoise(mean=5e-1 * np.ones(3), sigma=4.99e-1 * np.ones(3), dt=1e-2)
     normal_action_noise_box1_1 = NormalActionNoise(mean=np.zeros(3), sigma=1e-1 * np.ones(3))
     action_noise_binbox = OrnsteinUhlenbeckActionNoise(mean=np.zeros(1), sigma=1e-1 * np.ones(1), dt=1e-2)
+
+    action_noise_box = OrnsteinUhlenbeckActionNoise(mean=5e-1 * np.ones(3), sigma=4.99e-1 * np.ones(3), dt=1e-2)
+    normal_action_noise_box = NormalActionNoise(mean=5e-1 * np.ones(3), sigma=4.99e-1 * np.ones(3))
 
     ddpg_kwargs = dict(policy="MlpPolicy",
                        batch_size=128,
@@ -238,31 +252,32 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    # net_arch = [300, 200]
-    # net_arch = [dict(qf=[256, 128], pi=[256, 16])]
+    # net_arch = [256, 128]
+    # net_arch = [dict(qf=[256, 128], pi=[256, 32])]
     # sac_policy_kwargs = dict(activation_fn=torch.nn.ReLU,
     #                          net_arch=net_arch)
-
-    # sac_policy_kwargs = dict(
-    #     features_extractor_class=MlpExtractorNN,
-    #     features_extractor_kwargs=dict(features_dim=256),
-    #     share_features_extractor=True,
-    #     # net_arch=net_arch,
-    # )
+    sac_policy_kwargs = dict(
+        features_extractor_class=MlpExtractorNN,
+        features_extractor_kwargs=dict(features_dim=256),
+        share_features_extractor=True,
+        activation_fn=torch.nn.ReLU,
+        # net_arch=net_arch,
+    )
     sac_kwargs = dict(policy="MlpPolicy",
-                      buffer_size=3_000_000,
-                      learning_starts=1_000_000,
-                      # policy_kwargs=sac_policy_kwargs,
-                      batch_size=1536,
+                      buffer_size=buffer_size,
+                      learning_starts=learning_start,
+                      policy_kwargs=sac_policy_kwargs,
+                      batch_size=batch_size,
                       stats_window_size=100,
-                      ent_coef=0.0001,
-                      learning_rate=CoSheduller(warmup=1_000_000,
+                      ent_coef='auto_0.0001',
+                      learning_rate=CoSheduller(warmup=learning_start,
                                                 learning_rate=2e-4,
                                                 min_learning_rate=1e-5,
-                                                total_epochs=8_000_000,
-                                                epsilon=1000)(),
+                                                total_epochs=total_timesteps,
+                                                epsilon=100)(),
                       action_noise=action_noise_box,
-                      train_freq=(10, 'step'),
+                      train_freq=(2, 'step'),
+                      target_update_interval=10,  # update target network every 10 _gradient_ steps
                       device="auto",
                       verbose=1)
 
@@ -291,9 +306,10 @@ if __name__ == '__main__':
         agents_kwargs=[sac_kwargs],
         agents_n_env=[4],
         env_wrapper='dummy',
-        total_timesteps=8_000_000,
-        checkpoint_num=80,
+        total_timesteps=total_timesteps,
+        checkpoint_num=int(total_timesteps // 100_000),
         n_eval_episodes=50,
+        log_interval=200,
         eval_freq=25_000,
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
         deterministic=False,

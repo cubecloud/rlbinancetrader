@@ -66,7 +66,7 @@ class BinanceEnvBase(gymnasium.Env):
     total_episodes_counter: int = -1
 
     def __init__(self,
-                 data_processor_kwargs: dict,
+                 data_processor_kwargs: Union[dict, None],
                  target_balance: float = 100_000.,
                  target_minimum_trade: float = 5.,
                  coin_balance: float = 0.,
@@ -90,7 +90,7 @@ class BinanceEnvBase(gymnasium.Env):
                  eps_start: float = 0.99,
                  eps_end: float = 0.01,
                  eps_decay: float = 0.2,
-                 gamma: float = 0.99,
+                 gamma: float = 0.9999,
                  cache_obj: Union[CacheManager, None] = None,
                  render_mode=None,
                  index_type: str = 'target_time',
@@ -138,6 +138,11 @@ class BinanceEnvBase(gymnasium.Env):
         self.reward = 0.
         self.target = TargetCash(symbol='USDT', initial_cash=target_balance, minimum_trade=target_minimum_trade)
 
+        self.target = TargetCash(symbol='USDT',
+                                 initial_cash=target_balance,
+                                 minimum_trade=target_minimum_trade,
+                                 use_period=self.use_period)
+
         self.asset = Asset(symbol='BTC',
                            commission=.002,
                            minimum_trade=0.00001,
@@ -159,6 +164,7 @@ class BinanceEnvBase(gymnasium.Env):
             if cache_obj is None:
                 self.CM = cache_manager_obj
             self._take_action_func = self._take_action_train
+
         else:
             # separated CacheManager for eval environment
             if cache_obj is None:
@@ -196,6 +202,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.invalid_action_counter: int = 0
         self.episode_reward: float = 0.
         self.key_list: list = []
+        self.epsilon: float = 1.0
+        self.dones: bool = False
 
     def __del__(self):
         BinanceEnvBase.count -= 1
@@ -244,6 +252,9 @@ class BinanceEnvBase(gymnasium.Env):
         elif observation_type == 'indicators_pnl':
             space_obj = IndicatorsAndPNLSpace(self.indicators_df.shape[1], 1)
             self.__get_obs_func = self._get_pnl_indicators_obs
+        elif observation_type == 'indicators_close':
+            space_obj = IndicatorsSpace(self.indicators_df.shape[1] + 1)
+            self.__get_obs_func = self._get_indicators_close_obs
         elif observation_type == 'indicators':
             space_obj = IndicatorsSpace(self.indicators_df.shape[1])
             self.__get_obs_func = self._get_indicators_obs
@@ -264,16 +275,16 @@ class BinanceEnvBase(gymnasium.Env):
             self.action_space_obj = BinBoxActionSpace(n_action=3, low=-1, high=1)
         elif action_type == 'two_actions':
             self.action_space_obj = TwoActionsSpace(low=-1, high=1)
-        elif action_type == 'sell_buy_hold_amount':
-            self.action_space_obj = SellBuyHoldAmount(actions=3)
+        # elif action_type == 'sell_buy_hold_amount':
+        #     self.action_space_obj = SellBuyHoldAmount(actions=3)
         else:
             sys.exit(f'Error: Unknown action type {action_type}!')
         action_space = self.action_space_obj.action_space
         self.name = f'{self.name}_{self.action_space_obj.name}'
         return action_space
 
-    def calc_eps_treshold(self) -> float:
-        return self.eps_end + (self.eps_start - self.eps_end) * math.exp(
+    def recalc_epsilon(self):
+        self.epsilon = self.eps_end + (self.eps_start - self.eps_end) * math.exp(
             -1. * self.total_timesteps_counter / (self.total_timesteps * self.eps_decay))
 
     @property
@@ -367,6 +378,11 @@ class BinanceEnvBase(gymnasium.Env):
         return np.asarray(np.concatenate([[self.pnl], self.indicators_df.iloc[self.timecount].values]),
                           dtype=np.float32)
 
+    def _get_indicators_close_obs(self) -> np.ndarray:
+        close = new_logarithmic_scaler(self.price)
+        return np.asarray(np.concatenate([self.indicators_df.iloc[self.timecount].values, [close]]),
+                          dtype=np.float32)
+
     def _get_indicators_obs(self) -> np.ndarray:
         return np.asarray(self.indicators_df.iloc[self.timecount].values, dtype=np.float32)
 
@@ -377,7 +393,7 @@ class BinanceEnvBase(gymnasium.Env):
              self.not_max_holding_time(self.max_hold_timeframes)])
 
     def _get_info(self) -> dict:
-        return {"action_masks": self._get_action_masks()}
+        return {"action_masks": self._get_action_masks(), "pnl": self.pnl}
 
     def not_max_holding_time(self, max_hold_timeframes) -> bool:
         check = True
@@ -534,11 +550,15 @@ class BinanceEnvBase(gymnasium.Env):
 
         terminated = bool(self.pnl < self.pnl_stop)
         self.timecount += 1
+
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
+
+        if terminated or truncated:
+            self.timecount -= 1
+            self.dones = True
             if self.use_period == 'train':
                 self.reward_step += self.gamma_return
-            self.timecount -= 1
 
         self.episode_reward += self.reward_step
         self.previous_pnl = self.pnl
@@ -551,7 +571,7 @@ class BinanceEnvBase(gymnasium.Env):
         msg = (f"{self.__class__.__name__} #{self.idnum} {self.use_period}: "
                f"Ep.length(shape): {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.cache):03d}/"
                f"inv_act#: {self.invalid_action_counter:03d}/Ep.reward: {self.episode_reward:.4f}"
-               # f"\tepsilon: {self.eps_threshold:.6f}"
+               # f"\tepsilon: {self.epsilon:.6f}"
                f"\tprofit {self.total_reward:.1f}"
                # f"\teps_reward {self.eps_reward:.5f}"
                f"\tAssets: {self.current_balance}\tPNL "
@@ -579,15 +599,19 @@ class BinanceEnvBase(gymnasium.Env):
         self.actions_lst: list = []
         self.invalid_action_counter = 0
         self.gamma_return = 0.
+        self.recalc_epsilon()  # recalculate epsilon
+        self.dones = False
+        stable_cache = max(5., self.stable_cache_data_n * (
+                    1. - self.epsilon)) if self.use_period == 'train' else self.stable_cache_data_n
 
-        if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= self.stable_cache_data_n:
+        if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
             if not self.key_list:
                 self.key_list = list(self.CM.cache.keys())
                 self.np_random.shuffle(self.key_list)
-            key = self.key_list[0]
-            self.ohlcv_df, self.indicators_df = self.CM.cache[key]
+            self.ohlcv_df, self.indicators_df = self.CM.cache[self.key_list[0]]
             self.key_list = self.key_list[1:]
         else:
+            # self.data_processor_obj.change_train_timeframes_num(self.data_processor_obj.initial_minimum_train_size, self.data_processor_obj.initial_maximum_train_size)
             self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
                 index_type=self.index_type, period_type=self.use_period)
             if self.ohlcv_df.shape[0] != self.indicators_df.shape[0]:
@@ -599,14 +623,22 @@ class BinanceEnvBase(gymnasium.Env):
             cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
             self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
 
+        if self.use_period == 'train':
+            size = self.np_random.random() / 2 * (1 - self.epsilon)
+            cost = self.price * size
+            price = self.price
+        else:
+            size, cost, price = .0, .0, .0
+
+        self.asset.reset((size, cost, price))
+
         self.initial_total_assets = self.initial_cash + (
                 self.asset.initial_balance.size * self.asset.initial_balance.price)
-        # self.coin_orders_values = .0
-        self.asset.reset()
+
         self.order_closed = False
         self.episode_reward: float = .0
         self.gamma_return = .0
-        if self.observation_type == 'lookback_assets_close_indicators':
+        if self.observation_type in ['lookback_assets_close_indicators']:
             self._warmup()
         observation = self._get_obs()
         info = self._get_info()
@@ -630,7 +662,7 @@ class BinanceEnvCash(BinanceEnvBase):
     name = 'BinanceEnvCash'
 
     def __init__(self,
-                 data_processor_kwargs: dict,
+                 data_processor_kwargs: Union[dict, None],
                  target_balance: float = 100_000.,
                  target_minimum_trade: float = 5.,
                  coin_balance: float = 0.,
@@ -676,6 +708,209 @@ class BinanceEnvCash(BinanceEnvBase):
                 1 - self.asset.orders.commission)
         self.previous_price = self.price
         self.size_lst: list = []
+        self.last_sell_order_pnl: float = 0.
+
+    @property
+    def buy_and_hold_pnl(self):
+        return (self.buy_and_hold_start_size * self.price) / self.initial_total_assets - 1
+
+    def _take_action(self, action, amount) -> tuple:
+        old_target_balance = float(self.cash)
+        old_coin_balance = float(self.asset.balance.size)
+        action_commission = .0
+        order_cash: float = 0.
+        # action_symbol = self.target.symbol
+        msg = str()
+        size = 0.
+
+        """buy or sell stock"""
+        if action == 0:  # Buy
+            self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
+            max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
+            min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
+            # size = min(max(min_trade, amount), max_size if min_trade < max_size else 0.)
+            size = min_trade if min_trade < max_size else 0.
+            if size != 0.:
+                self.asset.orders.buy(size, self.price)
+                action_commission = self.asset.orders.book[-1].order_commission
+                order_cash = self.asset.orders.book[-1].order_cash
+
+        elif action == 1:  # Sell
+            self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
+            min_trade = max(self.min_coin_trade, self.target.minimum_trade / self.price)
+            # size = min(max(min_trade, amount),
+            #            self.asset.balance.size if min_trade < self.asset.balance.size else 0.)
+            size = min_trade if min_trade < self.asset.balance.size else 0.
+
+            if size != 0:
+                self.asset.orders.sell(size, self.price)
+                action_commission = self.asset.orders.book[-1].order_commission
+                order_cash = self.asset.orders.book[-1].order_cash
+                self.reward_step = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
+                self.reward_step = (self.reward_step / self.initial_total_assets)
+                # self.last_sell_order_pnl = float(self.pnl)
+
+        if self.verbose == 2:
+            if self.timecount % self.log_interval == 0:
+                ohlcv = (
+                    f"{self.timecount}\t {self.ohlcv_df.index[self.timecount]} \t"
+                    f"open: \t{self.ohlcv_df.iloc[self.timecount]['open']:.2f} \t"
+                    f"high: \t{self.ohlcv_df.iloc[self.timecount]['high']:.2f} \t"
+                    f"low: \t{self.ohlcv_df.iloc[self.timecount]['low']:.2f} \t"
+                    f"close: \t{self.ohlcv_df.iloc[self.timecount]['close']:.2f} \t"
+                    f"volume: \t{self.ohlcv_df.iloc[self.timecount]['volume']:.2f}")
+
+                old_balance = (
+                    f"OLD Assets =>\t{self.target.symbol}: {old_target_balance:.4f}, "
+                    f"{self.asset.symbol}: {old_coin_balance:.4f}"
+                    f"\tTotal assets(old): "
+                    f"{(old_target_balance + (old_coin_balance * self.price)):.1f} {self.asset.symbol}")
+                msg = (f"{ohlcv}\n{msg}"
+                       f"\tAction num: {action}\t{old_balance} "
+                       f"\tACTION => {actions_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f}) "
+                       f"{self.action_symbol}, commission: {action_commission:.2f}"
+                       f"\t{self.current_balance}\tprofit {self.reward_step:.2f}\tPNL {self.pnl:.4f}")
+                logger.info(msg)
+
+        return action, size
+
+    def step(self, action):
+        info = self._get_info()
+        # self.reward_step = .0
+        self.reward_step = -self.penalty_value
+
+        action, amount = self.action_space_obj.convert2action(action, None)
+        # action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
+        # valid_actions = self.get_valid_actions(info['action_masks'])
+        # if action not in valid_actions:
+        #     action = 2
+        #     amount = 0.
+        #     # self.reward_step += -self.penalty_value
+
+        # if masked_action != action:
+        #     # amount = 0.
+        #     self.invalid_action_counter += 1
+        #     # self.reward_step += -self.penalty_value
+        #     action = 2
+        #     amount = 0
+
+        real_action, real_size = self._take_action_func(action, amount)
+        self.actions_lst.append(real_action)
+        self.size_lst.append(real_size)
+        # self.reward_step = ((self.pnl - self.previous_pnl) + 1) / (self.buy_and_hold_pnl + 1) - self.reward_step
+
+        observation = self._get_obs()
+
+        truncated = bool(self.invalid_action_counter >= self.invalid_actions)
+        terminated = bool(self.pnl < self.pnl_stop)
+
+        # don't move. must be before increasing timecount
+        self.total_reward = self.total_assets - self.initial_total_assets
+        self.timecount += 1
+
+        if self.timecount == self.ohlcv_df.shape[0]:
+            terminated = True
+            # self.reward_step += (self.asset.balance.size * self.price) - (
+            #         self.asset.balance.size * self.asset.balance.price)
+            # self.reward_step = new_logarithmic_scaler(self.reward_step)
+            # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+            # self.reward_step += self.gamma_return
+        if terminated or truncated:
+            self.timecount -= 1
+            self.dones = True
+            # self.reward_step += self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
+            self.reward_step += (self.pnl - (self.buy_and_hold_pnl * (
+                    1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) if self.pnl != 0. else (
+                    self.pnl_stop - (
+                    self.buy_and_hold_pnl * (1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon)))))
+
+        # self.reward_step = new_logarithmic_scaler(self.reward_step)
+        # self.previous_pnl = self.pnl
+        # self.previous_price = self.price
+
+        return observation, self.reward_step, terminated, truncated, info
+
+    def log_reset_msg(self):
+        values, counts = np.unique(self.actions_lst, return_counts=True)
+        actions_counted: dict = dict(zip(values, counts))
+        msg = (f"{self.__class__.__name__} #{self.idnum} {self.use_period}: "
+               f"Ep.len: {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.cache):03d}/"
+               f"In.t.asset: {self.initial_total_assets:.0f} "
+               # f"inv_act#: {self.invalid_action_counter:03d}/"
+               f"Ep.reward: {self.episode_reward:.4f}"
+               f"\tepsilon: {self.epsilon:.5f}"
+               f"\tprofit {self.total_reward:.1f}"
+               # f"\steps_reward {self.eps_reward:.5f}"
+               f"\tAssets: {self.current_balance}\tPNL {self.pnl:.5f} BH_PNL {self.buy_and_hold_pnl:.5f}"
+               f"\t{actions_counted} \t#{self.total_episodes_counter:05d}")
+        logger.info(msg)
+
+    def reset(self, **kwargs):
+        BinanceEnvCash.total_episodes_counter += 1 if self.use_period == 'train' else 0
+
+        observation, info = super().reset(**kwargs)
+        self.size_lst = []
+        self.last_sell_order_pnl = 0.
+        self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
+                1 - self.asset.orders.commission)
+        return observation, info
+
+    def __del__(self):
+        BinanceEnvCash.count -= 1
+
+
+class BinanceEnvMax(BinanceEnvBase):
+    count: int = 0
+    name = 'BinanceEnvMax'
+
+    def __init__(self,
+                 data_processor_kwargs: Union[dict, None],
+                 target_balance: float = 100_000.,
+                 target_minimum_trade: float = 5.,
+                 coin_balance: float = 0.,
+                 pnl_stop: float = -0.5,
+                 verbose: int = 0,
+                 log_interval=500,
+                 observation_type='indicators',
+                 action_type='discrete',
+                 use_period='train',
+                 stable_cache_data_n=30,
+                 reuse_data_prob=0.5,
+                 eval_reuse_prob=0.1,
+                 seed=41,
+                 lookback_window: Union[str, int, None] = None,
+                 max_lot_size=0.25,
+                 max_hold_timeframes='72h',
+                 penalty_value=10,
+                 invalid_actions=60,
+                 total_timesteps: int = 3_000_000,
+                 eps_start=0.95,
+                 eps_end=0.01,
+                 eps_decay=0.2,
+                 gamma=0.99,
+                 cache_obj: Union[CacheManager, None] = None,
+                 render_mode: Union[str, None] = None,
+                 index_type: str = 'target_time',
+                 deterministic: bool = True):
+        super().__init__(data_processor_kwargs, target_balance, target_minimum_trade, coin_balance, pnl_stop, verbose,
+                         log_interval, observation_type, action_type, use_period, stable_cache_data_n, reuse_data_prob,
+                         eval_reuse_prob, seed, lookback_window, max_lot_size, max_hold_timeframes, penalty_value,
+                         invalid_actions, total_timesteps, eps_start, eps_end, eps_decay, gamma, cache_obj, render_mode,
+                         index_type, deterministic)
+
+        BinanceEnvMax.count += 1
+
+        self.idnum = int(BinanceEnvMax.count)
+
+        self.order_opened: bool = False
+        self.order_closed: bool = False
+        self.order_opened_pnl: float = 0.
+        self.order_closed_pnl: float = 0.
+        self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
+                1 - self.asset.orders.commission)
+        self.previous_price = self.price
+        self.size_lst: list = []
+        self.last_sell_order_pnl: float = 0.
 
     @property
     def buy_and_hold_pnl(self):
@@ -720,7 +955,8 @@ class BinanceEnvCash(BinanceEnvBase):
                 action_commission = self.asset.orders.book[-1].order_commission
                 order_cash = self.asset.orders.book[-1].order_cash
                 self.reward_step = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
-                self.reward_step = (self.reward_step / self.initial_total_assets) * 100.
+                self.reward_step = ((self.reward_step / self.initial_total_assets) - 1.) * 10.
+                self.last_sell_order_pnl = float(self.pnl)
                 # self.reward_step = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
                 # self.reward_step = (self.pnl - (
                 #         self.reward_step / self.initial_total_assets)) / self.buy_and_hold_pnl
@@ -754,10 +990,16 @@ class BinanceEnvCash(BinanceEnvBase):
 
     def step(self, action):
         info = self._get_info()
-        self.reward_step = -self.penalty_value
+        self.reward_step = .0
+        # self.reward_step = -self.penalty_value
 
         action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
-        # action, amount = self.action_space_obj.convert2action(action, None)
+        valid_actions = self.get_valid_actions(info['action_masks'])
+        if action not in valid_actions:
+            action = 2
+            amount = 0.
+            # self.reward_step += -self.penalty_value
+
         # if masked_action != action:
         #     # amount = 0.
         #     self.invalid_action_counter += 1
@@ -788,14 +1030,15 @@ class BinanceEnvCash(BinanceEnvBase):
             # self.reward_step += self.gamma_return
         if terminated or truncated:
             self.timecount -= 1
-            self.reward_step += self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
-
+            self.dones = True
+            # self.reward_step += self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
             # self.reward_step += (self.pnl - (self.buy_and_hold_pnl * (
-            #         1 + (np.sign(self.buy_and_hold_pnl) * 0.1)))) * 10. if self.pnl != 0. else (self.pnl_stop - (
-            #         self.buy_and_hold_pnl * (
-            #         1 + (np.sign(self.buy_and_hold_pnl) * 0.1)))) * 10.
+            #         1 + (np.sign(self.buy_and_hold_pnl) * 0.2)))) * 10. if self.pnl != 0. else (self.pnl_stop - (
+            #         self.buy_and_hold_pnl * (1 + (np.sign(self.buy_and_hold_pnl) * 0.2)))) * 10.
+            self.reward_step += ((self.pnl - self.last_sell_order_pnl) - 1.) * 10. if self.pnl != 0. else (
+                                                                                                                  self.pnl_stop - 1.) * 10.
+
         # self.reward_step = new_logarithmic_scaler(self.reward_step)
-        self.episode_reward += self.reward_step
         # self.previous_pnl = self.pnl
         # self.previous_price = self.price
 
@@ -806,6 +1049,7 @@ class BinanceEnvCash(BinanceEnvBase):
         actions_counted: dict = dict(zip(values, counts))
         msg = (f"{self.__class__.__name__} #{self.idnum} {self.use_period}: "
                f"Ep.len: {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.cache):03d}/"
+               f"In.t.asset: {self.initial_total_assets:.0f} "
                # f"inv_act#: {self.invalid_action_counter:03d}/"
                f"Ep.reward: {self.episode_reward:.4f}"
                # f"\tepsilon: {self.eps_threshold:.6f}"
@@ -816,12 +1060,14 @@ class BinanceEnvCash(BinanceEnvBase):
         logger.info(msg)
 
     def reset(self, **kwargs):
-        BinanceEnvCash.total_episodes_counter += 1 if self.use_period == 'train' else 0
+        BinanceEnvMax.total_episodes_counter += 1 if self.use_period == 'train' else 0
         observation, info = super().reset(**kwargs)
 
+        self.size_lst = []
+        self.last_sell_order_pnl = 0.
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
                 1 - self.asset.orders.commission)
         return observation, info
 
     def __del__(self):
-        BinanceEnvCash.count -= 1
+        BinanceEnvMax.count -= 1

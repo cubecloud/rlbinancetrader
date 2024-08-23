@@ -8,44 +8,49 @@ Order = namedtuple('Order', 'OrderType size price order_commission order_cash')
 Bal = namedtuple('Bal', 'size cost price')
 # BBalance = namedtuple('Balance', 'size cost price')
 
-version = 0.009
+version = 0.019
 
-
-# # @jit(nopython=True)
-# def balance(book):
-#     _asset_size: float = 0.
-#     _asset_price: float = 0.
-#     _asset_cost: float = 0.
-#     for order in book:
-#         if order.OrderType == 'buy':
-#             _asset_size += order.size
-#             _asset_cost += (order.size * order.price)
-#             _asset_price = _asset_cost / _asset_size
-#         elif order.OrderType == 'sell':
-#             _asset_size -= order.size
-#             _asset_cost = _asset_size * _asset_price
-#     return Balance(_asset_size, _asset_cost, _asset_price)
 
 class TargetCash:
-    def __init__(self, symbol: str = 'USDT', initial_cash: float = 100_000., minimum_trade: float = 5.):
+    def __init__(self, symbol: str = 'USDT',
+                 initial_cash: float = 100_000.,
+                 minimum_trade: float = 5.,
+                 use_period: str = 'train'):
         self.symbol = symbol
-        self.initial_cash = initial_cash
-        self.cash = initial_cash
+        self.use_period = use_period
+        self.max_cash = initial_cash
         self.minimum_trade = minimum_trade
+        if self.use_period == 'train':
+            self.initial_cash = self.random_starting_cash()
+            self.reset_func = self._train_reset
+        else:
+            self.initial_cash = self.max_cash
+            self.reset_func = self._test_reset
+
+        self.cash = initial_cash
+
+    def random_starting_cash(self) -> float:
+        return float(np.random.randint(max(int(self.minimum_trade * 5), int(self.max_cash//4)), int(self.max_cash)))
+
+    def _train_reset(self):
+        self.initial_cash = self.random_starting_cash()
+        self.cash = self.initial_cash
+
+    def _test_reset(self):
+        self.cash = self.initial_cash
 
     def reset(self):
-        self.cash = self.initial_cash
+        self.reset_func()
 
 
 class Balance:
     def __init__(self, initial_balance: tuple = (0., 0., 0.)):
-        self.__initial_balance = initial_balance
-        self.size, self.cost, self.price = self.__initial_balance
-        self.arr = np.array(list(self.__initial_balance), dtype=np.float32)
+        self.size, self.cost, self.price = initial_balance
+        self.arr = np.array(list(initial_balance), dtype=np.float32)
 
-    def reset(self):
-        self.size, self.cost, self.price = self.__initial_balance
-        self.arr = np.array(list(self.__initial_balance), dtype=np.float32)
+    def reset(self, initial_balance: tuple = (0., 0., 0.)):
+        self.size, self.cost, self.price = initial_balance
+        self.arr = np.array(list(initial_balance), dtype=np.float32)
 
     def __str__(self):
         return f'size={self.size}, cost={self.cost}, price={self.price}'
@@ -57,7 +62,8 @@ class Asset:
                  commission: float,
                  minimum_trade: float,
                  symbol='BTC',
-                 initial_balance: tuple = (0., 0., 0.)):
+                 initial_balance: tuple = (0., 0., 0.),
+                 ):
         self.symbol = symbol
         self.target = target_obj
         self.initial_balance = Bal(*initial_balance)
@@ -69,9 +75,10 @@ class Asset:
                                  target_obj=self.target,
                                  balance_obj=self.balance)
 
-    def reset(self):
+    def reset(self, initial_balance: tuple = (0., 0., 0.)):
         self.target.reset()
-        self.balance.reset()
+        self.initial_balance = Bal(*initial_balance)
+        self.balance.reset(initial_balance)
         self.orders.reset()
 
     def __str__(self):
@@ -88,18 +95,6 @@ class OrdersBook:
         self.book: List[Order,] = []
         self.balance = balance_obj
         self.last_index = 0
-
-    # @property
-    # def cash(self):
-    #     return self.target.cash
-    #
-    # @cash.setter
-    # def cash(self, value):
-    #     self.target.cash = value
-    #
-    # @property
-    # def initial_cash(self):
-    #     return self.target.initial_cash
 
     def buy(self, size, price):
         size_price = price * size
@@ -175,7 +170,7 @@ if __name__ == '__main__':
     print(asset.balance.arr)
 
     asset.orders.show()
-    asset.reset()
+    asset.reset((0.5, 67000, 37500))
     asset.orders.show()
     print(asset.balance)
     print(asset.initial_balance)

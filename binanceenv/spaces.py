@@ -123,36 +123,36 @@ class DiscreteActionSpace:
         self.__action_space = value
 
 
-class SellBuyHoldAmount:
-    def __init__(self, actions):
-        # self.__action_space = Box(low=0, high=1., shape=(assets_qty,), dtype=np.float32)
-        self.__action_space: Dict = {"Action": Discrete(actions),
-                                     "Amount": Box(low=0, high=1, shape=(1,), dtype=np.float32)}
-        self.name = 'sell_buy_hold_amount'
-
-    @staticmethod
-    def __get_action_amount(action: int) -> Tuple[int, float]:
-        if action < 0:
-            amount = abs(action)
-            action = actions_dict['Sell']
-        elif action > 0:
-            amount = action
-            action = actions_dict['Buy']
-        else:
-            amount = 0
-            action = actions_dict['Hold']
-        return action, amount
-
-    def convert2action(self, action, masked_actions=None):
-        return self.__get_action_amount(action)
-
-    @property
-    def action_space(self):
-        return self.__action_space
-
-    @action_space.setter
-    def action_space(self, value):
-        self.__action_space = value
+# class SellBuyHoldAmount:
+#     def __init__(self, actions):
+#         # self.__action_space = Box(low=0, high=1., shape=(assets_qty,), dtype=np.float32)
+#         self.__action_space: Dict = {"Action": Discrete(actions),
+#                                      "Amount": Box(low=0, high=1, shape=(1,), dtype=np.float32)}
+#         self.name = 'sell_buy_hold_amount'
+#
+#     @staticmethod
+#     def __get_action_amount(action: int) -> Tuple[int, float]:
+#         if action < 0:
+#             amount = abs(action)
+#             action = actions_dict['Sell']
+#         elif action > 0:
+#             amount = action
+#             action = actions_dict['Buy']
+#         else:
+#             amount = 0
+#             action = actions_dict['Hold']
+#         return action, amount
+#
+#     def convert2action(self, action, masked_actions=None):
+#         return self.__get_action_amount(action)
+#
+#     @property
+#     def action_space(self):
+#         return self.__action_space
+#
+#     @action_space.setter
+#     def action_space(self, value):
+#         self.__action_space = value
 
 
 class BoxActionSpace:

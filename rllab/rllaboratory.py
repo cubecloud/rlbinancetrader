@@ -24,7 +24,9 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 from dataclasses import asdict, dataclass, field, make_dataclass
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
-from rllab.configtools import ConfigMethods
+from rllab import ConfigMethods
+from rllab import lab_evaluate_policy
+from rllab import LabEvalCallback
 
 __version__ = 0.032
 
@@ -45,6 +47,7 @@ class LABConfig:
     EXPERIMENT_PATH: str = field(default_factory=str, init=True)
     ENV_NAME: str = field(default_factory=str, init=True)
     ALGO: str = field(default_factory=str, init=True)
+    OBS_TYPE: str = field(default_factory=str, init=True)
     DIRS: dict = field(default_factory=dict, init=True)
     FILENAME: str = field(default_factory=str, init=True)
 
@@ -65,8 +68,10 @@ class LabBase:
                  checkpoint_num: int = 20,
                  eval_freq: int = 50_000,
                  n_eval_episodes: int = 10,
+                 log_interval: int = 200,
                  deterministic=True,
                  verbose: int = 1,
+
                  ):
         """
         Get all arguments to instantiate all classes and object inside the Lab
@@ -90,6 +95,7 @@ class LabBase:
         self.eval_freq = eval_freq
         self.checkpoint_num = checkpoint_num
         self.n_eval_episodes = n_eval_episodes
+        self.log_interval = log_interval
         self.experiment_path = experiment_path
         self.total_timesteps = total_timesteps
         self.deterministic = deterministic
@@ -186,21 +192,21 @@ class LabBase:
                                                  save_path=agent_cfg.DIRS["training"],
                                                  name_prefix=f'{agent_cfg.FILENAME}_chkp',
                                                  )
-        eval_callback = EvalCallback(self.eval_vecenv_lst[ix],
-                                     best_model_save_path=agent_cfg.DIRS["best"],
-                                     n_eval_episodes=self.n_eval_episodes,
-                                     log_path=agent_cfg.DIRS["evaluation"],
-                                     eval_freq=self.eval_freq,
-                                     deterministic=self.deterministic
-                                     )
+        eval_callback = LabEvalCallback(self.eval_vecenv_lst[ix],
+                                        best_model_save_path=agent_cfg.DIRS["best"],
+                                        n_eval_episodes=self.n_eval_episodes,
+                                        log_path=agent_cfg.DIRS["evaluation"],
+                                        eval_freq=self.eval_freq,
+                                        deterministic=self.deterministic
+                                        )
         # Create the callback list
         callbacks = CallbackList([checkpoint_callback, eval_callback])
 
         agent_obj.learn(total_timesteps=self.total_timesteps,
                         callback=callbacks,
-                        log_interval=1000,
+                        log_interval=self.log_interval,
                         progress_bar=False,
-                        tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.EXP_ID}')
+                        tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.OBS_TYPE}/{agent_cfg.EXP_ID}')
 
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
@@ -222,7 +228,7 @@ class LabBase:
 
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        eval_env_kwargs.update({'use_period': 'test', 'verbose': verbose})
+        eval_env_kwargs.update({'use_period': 'test', 'verbose': verbose, 'stable_cache_data_n': self.n_eval_episodes})
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,
                                    seed=42,
@@ -233,14 +239,14 @@ class LabBase:
 
         # filename = agent_cfg.FILENAME
         agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
-        result = evaluate_policy(agent_obj,
-                                 eval_vec_env,
-                                 n_eval_episodes=self.n_eval_episodes,
-                                 deterministic=self.deterministic,
-                                 return_episode_rewards=True)
+        result = lab_evaluate_policy(agent_obj,
+                                     eval_vec_env,
+                                     n_eval_episodes=self.n_eval_episodes,
+                                     deterministic=self.deterministic,
+                                     return_episode_rewards=True)
 
-        result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1]})
-        result = result.astype({"reward": float, "ep_length": int})
+        result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1], 'ep_pnl': result[2]})
+        result = result.astype({"reward": float, "ep_length": int, 'ep_pnl': float})
         msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
                f'Evaluation result on BEST model:\n {result.to_string()}')
         logger.debug(msg)
@@ -257,10 +263,7 @@ class LabBase:
         self.base_cfg.ENV_NAME = f'{env.__class__.__name__}'
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        train_env_kwargs.update({'use_period': 'train',
-                                 'verbose': self.verbose,
-                                 }
-                                )
+        train_env_kwargs.update({'use_period': 'train', 'verbose': self.verbose, })
 
         """ Rlock object can't be copied """
         eval_env_kwargs = copy.deepcopy(train_env_kwargs)
@@ -295,6 +298,10 @@ class LabBase:
 
         agent_cfg = LABConfig(**asdict(self.base_cfg))
         agent_cfg.ALGO = agent_obj.__class__.__name__
+        agent_cfg.OBS_TYPE = train_env_kwargs.get('observation_type', None)
+
+        assert agent_cfg.OBS_TYPE is not None, 'Error: something wrong with "observation type"'
+
         agent_cfg.FILENAME = f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}'
 
         self.agents_obj.append(agent_obj)
@@ -314,6 +321,39 @@ class LabBase:
                 f'\n{self.__class__.__name__}: Start learning agent #{ix:02d}: {self.agents_obj[ix].__class__.__name__}\n')
             self.learn_agent(ix)
             self.evaluate_agent(ix)
+
+    def test_agent(self, ix, json_path_filename, verbose=1):
+        config_kwargs = ConfigMethods.load_config(json_path_filename)
+        agent_cfg = LABConfig(**config_kwargs)
+
+        agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
+
+        """ Create independent evaluation env """
+        eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
+        eval_env_kwargs.update(
+            {'use_period': 'test', 'verbose': verbose, 'stable_cache_data_n': self.n_eval_episodes})
+        eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
+                                   n_envs=1,
+                                   seed=42,
+                                   env_kwargs=eval_env_kwargs,
+                                   vec_env_cls=DummyVecEnv)
+
+        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
+
+        # filename = agent_cfg.FILENAME
+        agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
+        result = lab_evaluate_policy(agent_obj,
+                                     eval_vec_env,
+                                     n_eval_episodes=self.n_eval_episodes,
+                                     deterministic=self.deterministic,
+                                     return_episode_rewards=True)
+
+        result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1], 'ep_pnl': result[2]})
+        result = result.astype({"reward": float, "ep_length": int, 'ep_pnl': float})
+        msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
+               f'Evaluation result on BEST model:\n {result.to_string()}')
+        logger.debug(msg)
+        result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
     def load_agent(self, json_path_filename, best=False):
         config_kwargs = ConfigMethods.load_config(json_path_filename)

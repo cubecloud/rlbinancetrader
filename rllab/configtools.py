@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import asdict
 
-__version__ = 0.001
+__version__ = 0.005
 
 logger = logging.getLogger()
 
@@ -14,8 +14,8 @@ class ConfigMethods:
             if isinstance(config, dict):
                 try:
                     json.dump(config, f)
-                except TypeError:
-                    logger.debug(f"Error: object not serializable")
+                except TypeError as err:
+                    logger.warning(f"Error: object not serializable - {err}")
             else:
                 json.dump(asdict(config), f)
         logger.debug(f"Config saved to {path_filename}")
