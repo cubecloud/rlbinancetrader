@@ -48,5 +48,6 @@ dependencies:
       - git+https://github.com/cubecloud/dbbinance-storage.git
       - git+https://github.com/cubecloud/ensembletools.git
       - git+https://github.com/cubecloud/backtesting_optuna.git
+      - json-numpy
 prefix: /home/cubecloud/anaconda3/envs/rlbinancetrader
 

@@ -17,7 +17,9 @@ class MlpExtractorNN(BaseFeaturesExtractor):
         self.mlp_extractor = nn.Sequential(
             nn.Linear(observation_space.shape[0], features_dim),
             nn.LeakyReLU(),
-            nn.Linear(features_dim, int(features_dim // 4)),
+            nn.Linear(features_dim, int(features_dim // 2)),
+            nn.LeakyReLU(),
+            nn.Linear(int(features_dim // 2), int(features_dim // 4)),
             nn.LeakyReLU(),
         )
 

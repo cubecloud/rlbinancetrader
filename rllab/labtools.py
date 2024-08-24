@@ -14,6 +14,7 @@ class CoSheduller:
         self.total_epochs = total_epochs
         self.last_lr = self.learning_rate
         self.epsilon = epsilon
+        self.__call__()
 
     def __call__(self) -> Callable[[float], float]:
         return self.scheduler

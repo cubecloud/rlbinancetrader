@@ -209,15 +209,17 @@ class LabEvalCallback(EventCallback):
             self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
             self.logger.dump(self.num_timesteps)
 
-            if mean_reward > self.best_mean_reward:
-                if self.verbose >= 1:
-                    print("New best mean reward!")
-                self.best_mean_reward = float(mean_reward)
-            if mean_pnl > self.best_mean_pnl:
-                if self.verbose >= 1:
-                    print("New best mean pnl!")
-                self.best_mean_pnl = float(mean_pnl)
-            continue_training = self.save_best(continue_training, metric_name=self.best_metric)
+            continue_training = self.check_save_best(new_mean=mean_reward,
+                                                     best_mean=self.best_mean_reward,
+                                                     metric_name='reward',
+                                                     var_metric_name='best_mean_reward',
+                                                     continue_training=continue_training)
+
+            continue_training = self.check_save_best(new_mean=mean_pnl,
+                                                     best_mean=self.best_mean_pnl,
+                                                     metric_name='pnl',
+                                                     var_metric_name='best_mean_pnl',
+                                                     continue_training=continue_training)
 
             # Trigger callback after every evaluation, if needed
             if self.callback is not None:
@@ -225,13 +227,17 @@ class LabEvalCallback(EventCallback):
 
         return continue_training
 
-    def save_best(self, continue_training, metric_name) -> bool:
-        if self.best_metric == metric_name:
-            if self.best_model_save_path is not None:
-                self.model.save(os.path.join(self.best_model_save_path, "best_model"))
-            # Trigger callback on new best model, if needed
-            if self.callback_on_new_best is not None:
-                continue_training = self.callback_on_new_best.on_step()
+    def check_save_best(self, new_mean, best_mean, metric_name, var_metric_name, continue_training) -> bool:
+        if new_mean > best_mean:
+            if self.verbose >= 1:
+                print(f"New best mean {metric_name}!")
+            setattr(self, var_metric_name, float(new_mean))
+            if self.best_metric == metric_name:
+                if self.best_model_save_path is not None:
+                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                # Trigger callback on new best model, if needed
+                if self.callback_on_new_best is not None:
+                    continue_training = self.callback_on_new_best.on_step()
         return continue_training
 
     def update_child_locals(self, locals_: Dict[str, Any]) -> None:

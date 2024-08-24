@@ -13,28 +13,30 @@ from binanceenv.cache import cache_manager_obj
 from binanceenv.cache import eval_cache_manager_obj
 
 from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.callbacks import EvalCallback
+# from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.evaluation import evaluate_policy
+# from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 from dataclasses import asdict, dataclass, field, make_dataclass
-from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
+# from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
+from rllab.labserializer import deserialize_kwargs
 
-__version__ = 0.032
+__version__ = 0.034
 
 TZ = timezone('Europe/Moscow')
 
 logger = logging.getLogger()
 
-ACTION_NOISE: dict = {'ornstein_uhlenbeck': OrnsteinUhlenbeckActionNoise, 'normal': NormalActionNoise}
+
+# ACTION_NOISE: dict = {'ornstein_uhlenbeck': OrnsteinUhlenbeckActionNoise, 'normal': NormalActionNoise}
 
 
 def get_exp_id() -> str:
@@ -50,6 +52,13 @@ class LABConfig:
     OBS_TYPE: str = field(default_factory=str, init=True)
     DIRS: dict = field(default_factory=dict, init=True)
     FILENAME: str = field(default_factory=str, init=True)
+    DETERMINISTIC: bool = field(default_factory=bool, init=True)
+    AGENTS_N_ENV: int = field(default_factory=int, init=True)
+    ENV_WRAPPER: str = field(default_factory=str, init=True)
+    TOTAL_TIMESTEPS: int = field(default_factory=int, init=True)
+    EVAL_FREQ: int = field(default_factory=int, init=True)
+    N_EVAL_EPISODES: int = field(default_factory=int, init=True)
+    LOG_INTERVAL: int = field(default_factory=int, init=True)
 
 
 env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv}
@@ -65,13 +74,13 @@ class LabBase:
                  env_wrapper: str = 'dummy',
                  total_timesteps: int = 500_000,
                  experiment_path: str = './',
-                 checkpoint_num: int = 20,
                  eval_freq: int = 50_000,
+                 checkpoint_num: int = 20,
                  n_eval_episodes: int = 10,
                  log_interval: int = 200,
                  deterministic=True,
                  verbose: int = 1,
-
+                 exp_cfg: Union[LABConfig, None] = None
                  ):
         """
         Get all arguments to instantiate all classes and object inside the Lab
@@ -101,11 +110,22 @@ class LabBase:
         self.deterministic = deterministic
         self.env_cls = env_cls
         self.env_kwargs = env_kwargs
-        self.base_cfg = LABConfig()
-        self.base_cfg.EXPERIMENT_PATH = experiment_path
+
         self.env_wrapper = env_wrapper
         self.env_wrapper_cls = env_wrapper_dict.get(env_wrapper, DummyVecEnv)
         self.verbose = verbose
+
+        if exp_cfg is None:
+            self.base_cfg = LABConfig()
+            self.base_cfg.EXPERIMENT_PATH = experiment_path
+            self.base_cfg.TOTAL_TIMESTEPS = self.total_timesteps
+            self.base_cfg.EVAL_FREQ = self.eval_freq
+            self.base_cfg.ENV_WRAPPER = self.env_wrapper
+            self.base_cfg.DETERMINISTIC = self.deterministic
+            self.base_cfg.N_EVAL_EPISODES = self.n_eval_episodes
+            self.base_cfg.LOG_INTERVAL = self.log_interval
+        else:
+            self.base_cfg = exp_cfg
 
         if not isinstance(env_cls, list):
             self.env_classes_lst = list([env_cls, ])
@@ -130,12 +150,12 @@ class LabBase:
                 kwargs.update({'deterministic': self.deterministic})
 
         if not isinstance(agents_kwargs, list):
-            agents_kwargs.update({'tensorboard_log': os.path.join(self.base_cfg.EXPERIMENT_PATH, 'TB')})
+            self.update_agent_kwargs(agents_kwargs)
             self.agents_kwargs_lst = list([agents_kwargs, ])
         else:
             self.agents_kwargs_lst = agents_kwargs
             for kwargs in self.agents_kwargs_lst:
-                kwargs.update({'tensorboard_log': os.path.join(self.base_cfg.EXPERIMENT_PATH, 'TB')})
+                self.update_agent_kwargs(kwargs)
 
         if agents_n_env is None:
             self.agents_n_env = []
@@ -157,7 +177,11 @@ class LabBase:
         self.eval_vecenv_lst: list = []
         self.cache_manager: CacheManager = cache_manager_obj
         self.eval_cache_manager: CacheManager = eval_cache_manager_obj
-        self.init_agents()
+        # self.init_agents()
+
+    def update_agent_kwargs(self, agent_kwargs):
+        agent_kwargs.update({'tensorboard_log': os.path.join(self.base_cfg.EXPERIMENT_PATH, 'TB')})
+        return agent_kwargs
 
     def create_exp_dirs(self, cfg: LABConfig):
         dirs = dict()
@@ -184,9 +208,9 @@ class LabBase:
 
     def learn_agent(self, ix):
         agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
-        ConfigMethods.save_config(agent_cfg, os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_cfg.json'))
-        ConfigMethods.save_config(agent_kwargs,
-                                  os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
+        # ConfigMethods.save_config(agent_cfg, os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_cfg.json'))
+        # ConfigMethods.save_config(agent_kwargs,
+        #                           os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
 
         checkpoint_callback = CheckpointCallback(save_freq=int(self.total_timesteps // self.checkpoint_num),
                                                  save_path=agent_cfg.DIRS["training"],
@@ -252,17 +276,18 @@ class LabBase:
         logger.debug(msg)
         result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
-    def __get_env(self, env_cls, env_kwargs):
-        env = env_cls(**env_kwargs)
-        return env
+    # def __get_env(self, env_cls, env_kwargs):
+    #     env = env_cls(**env_kwargs)
+    #     return env
 
-    def init_agent(self, ix):
+    def init_agent(self, ix, save_config: bool = True):
         env = self.env_classes_lst[ix](**self.env_kwargs_lst[ix])
         logger.info(f'{self.__class__.__name__}: Environment check {self.env_classes_lst[ix].__class__.__name__}')
         check_env(env)
         self.base_cfg.ENV_NAME = f'{env.__class__.__name__}'
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
+
         train_env_kwargs.update({'use_period': 'train', 'verbose': self.verbose, })
 
         """ Rlock object can't be copied """
@@ -294,11 +319,13 @@ class LabBase:
 
         logger.info(
             f'{self.__class__.__name__}: Creating agent: #{ix:02d} {self.agents_classes_lst[ix].__class__.__name__}')
-        agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **self.agents_kwargs[ix])
+        agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
 
+        agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **deserialize_kwargs(agent_kwargs))
         agent_cfg = LABConfig(**asdict(self.base_cfg))
         agent_cfg.ALGO = agent_obj.__class__.__name__
         agent_cfg.OBS_TYPE = train_env_kwargs.get('observation_type', None)
+        agent_cfg.AGENTS_N_ENV = self.agents_n_env[ix]
 
         assert agent_cfg.OBS_TYPE is not None, 'Error: something wrong with "observation type"'
 
@@ -309,6 +336,12 @@ class LabBase:
         agent_cfg.DIRS = dirs
         self.agents_cfg.append(agent_cfg)
         logger.debug(f'{self.__class__.__name__}: Initialized agent: #{ix:02d} {agent_obj.__class__.__name__}')
+        if save_config:
+            ConfigMethods.save_config(agent_cfg, os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_cfg.json'))
+            ConfigMethods.save_config(self.agents_kwargs[ix],
+                                      os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
+            ConfigMethods.save_config(self.env_kwargs_lst[ix],
+                                      os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_env_kwargs.json'))
         del env
 
     def init_agents(self):
@@ -316,22 +349,22 @@ class LabBase:
             self.init_agent(ix)
 
     def learn(self):
+        self.init_agents()
         for ix in range(len(self.agents_obj)):
             logger.info(
                 f'\n{self.__class__.__name__}: Start learning agent #{ix:02d}: {self.agents_obj[ix].__class__.__name__}\n')
             self.learn_agent(ix)
             self.evaluate_agent(ix)
 
-    def test_agent(self, ix, json_path_filename, verbose=1):
-        config_kwargs = ConfigMethods.load_config(json_path_filename)
-        agent_cfg = LABConfig(**config_kwargs)
-
-        agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
-
+    def test_agent(self, ix=0, filename: str = 'best_model', verbose=1):
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        eval_env_kwargs.update(
-            {'use_period': 'test', 'verbose': verbose, 'stable_cache_data_n': self.n_eval_episodes})
+        eval_env_kwargs.update({'use_period': 'test',
+                                'verbose': verbose,
+                                'stable_cache_data_n': self.n_eval_episodes})
+        if self.env_wrapper != 'subproc':
+            eval_env_kwargs.update({'cache_obj': eval_cache_manager_obj})
+
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,
                                    seed=42,
@@ -340,8 +373,19 @@ class LabBase:
 
         eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
 
-        # filename = agent_cfg.FILENAME
-        agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
+        logger.info(
+            f'{self.__class__.__name__}: Creating agent: #{ix:02d} {self.agents_classes_lst[ix].__class__.__name__}')
+        agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
+
+        agent_obj = self.agents_classes_lst[ix](env=eval_vec_env, **deserialize_kwargs(agent_kwargs))
+
+        agent_cfg = LABConfig(**asdict(self.base_cfg))
+
+        if filename != 'best_model':
+            agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', filename), env=eval_vec_env)
+        else:
+            agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', filename), env=eval_vec_env)
+
         result = lab_evaluate_policy(agent_obj,
                                      eval_vec_env,
                                      n_eval_episodes=self.n_eval_episodes,
@@ -352,9 +396,40 @@ class LabBase:
         result = result.astype({"reward": float, "ep_length": int, 'ep_pnl': float})
         msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
                f'Evaluation result on BEST model:\n {result.to_string()}')
-        logger.debug(msg)
-        result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
+        logger.info(msg)
+        print(msg)
+        # result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
-    def load_agent(self, json_path_filename, best=False):
+    @classmethod
+    def load_agent(cls, json_path_filename, best=False, verbose=1):
         config_kwargs = ConfigMethods.load_config(json_path_filename)
         agent_cfg = LABConfig(**config_kwargs)
+        env_kwargs = ConfigMethods.load_config(
+            os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_env_kwargs.json'))
+        agent_kwargs = ConfigMethods.load_config(
+            os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
+        if isinstance(agent_kwargs['train_freq'], list):
+            agent_kwargs.update({'train_freq': tuple(agent_kwargs['train_freq'])})
+        lab_kwargs: dict = {'env_cls': [deserialize_kwargs(agent_cfg.ENV_NAME)],
+                            'agents_cls': [deserialize_kwargs(agent_cfg.ALGO)],
+                            'env_kwargs': [deserialize_kwargs(env_kwargs)],
+                            'agents_kwargs': [deserialize_kwargs(agent_kwargs)],
+                            'agents_n_env': agent_cfg.AGENTS_N_ENV,
+                            'env_wrapper': agent_cfg.ENV_WRAPPER,
+                            'total_timesteps': agent_cfg.TOTAL_TIMESTEPS,
+                            'experiment_path': agent_cfg.DIRS['exp'],
+                            'eval_freq': int(agent_cfg.EVAL_FREQ // agent_cfg.AGENTS_N_ENV),
+                            'checkpoint_num': int(agent_cfg.TOTAL_TIMESTEPS // agent_cfg.EVAL_FREQ),
+                            'n_eval_episodes': agent_cfg.N_EVAL_EPISODES,
+                            'log_interval': agent_cfg.LOG_INTERVAL,
+                            'deterministic': agent_cfg.DETERMINISTIC,
+                            'verbose': verbose,
+                            }
+
+        new_instance = cls.__new__(cls)
+        deserialized_kwargs = deserialize_kwargs(lab_kwargs)
+        cls.__init__(new_instance, exp_cfg=agent_cfg, **deserialized_kwargs)
+        return new_instance
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls)

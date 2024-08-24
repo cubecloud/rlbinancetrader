@@ -8,6 +8,7 @@ from datetime import timezone
 from dateutil.relativedelta import relativedelta
 from typing import Union
 
+from dbbinance.fetcher import check_convert_to_datetime
 from dbbinance.fetcher.getfetcher import get_datafetcher
 from dbbinance.fetcher.datautils import convert_timeframe_to_freq
 from dbbinance.fetcher.datautils import get_timedelta_kwargs
@@ -31,8 +32,8 @@ class ProcessorBase:
                  maximum_test_size: float = 0.7,
                  test_size: float = 0.2,
                  verbose: int = 0):
-        self.start_datetime = start_datetime
-        self.end_datetime = end_datetime
+        self.start_datetime = check_convert_to_datetime(start_datetime, utc_aware=False)
+        self.end_datetime = check_convert_to_datetime(end_datetime, utc_aware=False)
         self.timeframe = timeframe
         self.discretization = discretization
         self.market = market
@@ -52,8 +53,11 @@ class ProcessorBase:
         self.train_timeframes_num = int(len(self.all_period_timeframes) * (1 - test_size))
         self.test_timeframes_num = len(self.all_period_timeframes) - self.train_timeframes_num
 
-        msg = (f"FULL pool timeframes: {self.train_timeframes_num}, "
-               f"Pool period: {self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num]}")
+        msg = (f"TRAIN pool timeframes: {self.train_timeframes_num}, "
+               f"Pool period: {self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num - 1]}")
+        logger.info(msg)
+        msg = (f"TEST pool timeframes: {self.test_timeframes_num}, "
+               f"Pool period: {self.all_period_timeframes[self.train_timeframes_num]} - {self.all_period_timeframes[-1]}")
         logger.info(msg)
         assert self.train_timeframes_num >= 50, f'Error: train_timeframes_num is to LOW {self.train_timeframes_num}'
         assert self.test_timeframes_num >= 50, f'Error: test_timeframes_num is to LOW {self.test_timeframes_num}'
@@ -66,7 +70,6 @@ class ProcessorBase:
 
         self.change_train_test_timeframes_num(minimum_train_size, maximum_train_size, minimum_test_size,
                                               maximum_test_size)
-
 
     @property
     def initial_minimum_train_size(self):

@@ -22,7 +22,7 @@ from rllab.labtools import CoSheduller
 from multiprocessing import freeze_support
 import torch
 
-__version__ = 0.051
+__version__ = 0.052
 
 logger = logging.getLogger()
 
@@ -48,10 +48,12 @@ if __name__ == '__main__':
     _discretization = '15m'
     _gap_period = '5d'
 
-    _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
+    # _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
+    _start_datetime = '2023-07-20 01:00:00'
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
-    _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
+    # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
+    _end_datetime = '2024-07-30 01:00:00'
     # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
@@ -68,8 +70,8 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.027,
-                                 maximum_train_size=0.053,
+                                 minimum_train_size=0.031,
+                                 maximum_train_size=0.057,
                                  minimum_test_size=0.35,
                                  maximum_test_size=0.5,
                                  test_size=0.13,
@@ -101,7 +103,7 @@ if __name__ == '__main__':
                           target_minimum_trade=100.,
                           observation_type='lookback_assets_close_indicators',
                           # observation_type='indicators_close',
-                          stable_cache_data_n=120,
+                          stable_cache_data_n=100,
                           reuse_data_prob=0.95,
                           eval_reuse_prob=0.9999,
                           # lookback_window=None,
@@ -111,7 +113,7 @@ if __name__ == '__main__':
                           eps_start=0.99,
                           eps_end=0.01,
                           eps_decay=0.2,
-                          gamma=0.9995,
+                          gamma=0.995,
                           invalid_actions=15_000,
                           penalty_value=1e-5,
                           action_type='box',
@@ -256,13 +258,39 @@ if __name__ == '__main__':
     # net_arch = [dict(qf=[256, 128], pi=[256, 32])]
     # sac_policy_kwargs = dict(activation_fn=torch.nn.ReLU,
     #                          net_arch=net_arch)
+    # sac_policy_kwargs = dict(
+    #     features_extractor_class=MlpExtractorNN,
+    #     features_extractor_kwargs=dict(features_dim=256),
+    #     share_features_extractor=True,
+    #     activation_fn=torch.nn.ReLU,
+    #     # net_arch=net_arch,
+    # )
+    # sac_kwargs = dict(policy="MlpPolicy",
+    #                   buffer_size=buffer_size,
+    #                   learning_starts=learning_start,
+    #                   policy_kwargs=sac_policy_kwargs,
+    #                   batch_size=batch_size,
+    #                   stats_window_size=100,
+    #                   ent_coef='auto_0.0001',
+    #                   learning_rate={'CoSheduller': dict(warmup=learning_start,
+    #                                                      learning_rate=2e-4,
+    #                                                      min_learning_rate=1e-5,
+    #                                                      total_epochs=total_timesteps,
+    #                                                      epsilon=100)},
+    #                   action_noise=action_noise_box,
+    #                   train_freq=(2, 'step'),
+    #                   target_update_interval=10,  # update target network every 10 _gradient_ steps
+    #                   device="auto",
+    #                   verbose=1)
+
     sac_policy_kwargs = dict(
-        features_extractor_class=MlpExtractorNN,
+        features_extractor_class='MlpExtractorNN',
         features_extractor_kwargs=dict(features_dim=256),
         share_features_extractor=True,
-        activation_fn=torch.nn.ReLU,
+        activation_fn='LeakyReLU',
         # net_arch=net_arch,
     )
+
     sac_kwargs = dict(policy="MlpPolicy",
                       buffer_size=buffer_size,
                       learning_starts=learning_start,
@@ -270,12 +298,14 @@ if __name__ == '__main__':
                       batch_size=batch_size,
                       stats_window_size=100,
                       ent_coef='auto_0.0001',
-                      learning_rate=CoSheduller(warmup=learning_start,
-                                                learning_rate=2e-4,
-                                                min_learning_rate=1e-5,
-                                                total_epochs=total_timesteps,
-                                                epsilon=100)(),
-                      action_noise=action_noise_box,
+                      learning_rate={'CoSheduller': dict(warmup=learning_start,
+                                                         learning_rate=2e-4,
+                                                         min_learning_rate=1e-5,
+                                                         total_epochs=total_timesteps,
+                                                         epsilon=100)},
+                      action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=5e-1 * np.ones(3),
+                                                                         sigma=4.99e-1 * np.ones(3),
+                                                                         dt=1e-2)},
                       train_freq=(2, 'step'),
                       target_update_interval=10,  # update target network every 10 _gradient_ steps
                       device="auto",

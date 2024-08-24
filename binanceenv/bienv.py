@@ -601,19 +601,23 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
-        stable_cache = max(5., self.stable_cache_data_n * (
-                    1. - self.epsilon)) if self.use_period == 'train' else self.stable_cache_data_n
+        stable_cache = max(20., self.stable_cache_data_n * (
+                1. - self.epsilon)) if self.use_period == 'train' else self.stable_cache_data_n
 
         if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
             if not self.key_list:
                 self.key_list = list(self.CM.cache.keys())
                 self.np_random.shuffle(self.key_list)
             self.ohlcv_df, self.indicators_df = self.CM.cache[self.key_list[0]]
+            rnd_start = self.np_random.integers(max(1, int(200 * (1 - self.epsilon))))
+            self.ohlcv_df, self.indicators_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True), self.indicators_df.iloc[
+                                                                                                rnd_start:].copy(
+                deep=True)
             self.key_list = self.key_list[1:]
         else:
-            # self.data_processor_obj.change_train_timeframes_num(self.data_processor_obj.initial_minimum_train_size, self.data_processor_obj.initial_maximum_train_size)
             self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
                 index_type=self.index_type, period_type=self.use_period)
+
             if self.ohlcv_df.shape[0] != self.indicators_df.shape[0]:
                 msg = (f"{self.__class__.__name__} #{self.idnum}: ohlcv_df.shape = {self.ohlcv_df.shape}, "
                        f"indicators_df.shape = {self.indicators_df.shape}")
@@ -624,7 +628,7 @@ class BinanceEnvBase(gymnasium.Env):
             self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
 
         if self.use_period == 'train':
-            size = self.np_random.random() / 2 * (1 - self.epsilon)
+            size = self.np_random.random() / 4
             cost = self.price * size
             price = self.price
         else:
@@ -636,7 +640,7 @@ class BinanceEnvBase(gymnasium.Env):
                 self.asset.initial_balance.size * self.asset.initial_balance.price)
 
         self.order_closed = False
-        self.episode_reward: float = .0
+        self.episode_reward = .0
         self.gamma_return = .0
         if self.observation_type in ['lookback_assets_close_indicators']:
             self._warmup()
@@ -734,6 +738,8 @@ class BinanceEnvCash(BinanceEnvBase):
                 self.asset.orders.buy(size, self.price)
                 action_commission = self.asset.orders.book[-1].order_commission
                 order_cash = self.asset.orders.book[-1].order_cash
+            else:
+                action = 2
 
         elif action == 1:  # Sell
             self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
@@ -749,6 +755,8 @@ class BinanceEnvCash(BinanceEnvBase):
                 self.reward_step = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
                 self.reward_step = (self.reward_step / self.initial_total_assets)
                 # self.last_sell_order_pnl = float(self.pnl)
+            else:
+                action = 2
 
         if self.verbose == 2:
             if self.timecount % self.log_interval == 0:
@@ -827,6 +835,7 @@ class BinanceEnvCash(BinanceEnvBase):
         # self.reward_step = new_logarithmic_scaler(self.reward_step)
         # self.previous_pnl = self.pnl
         # self.previous_price = self.price
+        self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
 
@@ -1041,6 +1050,7 @@ class BinanceEnvMax(BinanceEnvBase):
         # self.reward_step = new_logarithmic_scaler(self.reward_step)
         # self.previous_pnl = self.pnl
         # self.previous_price = self.price
+        self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
 
