@@ -1,3 +1,4 @@
+
 import random
 import numpy as np
 import numba
@@ -6,6 +7,9 @@ from typing import Tuple, Union, Dict
 
 from gymnasium.spaces import Discrete
 from gymnasium.spaces import Box
+from dbbinance.fetcher.datautils import minmax_normalization_1_1
+
+__version__ = 0.001
 
 actions_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2}
 actions_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold"}
@@ -181,16 +185,22 @@ class BoxActionSpace:
 
 class BoxExtActionSpace:
     def __init__(self, n_action):
+
         self.__action_space = Box(low=-1., high=1, shape=(n_action,), dtype=np.float32)
+
         self.name = 'box1_1'
+
+    @staticmethod
+    def scale_amount(value):
+        return (value - -1) / 2
 
     def convert2action(self, action, masked_actions=None):
         if masked_actions is None:
             act = np.argmax(action)
-            amount = abs(action[act])
+            amount = self.scale_amount(action[act])
         else:
             act = np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
-            amount = abs(action[act])
+            amount = self.scale_amount(action[act])
         return act, amount
 
     @property

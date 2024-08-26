@@ -2,7 +2,7 @@ import copy
 from typing import Union, Callable, ClassVar
 import numpy as np
 from rllab.labtools import CoSheduller
-from torch.nn import ReLU, LeakyReLU
+from torch.nn import ReLU, LeakyReLU, Tanh
 from customnn.mlpextractor import MlpExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC
@@ -17,6 +17,7 @@ lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'MlpExtractorNN': MlpExtractorNN,
                         'ReLU': ReLU,
                         'LeakyReLU': LeakyReLU,
+                        'Tanh': Tanh,
                         'action_noise': {'OrnsteinUhlenbeckActionNoise': OrnsteinUhlenbeckActionNoise},
                         'SAC': SAC,
                         'A2C': A2C,

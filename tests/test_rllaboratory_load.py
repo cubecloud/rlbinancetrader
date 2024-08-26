@@ -89,7 +89,7 @@ if __name__ == '__main__':
         features_extractor_class='MlpExtractorNN',
         features_extractor_kwargs=dict(features_dim=256),
         share_features_extractor=True,
-        activation_fn='ReLU',
+        activation_fn='LeakyReLU',
         # net_arch=net_arch,
     )
 
@@ -130,10 +130,10 @@ if __name__ == '__main__':
     #     verbose=0
     # )
 
-    json_cfg = './save/BinanceEnvCash/SAC/exp-2408-033912/SAC_BinanceEnvCash_16000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/SAC/exp-2608-030436/SAC_BinanceEnvCash_16000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
-    rllab.test_agent(filename='SAC_BinanceEnvCash_16000000_chkp_7200000_steps')
+    rllab.test_agent(filename='best_model', verbose=1)
     # rllab.evaluate_agent(0)
 
 
