@@ -545,7 +545,6 @@ class BinanceEnvBase(gymnasium.Env):
             self.reward_step += (self.pnl - self.previous_pnl)
 
         self.old_total_assets = float(self.total_assets)
-        self.previous_pnl = float(self.pnl)
 
         terminated = bool(self.pnl < self.pnl_stop)
         self.timecount += 1
@@ -645,6 +644,7 @@ class BinanceEnvBase(gymnasium.Env):
             self._warmup()
         observation = self._get_obs()
         info = self._get_info()
+        self.previous_pnl = 0.
 
         return observation, info
 
@@ -711,10 +711,11 @@ class BinanceEnvCash(BinanceEnvBase):
                 1 - self.asset.orders.commission)
         self.previous_price = self.price
         self.size_lst: list = []
+        self.previous_buy_and_hold_pnl: float = 0.
         self.last_sell_order_pnl: float = 0.
 
     @property
-    def buy_and_hold_pnl(self):
+    def buy_and_hold_pnl(self) -> float:
         return (self.buy_and_hold_start_size * self.price) / self.initial_total_assets - 1
 
     def _take_action(self, action, amount) -> tuple:
@@ -755,7 +756,7 @@ class BinanceEnvCash(BinanceEnvBase):
                 order_cash = self.asset.orders.book[-1].order_cash
                 order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
                 # self.reward_step = (self.reward_step / self.initial_total_assets)
-                self.reward_step = (order_profit / self.initial_total_assets) - 0.5
+                self.reward_step = (order_profit / self.initial_total_assets)
                 self.last_sell_order_pnl = float(self.pnl)
             else:
                 action = 2
@@ -788,7 +789,8 @@ class BinanceEnvCash(BinanceEnvBase):
     def step(self, action):
         info = self._get_info()
         # self.reward_step = .0
-        self.reward_step = -self.penalty_value
+        self.reward_step = (self.pnl - self.previous_pnl) - (self.buy_and_hold_pnl - self.previous_buy_and_hold_pnl)
+        # self.reward_step = -self.penalty_value
 
         action, amount = self.action_space_obj.convert2action(action, None)
         # action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
@@ -829,18 +831,19 @@ class BinanceEnvCash(BinanceEnvBase):
         if terminated or truncated:
             self.timecount -= 1
             self.dones = True
-            # self.reward_step += self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
+            self.reward_step = self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
             # self.reward_step += (self.pnl - (self.buy_and_hold_pnl * (
             #         1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) * 10. if self.pnl != 0. else (
             #         self.pnl_stop - (
             #         self.buy_and_hold_pnl * (1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) * 10.
-            reward = ((self.pnl - self.last_sell_order_pnl) - 0.5) if self.pnl != 0. else (self.pnl_stop - 0.5)
+            # reward = ((self.pnl - self.last_sell_order_pnl) - 0.5) if self.pnl != 0. else (self.pnl_stop - 0.5)
             # reward = max(-19., min(reward, 19.))
-            self.reward_step += reward
+            # self.reward_step += reward
 
-            # self.reward_step = new_logarithmic_scaler(self.reward_step)
-            # self.previous_pnl = self.pnl
-            # self.previous_price = self.price
+        self.reward_step = new_logarithmic_scaler(self.reward_step)
+        self.previous_pnl = float(self.pnl)
+        self.previous_buy_and_hold_pnl = float(self.buy_and_hold_pnl)
+        # self.previous_price = self.price
         self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
@@ -867,6 +870,7 @@ class BinanceEnvCash(BinanceEnvBase):
         self.last_sell_order_pnl = 0.
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
                 1 - self.asset.orders.commission)
+        self.previous_buy_and_hold_pnl = 0.
         return observation, info
 
     def __del__(self):
@@ -1052,7 +1056,7 @@ class BinanceEnvMax(BinanceEnvBase):
             #         1 + (np.sign(self.buy_and_hold_pnl) * 0.2)))) * 10. if self.pnl != 0. else (self.pnl_stop - (
             #         self.buy_and_hold_pnl * (1 + (np.sign(self.buy_and_hold_pnl) * 0.2)))) * 10.
             self.reward_step += ((self.pnl - self.last_sell_order_pnl) - 1.) if self.pnl != 0. else ((
-                                                                                                                   self.pnl - self.pnl_stop) - 1.)
+                                                                                                             self.pnl - self.pnl_stop) - 1.)
 
         # self.reward_step = new_logarithmic_scaler(self.reward_step)
         # self.previous_pnl = self.pnl
