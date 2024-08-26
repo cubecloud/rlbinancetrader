@@ -1,28 +1,29 @@
 import logging
-import datetime
-import gc
+# import datetime
+# import gc
 import numpy as np
-from dateutil.relativedelta import relativedelta
-from dbbinance.fetcher.datautils import get_timedelta_kwargs
-from dbbinance.fetcher.datafetcher import ceil_time, floor_time
-from dbbinance.fetcher.constants import Constants
-
-from stable_baselines3 import HerReplayBuffer
-from stable_baselines3.her.goal_selection_strategy import GoalSelectionStrategy
-from stable_baselines3.common.envs import BitFlippingEnv
+# from dateutil.relativedelta import relativedelta
+# from dbbinance.fetcher.datautils import get_timedelta_kwargs
+# from dbbinance.fetcher.datafetcher import ceil_time, floor_time
+# from dbbinance.fetcher.constants import Constants
+#
+# from stable_baselines3 import HerReplayBuffer
+# from stable_baselines3.her.goal_selection_strategy import GoalSelectionStrategy
+# from stable_baselines3.common.envs import BitFlippingEnv
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 # from torch.nn import Tanh, Softmax, LeakyReLU, ReLU
-from binanceenv.bienv import BinanceEnvBase
+# from binanceenv.bienv import BinanceEnvBase
 from binanceenv.bienv import BinanceEnvCash
-from customnn.mlpextractor import MlpExtractorNN
+# from customnn.mlpextractor import MlpExtractorNN
 from rllab.rllaboratory import LabBase
-from rllab.labtools import CoSheduller
+# from rllab.labcosheduller import CoSheduller
 from multiprocessing import freeze_support
-import torch
 
-__version__ = 0.052
+# import torch
+
+__version__ = 0.063
 
 logger = logging.getLogger()
 
@@ -60,9 +61,9 @@ if __name__ == '__main__':
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
     total_timesteps = 16_000_000
-    buffer_size = 1_000_000
+    buffer_size = 1_800_000
     learning_start = 750_000
-    batch_size = 1024
+    batch_size = 5120
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -113,13 +114,69 @@ if __name__ == '__main__':
                           eps_start=0.99,
                           eps_end=0.01,
                           eps_decay=0.2,
-                          gamma=0.995,
+                          gamma=0.995,  # change to 0.9995 next run
                           invalid_actions=15_000,
                           penalty_value=1e-5,
                           action_type='box',
                           # index_type='target_time',
                           index_type='prediction_time',
                           )
+
+    env_box_4_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
+                            pnl_stop=-0.9,
+                            # max_lot_size=0.5,
+                            verbose=2,
+                            log_interval=1,
+                            seed=42,
+                            target_balance=100_000.,
+                            target_minimum_trade=100.,
+                            observation_type='lookback_assets_close_indicators',
+                            # observation_type='indicators_close',
+                            stable_cache_data_n=250,
+                            reuse_data_prob=0.95,
+                            eval_reuse_prob=0.9999,
+                            # lookback_window=None,
+                            lookback_window='2h',
+                            max_hold_timeframes='30d',
+                            total_timesteps=total_timesteps,
+                            eps_start=0.99,
+                            eps_end=0.01,
+                            eps_decay=0.2,
+                            gamma=0.995,
+                            invalid_actions=15_000,
+                            penalty_value=1e-5,
+                            action_type='box_4',
+                            # index_type='target_time',
+                            index_type='prediction_time',
+                            )
+
+    env_box1_1_4_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
+                               pnl_stop=-0.9,
+                               # max_lot_size=0.5,
+                               verbose=2,
+                               log_interval=1,
+                               seed=42,
+                               target_balance=100_000.,
+                               target_minimum_trade=100.,
+                               observation_type='lookback_assets_close_indicators',
+                               # observation_type='indicators_close',
+                               stable_cache_data_n=250,
+                               reuse_data_prob=0.95,
+                               eval_reuse_prob=0.9999,
+                               # lookback_window=None,
+                               lookback_window='2h',
+                               max_hold_timeframes='30d',
+                               total_timesteps=total_timesteps,
+                               eps_start=0.99,
+                               eps_end=0.01,
+                               eps_decay=0.2,
+                               gamma=0.9995,  # change to 0.9995 next run
+                               invalid_actions=15_000,
+                               penalty_value=1e-5,
+                               action_type='box1_1_4',
+                               # index_type='target_time',
+                               index_type='prediction_time',
+                               )
 
     env_box1_1_3_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                                pnl_stop=-0.9,
@@ -294,9 +351,9 @@ if __name__ == '__main__':
     features_dim = 256
     sac_policy_kwargs = dict(
         features_extractor_class='MlpExtractorNN',
-        features_extractor_kwargs=dict(features_dim=features_dim),
+        features_extractor_kwargs=dict(features_dim=features_dim, activation_fn='LeakyReLU'),
         share_features_extractor=True,
-        activation_fn='LeakyReLU',
+        activation_fn='ReLU',
         # net_arch=[features_dim, features_dim]
     )
 
@@ -312,11 +369,11 @@ if __name__ == '__main__':
                                                          min_learning_rate=1e-5,
                                                          total_epochs=total_timesteps,
                                                          epsilon=100)},
-                      action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=5e-1 * np.ones(3),
-                                                                         sigma=4.99e-1 * np.ones(3),
+                      action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=5e-1 * np.ones(4),
+                                                                         sigma=1e-1 * np.ones(4),
                                                                          dt=1e-2)},
-                      train_freq=(2, 'step'),
-                      target_update_interval=10,  # update target network every 10 _gradient_ steps
+                      # train_freq=(10, 'step'),
+                      # target_update_interval=6,  # update target network every 6 _gradient_ steps
                       device="auto",
                       verbose=1)
 
@@ -340,7 +397,7 @@ if __name__ == '__main__':
 
     rllab = LabBase(
         env_cls=[BinanceEnvCash],
-        env_kwargs=[env_box_kwargs],
+        env_kwargs=[env_box_4_kwargs],
         agents_cls=[SAC],
         agents_kwargs=[sac_kwargs],
         agents_n_env=[4],

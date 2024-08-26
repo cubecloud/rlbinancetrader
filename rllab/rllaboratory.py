@@ -27,9 +27,10 @@ from dataclasses import asdict, dataclass, field, make_dataclass
 from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
-from rllab.labserializer import deserialize_kwargs
+from rllab.labtools import deserialize_kwargs
+from rllab.labserializer import lab_serializer
 
-__version__ = 0.034
+__version__ = 0.039
 
 TZ = timezone('Europe/Moscow')
 
@@ -234,8 +235,6 @@ class LabBase:
 
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
-
-
     def evaluate_agent(self, ix, verbose=1):
         agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
 
@@ -310,7 +309,9 @@ class LabBase:
             f'{self.__class__.__name__}: Creating agent: #{ix:02d} {self.agents_classes_lst[ix].__class__.__name__}')
         agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
 
-        agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix], **deserialize_kwargs(agent_kwargs))
+        agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix],
+                                                **deserialize_kwargs(agent_kwargs, lab_serializer))
+
         agent_cfg = LABConfig(**asdict(self.base_cfg))
         agent_cfg.ALGO = agent_obj.__class__.__name__
         agent_cfg.OBS_TYPE = train_env_kwargs.get('observation_type', None)
@@ -438,12 +439,13 @@ class LabBase:
             os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_env_kwargs.json'))
         agent_kwargs = ConfigMethods.load_config(
             os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
-        if isinstance(agent_kwargs['train_freq'], list):
+
+        if isinstance(agent_kwargs.get('train_freq', None), list):
             agent_kwargs.update({'train_freq': tuple(agent_kwargs['train_freq'])})
-        lab_kwargs: dict = {'env_cls': [deserialize_kwargs(agent_cfg.ENV_NAME)],
-                            'agents_cls': [deserialize_kwargs(agent_cfg.ALGO)],
-                            'env_kwargs': [deserialize_kwargs(env_kwargs)],
-                            'agents_kwargs': [deserialize_kwargs(agent_kwargs)],
+        lab_kwargs: dict = {'env_cls': [deserialize_kwargs(agent_cfg.ENV_NAME, lab_serializer)],
+                            'agents_cls': [deserialize_kwargs(agent_cfg.ALGO, lab_serializer)],
+                            'env_kwargs': [deserialize_kwargs(env_kwargs, lab_serializer)],
+                            'agents_kwargs': [deserialize_kwargs(agent_kwargs, lab_serializer)],
                             'agents_n_env': agent_cfg.AGENTS_N_ENV,
                             'env_wrapper': agent_cfg.ENV_WRAPPER,
                             'total_timesteps': agent_cfg.TOTAL_TIMESTEPS,
@@ -457,7 +459,7 @@ class LabBase:
                             }
 
         new_instance = cls.__new__(cls)
-        deserialized_kwargs = deserialize_kwargs(lab_kwargs)
+        deserialized_kwargs = deserialize_kwargs(lab_kwargs, lab_serializer)
         cls.__init__(new_instance, exp_cfg=agent_cfg, **deserialized_kwargs)
         return new_instance
 

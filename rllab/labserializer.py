@@ -1,18 +1,17 @@
 import copy
 from typing import Union, Callable, ClassVar
 import numpy as np
-from rllab.labtools import CoSheduller
+from rllab.labcosheduller import CoSheduller
 from torch.nn import ReLU, LeakyReLU, Tanh
 from customnn.mlpextractor import MlpExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC
 from binanceenv import BinanceEnvBase
 from binanceenv import BinanceEnvCash
-
-__version__ = 0.009
+from rllab.labtools import deserialize_kwargs
+__version__ = 0.011
 
 #   underscore at the end of class name -> call object itself to get method
-
 lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'MlpExtractorNN': MlpExtractorNN,
                         'ReLU': ReLU,
@@ -29,38 +28,6 @@ lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'BinanceEnvCash': BinanceEnvCash
                         }
 
-
-def deserialize_kwargs(_agent_kwargs: Union[dict, str]) -> Union[dict, Callable]:
-    agent_kwargs = copy.deepcopy(_agent_kwargs)
-    data_update: dict = {}
-    if isinstance(agent_kwargs, dict):
-        for _key, _value in agent_kwargs.items():
-            if isinstance(_value, str):
-                for serializer_key, serializer_value in lab_serializer.items():
-                    if _value.lower() == serializer_key.lower():
-                        deserialized_obj = lab_serializer.get(_value, None)
-                        data_update.update({_key: deserialized_obj})
-            elif isinstance(_value, dict):
-                for serializer_key, serializer_value in lab_serializer.items():
-                    if _key.lower() == serializer_key.lower():
-                        for _k, _v in _value.items():
-                            deserialized_obj = lab_serializer.get(_key, None).get(_k, None)
-                            if deserialized_obj is not None:
-                                data_update.update({_key: deserialized_obj(**_v)})
-                            else:
-                                deserialized_obj = lab_serializer.get(_key, None).get(f'{_k}_', None)
-                                if deserialized_obj is not None:
-                                    data_update.update({_key: deserialized_obj(**_v)()})
-                if not data_update:
-                    data_update.update({_key: deserialize_kwargs(_value)})
-        agent_kwargs.update(data_update)
-    elif isinstance(agent_kwargs, str):
-        deserialized_obj = lab_serializer.get(agent_kwargs, None)
-        if deserialized_obj is not None:
-            agent_kwargs = deserialized_obj
-    return agent_kwargs
-
-
 if __name__ == '__main__':
     total_timesteps = 16_000_000
     buffer_size = 1_000_000
@@ -71,7 +38,7 @@ if __name__ == '__main__':
 
     sac_policy_kwargs = dict(
         features_extractor_class='MlpExtractorNN',
-        features_extractor_kwargs=dict(features_dim=256),
+        features_extractor_kwargs=dict(features_dim=256, activation_fn='ReLU'),
         share_features_extractor=True,
         activation_fn='ReLU',
         # net_arch=net_arch,
@@ -96,4 +63,4 @@ if __name__ == '__main__':
                       device="auto",
                       verbose=1)
 
-    print(deserialize_kwargs(sac_kwargs))
+    print(deserialize_kwargs(sac_kwargs, lab_serializer=lab_serializer))

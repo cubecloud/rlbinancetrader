@@ -1,38 +1,44 @@
-from typing import Callable
-from math import cos, pi
+from typing import Callable, Union, Dict
+import copy
 
-__version__ = 0.002
+__version__ = 0.009
 
 
-class CoSheduller:
-    def __init__(self, warmup: int = 15, learning_rate: float = 1e-4, min_learning_rate: float = 1e-6,
-                 total_epochs: int = 300, epsilon: int = 100):
+def deserialize_kwargs(_agent_kwargs: Union[dict, str],
+                       lab_serializer=None) -> Union[dict, Callable]:
+    """
 
-        self.warmup = warmup
-        self.learning_rate = learning_rate
-        self.min_learning_rate = min_learning_rate
-        self.total_epochs = total_epochs
-        self.last_lr = self.learning_rate
-        self.epsilon = epsilon
-        self.__call__()
+    Args:
+        lab_serializer (dict):
+    """
+    if lab_serializer is None:
+        lab_serializer = {}
 
-    def __call__(self) -> Callable[[float], float]:
-        return self.scheduler
-
-    def scheduler(self, progress_remaining: float) -> float:
-        # progress_remaining = 1.0 - (num_timesteps / total_timesteps)
-        epoch = int((1 - progress_remaining) * self.total_epochs)
-        if epoch % self.epsilon == 0:
-            """ Warm up from zero to learning_rate """
-            if epoch <= self.warmup - 1:
-                lr = self.min_learning_rate + (((self.learning_rate - self.min_learning_rate) / self.warmup) *
-                                               epoch)
-            else:
-                """ using cos learning rate """
-
-                formula = self.min_learning_rate + 0.5 * (self.learning_rate - self.min_learning_rate) * (
-                        1 + cos(max(epoch + 1 - self.warmup, 0) * pi / max(self.total_epochs - self.warmup, 1)))
-                # min calc min and max with zero centered logic - close to zero = less
-                lr = max(formula, self.min_learning_rate)
-            self.last_lr = lr
-        return self.last_lr
+    agent_kwargs = copy.deepcopy(_agent_kwargs)
+    data_update: dict = {}
+    if isinstance(agent_kwargs, dict):
+        for _key, _value in agent_kwargs.items():
+            if isinstance(_value, str):
+                for serializer_key, serializer_value in lab_serializer.items():
+                    if _value.lower() == serializer_key.lower():
+                        deserialized_obj = lab_serializer.get(_value, None)
+                        data_update.update({_key: deserialized_obj})
+            elif isinstance(_value, dict):
+                for serializer_key, serializer_value in lab_serializer.items():
+                    if _key.lower() == serializer_key.lower():
+                        for _k, _v in _value.items():
+                            deserialized_obj = lab_serializer.get(_key, None).get(_k, None)
+                            if deserialized_obj is not None:
+                                data_update.update({_key: deserialized_obj(**_v)})
+                            else:
+                                deserialized_obj = lab_serializer.get(_key, None).get(f'{_k}_', None)
+                                if deserialized_obj is not None:
+                                    data_update.update({_key: deserialized_obj(**_v)()})
+                if not data_update:
+                    data_update.update({_key: deserialize_kwargs(_value, lab_serializer)})
+        agent_kwargs.update(data_update)
+    elif isinstance(agent_kwargs, str):
+        deserialized_obj = lab_serializer.get(agent_kwargs, None)
+        if deserialized_obj is not None:
+            agent_kwargs = deserialized_obj
+    return agent_kwargs

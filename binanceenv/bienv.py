@@ -28,7 +28,7 @@ from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
 
-__version__ = 0.037
+__version__ = 0.039
 
 logger = logging.getLogger()
 
@@ -268,8 +268,12 @@ class BinanceEnvBase(gymnasium.Env):
             self.action_space_obj = DiscreteActionSpace(3)
         elif action_type == 'box':
             self.action_space_obj = BoxActionSpace(n_action=3)
+        elif action_type == 'box_4':
+            self.action_space_obj = BoxActionSpace(n_action=4)
         elif action_type == 'box1_1_3':
             self.action_space_obj = BoxExtActionSpace(n_action=3)
+        elif action_type == 'box1_1_4':
+            self.action_space_obj = BoxExtActionSpace(n_action=4)
         elif action_type == 'binbox':
             self.action_space_obj = BinBoxActionSpace(n_action=3, low=-1, high=1)
         elif action_type == 'two_actions':
@@ -599,7 +603,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
-        stable_cache = max(18., self.stable_cache_data_n * (
+        stable_cache = max(10., self.stable_cache_data_n * (
                 1. - self.epsilon)) if self.use_period == 'train' else self.stable_cache_data_n
 
         if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
@@ -733,8 +737,8 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
             max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
             min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
-            # size = min(max(min_trade, amount), max_size if min_trade < max_size else 0.)
-            size = min_trade if min_trade < max_size else 0.
+            size = min(max(min_trade, amount), max_size if max_size > min_trade else 0.)
+            # size = min_trade if min_trade < max_size else 0.
             if size != 0.:
                 self.asset.orders.buy(size, self.price)
                 action_commission = self.asset.orders.book[-1].order_commission
@@ -746,10 +750,27 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
             min_trade = max(self.min_coin_trade,
                             (self.target.minimum_trade / self.price) * (1. + self.asset.orders.commission))
-            # size = min(max(min_trade, amount),
-            #            self.asset.balance.size if min_trade < self.asset.balance.size else 0.)
-            size = min_trade if min_trade < self.asset.balance.size else 0.
+            size = min(max(min_trade, amount),
+                       self.asset.balance.size if self.asset.balance.size > min_trade else 0.)
+            # size = min_trade if min_trade < self.asset.balance.size else 0.
 
+            if size != 0:
+                self.asset.orders.sell(size, self.price)
+                action_commission = self.asset.orders.book[-1].order_commission
+                order_cash = self.asset.orders.book[-1].order_cash
+                order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
+                # self.reward_step = (self.reward_step / self.initial_total_assets)
+                self.reward_step = (order_profit / self.initial_total_assets)
+                self.last_sell_order_pnl = float(self.pnl)
+            else:
+                action = 2
+
+        elif action == 3:  # Close all
+            self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
+            # min_trade = max(self.min_coin_trade,
+            #                 (self.target.minimum_trade / self.price) * (1. + self.asset.orders.commission))
+            size = self.asset.balance.size if self.asset.balance.size > self.min_coin_trade else 0.
+            # size = min_trade if min_trade < self.asset.balance.size else 0.
             if size != 0:
                 self.asset.orders.sell(size, self.price)
                 action_commission = self.asset.orders.book[-1].order_commission
@@ -778,7 +799,7 @@ class BinanceEnvCash(BinanceEnvBase):
                     f"{(old_target_balance + (old_coin_balance * self.price)):.1f} {self.asset.symbol}")
                 msg = (f"{ohlcv}\n{msg}"
                        f"\tAction num: {action}\t{old_balance} "
-                       f"\tACTION => {actions_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f}) "
+                       f"\tACTION => {actions_4_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f}) "
                        f"{self.action_symbol}, commission: {action_commission:.2f}"
                        f"\t{self.current_balance}\tprofit {order_profit:.4f}\tPNL {self.pnl:.4f}"
                        f"\treward:{self.reward_step:.5f}")
@@ -831,11 +852,11 @@ class BinanceEnvCash(BinanceEnvBase):
         if terminated or truncated:
             self.timecount -= 1
             self.dones = True
-            self.reward_step = self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
-            # self.reward_step += (self.pnl - (self.buy_and_hold_pnl * (
-            #         1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) * 10. if self.pnl != 0. else (
-            #         self.pnl_stop - (
-            #         self.buy_and_hold_pnl * (1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) * 10.
+            # self.reward_step = self.pnl * 100. if self.pnl != 0. else self.pnl_stop * 100.
+            self.reward_step = (self.pnl - (self.buy_and_hold_pnl * (
+                    1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) * 100. if self.pnl != 0. else (
+                    self.pnl_stop - (
+                    self.buy_and_hold_pnl * (1 + (np.sign(self.buy_and_hold_pnl) * (1 - self.epsilon))))) * 100.
             # reward = ((self.pnl - self.last_sell_order_pnl) - 0.5) if self.pnl != 0. else (self.pnl_stop - 0.5)
             # reward = max(-19., min(reward, 19.))
             # self.reward_step += reward
