@@ -124,12 +124,13 @@ if __name__ == '__main__':
 
     env_box_4_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                             pnl_stop=-0.9,
-                            # max_lot_size=0.5,
+
                             verbose=2,
                             log_interval=1,
                             seed=42,
                             target_balance=100_000.,
                             target_minimum_trade=100.,
+                            target_maximum_trade=1000.,
                             observation_type='lookback_assets_close_indicators',
                             # observation_type='indicators_close',
                             stable_cache_data_n=250,

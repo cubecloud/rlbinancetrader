@@ -15,11 +15,13 @@ class TargetCash:
     def __init__(self, symbol: str = 'USDT',
                  initial_cash: float = 100_000.,
                  minimum_trade: float = 5.,
+                 maximum_trade: float = 100.,
                  use_period: str = 'train'):
         self.symbol = symbol
         self.use_period = use_period
         self.max_cash = initial_cash
         self.minimum_trade = minimum_trade
+        self.maximum_trade = maximum_trade
         if self.use_period == 'train':
             self.initial_cash = self.random_starting_cash()
             self.reset_func = self._train_reset

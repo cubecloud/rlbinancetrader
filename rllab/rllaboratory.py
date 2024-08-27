@@ -235,35 +235,6 @@ class LabBase:
 
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
-    def evaluate_agent(self, ix, verbose=1):
-        agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
-
-        """ Create independent evaluation env """
-        eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        eval_env_kwargs.update({'use_period': 'test', 'verbose': verbose, 'stable_cache_data_n': self.n_eval_episodes})
-        eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
-                                   n_envs=1,
-                                   seed=42,
-                                   env_kwargs=eval_env_kwargs,
-                                   vec_env_cls=DummyVecEnv)
-
-        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
-
-        # filename = agent_cfg.FILENAME
-        agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
-        result = lab_evaluate_policy(agent_obj,
-                                     eval_vec_env,
-                                     n_eval_episodes=self.n_eval_episodes,
-                                     deterministic=self.deterministic,
-                                     return_episode_rewards=True)
-
-        result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1], 'ep_pnl': result[2]})
-        result = result.astype({"reward": float, "ep_length": int, 'ep_pnl': float})
-        msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
-               f'Evaluation result on BEST model:\n {result.to_string()}')
-        logger.debug(msg)
-        result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
-
     # def __get_env(self, env_cls, env_kwargs):
     #     env = env_cls(**env_kwargs)
     #     return env
@@ -346,6 +317,30 @@ class LabBase:
             self.learn_agent(ix)
             self.evaluate_agent(ix)
 
+    def evaluate_agent(self, ix, verbose=1):
+        agent_obj, agent_cfg, agent_kwargs = self.get_agent_requisite(ix)
+
+        """ Create independent evaluation env """
+        eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
+        eval_env_kwargs.update({'use_period': 'test', 'verbose': verbose, 'stable_cache_data_n': self.n_eval_episodes})
+        eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
+                                   n_envs=1,
+                                   seed=42,
+                                   env_kwargs=eval_env_kwargs,
+                                   vec_env_cls=DummyVecEnv)
+
+        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
+
+        # filename = agent_cfg.FILENAME
+        agent_obj.load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model'), env=eval_vec_env)
+        result = lab_evaluate_policy(agent_obj,
+                                     agent_obj.get_env(),
+                                     n_eval_episodes=self.n_eval_episodes,
+                                     deterministic=self.deterministic,
+                                     return_episode_rewards=True)
+
+        self.show_result(result, agent_cfg, save_csv=True)
+
     def test_agent(self, ix=0, filename: str = 'best_model', verbose=1):
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
@@ -382,14 +377,16 @@ class LabBase:
                                      n_eval_episodes=self.n_eval_episodes,
                                      deterministic=self.deterministic,
                                      return_episode_rewards=True)
+        self.show_result(result, agent_cfg, save_csv=False)
 
-        result = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1], 'ep_pnl': result[2]})
-        result = result.astype({"reward": float, "ep_length": int, 'ep_pnl': float})
-        msg = (f'{self.__class__.__name__}: Agent #{ix:02d}: {agent_obj.__class__.__name__} '
-               f'Evaluation result on BEST model:\n {result.to_string()}')
+    def show_result(self, result, agent_cfg, save_csv=True):
+        result_df = pd.DataFrame(data={'reward': result[0], 'ep_length': result[1], 'ep_pnl': result[2]})
+        result_df = result_df.astype({"reward": float, "ep_length": int, 'ep_pnl': float})
+        total_df = result_df.groupby(result_df.index // self.n_eval_episodes).mean()
+        msg = f'{self.__class__.__name__}: Evaluation result on BEST model:\n{result_df.to_string()}\n{total_df.to_string()}'
         logger.info(msg)
-        # print(msg)
-        # result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
+        if save_csv:
+            result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
     def backtesting(self, ix=0, filename: str = 'best_model', verbose=1):
         """ Create independent evaluation env """
