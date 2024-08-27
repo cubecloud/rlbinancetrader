@@ -130,7 +130,7 @@ if __name__ == '__main__':
     #     verbose=0
     # )
 
-    json_cfg = './save/BinanceEnvCash/SAC/exp-2708-124441/SAC_BinanceEnvCash_16000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/SAC/exp-2708-201934/SAC_BinanceEnvCash_16000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     rllab.test_agent(filename='best_model', verbose=1)

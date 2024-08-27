@@ -373,7 +373,7 @@ if __name__ == '__main__':
                       action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=5e-1 * np.ones(4),
                                                                          sigma=1e-1 * np.ones(4),
                                                                          dt=1e-2)},
-                      # train_freq=(10, 'step'),
+                      train_freq=2,
                       # target_update_interval=6,  # update target network every 6 _gradient_ steps
                       device="auto",
                       verbose=1)

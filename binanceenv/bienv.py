@@ -5,6 +5,7 @@ import logging
 import gymnasium
 import numpy as np
 import numba
+import pandas as pd
 from numba import jit
 from typing import Union
 
@@ -27,19 +28,12 @@ from datawizard.dataprocessor import IndicatorProcessor
 from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
+import matplotlib.pyplot as plt
 
-__version__ = 0.039
+__version__ = 0.045
 
 logger = logging.getLogger()
 
-
-# @jit(nopython=True)
-# def new_logarithmic_scaler(value):
-#     if value < 0:
-#         _temp = -(1 / (1 + (math.e ** -(np.log10(abs(value) + 1)))) - 0.5) / 0.5
-#     else:
-#         _temp = (1 / (1 + (math.e ** -(np.log10(value + 1)))) - 0.5) / 0.5
-#     return _temp
 
 @jit(nopython=True)
 def _new_logarithmic_scaler(value, value_sign):
@@ -82,7 +76,6 @@ class BinanceEnvBase(gymnasium.Env):
                  eval_reuse_prob: float = 0.99,
                  seed: int = 41,
                  lookback_window: Union[str, int, None] = None,
-                 # TODO inplement max lot size
                  # max_lot_size: float = 0.25,
                  max_hold_timeframes='72h',
                  penalty_value: float = 1e-5,
@@ -181,7 +174,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.action_space = self.get_action_space(action_type=action_type)  # {0, 1, 2}
 
         # self._action_buy_hold_sell = ["Buy", "Sell", "Hold"]
-        self.old_total_assets: float = 0.
+
         self.initial_total_assets = self.initial_cash + (self.asset.balance.size * self.asset.balance.price)
 
         # self.action_bin_obj = ActionsBins([-1, 1], 3)
@@ -198,6 +191,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.reward_step = .0
         self.total_reward: float = 0.
         self.previous_pnl: float = .0
+        self.previous_total_assets: float = 0.
+
         self.order_pnl: float = .0
         self.all_actions = np.asarray(list(range(3)))
         self.invalid_action_counter: int = 0
@@ -205,6 +200,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.key_list: list = []
         self.epsilon: float = 1.0
         self.dones: bool = False
+        self.render_df = pd.DataFrame(index=self.ohlcv_df.index, data=0., columns=['price', 'action', 'amount', 'pnl'])
 
     def __del__(self):
         BinanceEnvBase.count -= 1
@@ -541,6 +537,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.actions_lst.append(action)
         self._take_action_func(action, amount)
 
+        self._render(self.timecount, self.price, action, amount, self.pnl)
+
         observation = self._get_obs()
 
         self.total_reward = self.total_assets - self.initial_total_assets
@@ -552,7 +550,7 @@ class BinanceEnvBase(gymnasium.Env):
         else:
             self.reward_step += (self.pnl - self.previous_pnl)
 
-        self.old_total_assets = float(self.total_assets)
+        self.previous_total_assets = float(self.total_assets)
 
         terminated = bool(self.pnl < self.pnl_stop)
         self.timecount += 1
@@ -570,6 +568,9 @@ class BinanceEnvBase(gymnasium.Env):
         self.previous_pnl = self.pnl
 
         return observation, self.reward_step, terminated, truncated, info
+
+    def _render(self, timecount, price, action, amount, pnl):
+        self.render_df.iloc[timecount] = price, action, amount, pnl
 
     def log_reset_msg(self):
         values, counts = np.unique(self.actions_lst, return_counts=True)
@@ -590,7 +591,14 @@ class BinanceEnvBase(gymnasium.Env):
     def _lookback_warmup(self):
         for ix in range(self.lookback_timeframes):
             _ = self.__get_obs_func()
+            self._render(self.timecount, self.price, actions_4_dict['Hold'], 0, self.pnl)
             self.timecount = ix
+
+    def calc_sharpe_ratio(self, risk_free_rate=0.05) -> float:
+        # risk_free_rate = 0.02  # Example risk-free rate
+        excess_return = self.total_assets - self.previous_total_assets
+        std_deviation = np.std(self.ohlcv_df.iloc[self.lookback_timeframes:self.timecount + 1]['close'])
+        return (excess_return - risk_free_rate) / std_deviation if std_deviation != 0 else 0
 
     def reset(self, seed=None, options=None):
         with mlp_mutex:
@@ -633,6 +641,8 @@ class BinanceEnvBase(gymnasium.Env):
             cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
             self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
 
+        self.render_df = pd.DataFrame(index=self.ohlcv_df.index, data=0., columns=['price', 'action', 'amount', 'pnl'])
+
         if self.use_period == 'train':
             size = self.np_random.random() / 2
             cost = self.price * size
@@ -648,11 +658,12 @@ class BinanceEnvBase(gymnasium.Env):
         self.order_closed = False
         self.episode_reward = .0
         self.gamma_return = .0
-        if self.observation_type in ['lookback_assets_close_indicators']:
+        if self.observation_type == 'lookback_assets_close_indicators':
             self._warmup()
         observation = self._get_obs()
         info = self._get_info()
         self.previous_pnl = 0.
+        self.previous_total_assets: float = self.total_assets
 
         return observation, info
 
@@ -666,6 +677,22 @@ class BinanceEnvBase(gymnasium.Env):
     def get_seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return seed
+
+    def render(self):
+        df = self.render_df.set_index('Date')
+        fig, ax = plt.subplots(figsize=(18, 6))
+        df.plot(y="pnl", use_index=True, ax=ax, style='--', color='lightgrey')
+        df.plot(y="price", use_index=True, ax=ax, secondary_y=True, color='black')
+
+        for idx in df.index.tolist():
+            if (df.loc[idx]['action'] == 'buy') & (df.loc[idx]['amount'] > 0):
+                plt.plot(idx, df.loc[idx]["price"] - 1, 'g^')
+                plt.text(idx, df.loc[idx]["price"] - 3, df.loc[idx]['amount'], c='green', fontsize=8,
+                         horizontalalignment='center', verticalalignment='center')
+            elif (df.loc[idx]['action'] == 'sell') & (df.loc[idx]['amount'] > 0):
+                plt.plot(idx, df.loc[idx]["price"] + 1, 'rv')
+                plt.text(idx, df.loc[idx]["price"] + 3, df.loc[idx]['amount'], c='red', fontsize=8,
+                         horizontalalignment='center', verticalalignment='center')
 
 
 class BinanceEnvCash(BinanceEnvBase):
@@ -713,10 +740,10 @@ class BinanceEnvCash(BinanceEnvBase):
 
         self.idnum = int(BinanceEnvCash.count)
 
-        self.order_opened: bool = False
-        self.order_closed: bool = False
-        self.order_opened_pnl: float = 0.
-        self.order_closed_pnl: float = 0.
+        # self.order_opened: bool = False
+        # self.order_closed: bool = False
+        # self.order_opened_pnl: float = 0.
+        # self.order_closed_pnl: float = 0.
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
                 1 - self.asset.orders.commission)
         self.previous_price = self.price
@@ -824,23 +851,13 @@ class BinanceEnvCash(BinanceEnvBase):
 
         action, amount = self.action_space_obj.convert2action(action, None)
         # action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
-        # valid_actions = self.get_valid_actions(info['action_masks'])
-        # if action not in valid_actions:
-        #     action = 2
-        #     amount = 0.
-        #     # self.reward_step += -self.penalty_value
-
-        # if masked_action != action:
-        #     # amount = 0.
-        #     self.invalid_action_counter += 1
-        #     # self.reward_step += -self.penalty_value
-        #     action = 2
-        #     amount = 0
 
         real_action, real_size = self._take_action_func(action, amount)
+
+        self._render(self.timecount, self.price, real_action, real_size, self.pnl)
+
         self.actions_lst.append(real_action)
         self.size_lst.append(real_size)
-        # self.reward_step = ((self.pnl - self.previous_pnl) + 1) / (self.buy_and_hold_pnl + 1) - self.reward_step
 
         observation = self._get_obs()
 
@@ -853,11 +870,7 @@ class BinanceEnvCash(BinanceEnvBase):
 
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
-            # self.reward_step += (self.asset.balance.size * self.price) - (
-            #         self.asset.balance.size * self.asset.balance.price)
-            # self.reward_step = new_logarithmic_scaler(self.reward_step)
-            # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-            # self.reward_step += self.gamma_return
+
         if terminated or truncated:
             self.timecount -= 1
             self.dones = True
@@ -880,6 +893,7 @@ class BinanceEnvCash(BinanceEnvBase):
 
         self.previous_pnl = float(self.pnl)
         self.previous_buy_and_hold_pnl = float(self.buy_and_hold_pnl)
+        self.previous_total_assets = float(self.total_assets)
         # self.previous_price = self.price
         self.episode_reward += self.reward_step
 
