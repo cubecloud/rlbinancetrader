@@ -8,7 +8,7 @@ Order = namedtuple('Order', 'OrderType size price order_commission order_cash')
 Bal = namedtuple('Bal', 'size cost price')
 # BBalance = namedtuple('Balance', 'size cost price')
 
-version = 0.019
+version = 0.021
 
 
 class TargetCash:
@@ -16,23 +16,35 @@ class TargetCash:
                  initial_cash: float = 100_000.,
                  minimum_trade: float = 5.,
                  maximum_trade: float = 100.,
+                 scale_decay: int = 1_000_0000,
                  use_period: str = 'train'):
         self.symbol = symbol
         self.use_period = use_period
         self.max_cash = initial_cash
         self.minimum_trade = minimum_trade
         self.maximum_trade = maximum_trade
+        self.scale_decay = scale_decay
         if self.use_period == 'train':
             self.initial_cash = self.random_starting_cash()
             self.reset_func = self._train_reset
         else:
             self.initial_cash = self.max_cash
             self.reset_func = self._test_reset
-
         self.cash = initial_cash
+        self.scaler = self.simple_scaler
+
+    def simple_scaler(self, value):
+        return value / self.scale_decay
+
+    @property
+    def scaled_cash(self):
+        return self.scaler(self.cash)
+
+    def set_scaler(self, ref):
+        self.scaler = ref
 
     def random_starting_cash(self) -> float:
-        return float(np.random.randint(max(int(self.minimum_trade * 5), int(self.max_cash//4)), int(self.max_cash)))
+        return float(np.random.randint(max(int(self.minimum_trade * 5), int(self.max_cash // 8)), int(self.max_cash)))
 
     def _train_reset(self):
         self.initial_cash = self.random_starting_cash()
@@ -46,13 +58,23 @@ class TargetCash:
 
 
 class Balance:
-    def __init__(self, initial_balance: tuple = (0., 0., 0.)):
+    def __init__(self, target_obj: TargetCash,
+                 scaler_method,
+                 initial_balance: tuple = (0., 0., 0.), ):
+        self.target = target_obj
+        self.scaler = scaler_method
         self.size, self.cost, self.price = initial_balance
-        self.arr = np.array(list(initial_balance), dtype=np.float32)
+        self.scaled_arr = np.array([self.scaler(self.size),
+                                    self.target.scaler(self.cost),
+                                    self.target.scaler(self.price)],
+                                   dtype=np.float32)
 
     def reset(self, initial_balance: tuple = (0., 0., 0.)):
         self.size, self.cost, self.price = initial_balance
-        self.arr = np.array(list(initial_balance), dtype=np.float32)
+        self.scaled_arr = np.array([self.scaler(self.size),
+                                    self.target.scaler(self.cost),
+                                    self.target.scaler(self.price)],
+                                   dtype=np.float32)
 
     def __str__(self):
         return f'size={self.size}, cost={self.cost}, price={self.price}'
@@ -65,17 +87,26 @@ class Asset:
                  minimum_trade: float,
                  symbol='BTC',
                  initial_balance: tuple = (0., 0., 0.),
+                 scale_decay: int = 100,
                  ):
         self.symbol = symbol
         self.target = target_obj
         self.initial_balance = Bal(*initial_balance)
-        self.balance = Balance(initial_balance=initial_balance)
+        self.scale_decay = scale_decay
+        self.scaler = self.simple_scaler
+        self.balance = Balance(target_obj=target_obj, scaler_method=self.scaler,  initial_balance=initial_balance, )
         self.minimum_trade = minimum_trade
         self.orders = OrdersBook(symbol=self.symbol,
                                  commission=commission,
                                  minimum_trade=minimum_trade,
                                  target_obj=self.target,
                                  balance_obj=self.balance)
+
+    def simple_scaler(self, value):
+        return value / self.scale_decay
+
+    def set_scaler(self, ref):
+        self.scaler = ref
 
     def reset(self, initial_balance: tuple = (0., 0., 0.)):
         self.target.reset()
@@ -88,8 +119,7 @@ class Asset:
 
 
 class OrdersBook:
-    def __init__(self, symbol, commission, minimum_trade,
-                 target_obj: TargetCash, balance_obj: Balance):
+    def __init__(self, symbol, commission, minimum_trade, target_obj: TargetCash, balance_obj: Balance):
         self.target = target_obj
         self.symbol = symbol
         self.commission = commission
@@ -127,7 +157,10 @@ class OrdersBook:
                     self.balance.cost = self.balance.size * self.balance.price
                 last_index = ix
             self.last_index = last_index + 1
-            self.balance.arr = np.array([self.balance.size, self.balance.cost, self.balance.price], dtype=np.float32)
+            self.balance.scaled_arr = np.array([self.balance.scaler(self.balance.size),
+                                                self.target.scaler(self.balance.cost),
+                                                self.target.scaler(self.balance.price)],
+                                               dtype=np.float32)
 
     def show(self):
         print(self.book)
@@ -159,17 +192,17 @@ if __name__ == '__main__':
     print('Cash + 10000:', asset.target.cash + 10000)
 
     print(asset.balance)
-    print(asset.balance.arr)
+    print(asset.balance.scaled_arr)
     asset.orders.buy(1., 10000)
-    print(asset.balance.arr)
+    print(asset.balance.scaled_arr)
     asset.orders.buy(1., 10000)
     print(asset.balance)
     asset.orders.show()
     print(asset.balance)
-    print(asset.balance.arr)
+    print(asset.balance.scaled_arr)
     asset.orders.buy(1., 40000)
     print(asset.balance)
-    print(asset.balance.arr)
+    print(asset.balance.scaled_arr)
 
     asset.orders.show()
     asset.reset((0.5, 67000, 37500))

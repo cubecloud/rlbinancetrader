@@ -6,7 +6,7 @@ from pytz import timezone
 
 import pandas as pd
 
-from typing import List, Union, Dict
+from typing import List, Union, Dict, Type, Optional
 
 from binanceenv.cache import CacheManager
 from binanceenv.cache import cache_manager_obj
@@ -21,9 +21,11 @@ from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
+from stable_baselines3.common.env_util import unwrap_wrapper
 from dataclasses import asdict, dataclass, field, make_dataclass
 # from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
+import gymnasium
 from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
@@ -388,12 +390,14 @@ class LabBase:
         if save_csv:
             result.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
-    def backtesting(self, ix=0, filename: str = 'best_model', verbose=1):
+    # TODO Load and Learn again
+    def loaded_learn(self, ix=0, filename: Union[str, int] = 'best_model', render_mode=None, n_tests=10, verbose=1):
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
         eval_env_kwargs.update({'use_period': 'test',
                                 'verbose': verbose,
-                                'stable_cache_data_n': self.n_eval_episodes})
+                                'stable_cache_data_n': self.n_eval_episodes,
+                                'render_mode': render_mode})
         if self.env_wrapper != 'subproc':
             eval_env_kwargs.update({'cache_obj': eval_cache_manager_obj})
 
@@ -412,21 +416,79 @@ class LabBase:
 
         agent_cfg = LABConfig(**asdict(self.base_cfg))
 
+        if isinstance(filename, int):
+            filename = f'{agent_cfg.FILENAME}_chkp_{filename}_steps'
         if filename != 'best_model':
             agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', filename),
                                                          env=eval_vec_env)
+            path_filename = os.path.join(f'{agent_cfg.DIRS["training"]}', filename)
         else:
             agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', filename),
                                                          env=eval_vec_env)
+            path_filename = os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model')
 
-        episode_rewards = .0
-        obs = eval_vec_env.reset()
-        while True:
-            action, _states = agent_obj.predict(obs)
-            obs, rewards, dones, info = eval_vec_env.step(action)
-            episode_rewards += rewards
-            if dones.any():
-                break
+    def backtesting_agent(self, ix=0, filename: Union[str, int] = 'best_model', render_mode=None, n_tests=10, verbose=1):
+        """ Create independent evaluation env """
+        eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
+        eval_env_kwargs.update({'use_period': 'test',
+                                'verbose': verbose,
+                                'stable_cache_data_n': self.n_eval_episodes,
+                                'render_mode': render_mode})
+        if self.env_wrapper != 'subproc':
+            eval_env_kwargs.update({'cache_obj': eval_cache_manager_obj})
+
+        eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
+                                   n_envs=1,
+                                   seed=42,
+                                   env_kwargs=eval_env_kwargs,
+                                   vec_env_cls=DummyVecEnv)
+
+        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
+
+        logger.info(
+            f'{self.__class__.__name__}: Creating agent: #{ix:02d} {self.agents_classes_lst[ix].__class__.__name__}')
+        # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
+        # _ = agent_kwargs.pop('action_noise')
+
+        agent_cfg = LABConfig(**asdict(self.base_cfg))
+
+        if isinstance(filename, int):
+            filename = f'{agent_cfg.FILENAME}_chkp_{filename}_steps'
+        if filename != 'best_model':
+            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', filename),
+                                                         env=eval_vec_env)
+            path_filename = os.path.join(f'{agent_cfg.DIRS["training"]}', filename)
+        else:
+            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', filename),
+                                                         env=eval_vec_env)
+            path_filename = os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model')
+
+        env = agent_obj.get_env()
+        unwrapped_env = self.get_base_env(env, self.env_classes_lst[ix])
+
+        for ix in range(n_tests):
+            unwrapped_env.set_render_output(f'{path_filename}_{ix}')
+            episode_rewards = .0
+            obs = env.reset()
+            while True:
+                action, _states = agent_obj.predict(obs)
+                obs, rewards, dones, info = env.step(action)
+                episode_rewards += rewards
+                if dones.any():
+                    unwrapped_env.render_all(unwrapped_env.get_last_render_df())
+                    break
+
+    @staticmethod
+    def get_base_env(wrapped_env: Union[DummyVecEnv, SubprocVecEnv], env_class):
+        env_tmp = wrapped_env
+        while isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, Monitor)):
+            if isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv)):
+                env_tmp = env_tmp.envs[0]
+            elif isinstance(env_tmp, Monitor):
+                env_tmp = env_tmp.env
+            if isinstance(env_tmp, env_class):
+                return env_tmp
+        return None
 
     @classmethod
     def load_agent(cls, json_path_filename, best=False, verbose=1):

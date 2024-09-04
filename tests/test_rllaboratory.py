@@ -23,7 +23,7 @@ from multiprocessing import freeze_support
 
 # import torch
 
-__version__ = 0.063
+__version__ = 0.075
 
 logger = logging.getLogger()
 
@@ -61,9 +61,9 @@ if __name__ == '__main__':
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
     total_timesteps = 16_000_000
-    buffer_size = 1_800_000
+    buffer_size = 1_500_000
     learning_start = 750_000
-    batch_size = 5120
+    batch_size = 4096
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -71,10 +71,10 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.031,
-                                 maximum_train_size=0.057,
-                                 minimum_test_size=0.35,
-                                 maximum_test_size=0.5,
+                                 minimum_train_size=0.020,
+                                 maximum_train_size=0.035,
+                                 minimum_test_size=0.25,
+                                 maximum_test_size=0.33,
                                  test_size=0.13,
                                  verbose=0,
                                  )
@@ -102,6 +102,7 @@ if __name__ == '__main__':
                           seed=42,
                           target_balance=100_000.,
                           target_minimum_trade=100.,
+                          target_maximum_trade=1000.,
                           observation_type='lookback_assets_close_indicators',
                           # observation_type='indicators_close',
                           stable_cache_data_n=120,
@@ -121,20 +122,48 @@ if __name__ == '__main__':
                           # index_type='target_time',
                           index_type='prediction_time',
                           )
+    env_sell_buy_hold_amount_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
+                                           pnl_stop=-0.9,
+                                           # max_lot_size=0.5,
+                                           verbose=2,
+                                           log_interval=1,
+                                           seed=42,
+                                           target_balance=100_000.,
+                                           target_minimum_trade=100.,
+                                           target_maximum_trade=1000.,
+                                           observation_type='lookback_assets_close_indicators',
+                                           # observation_type='indicators_close',
+                                           stable_cache_data_n=400,
+                                           reuse_data_prob=0.95,
+                                           eval_reuse_prob=0.9999,
+                                           # lookback_window=None,
+                                           lookback_window='2h',
+                                           max_hold_timeframes='30d',
+                                           total_timesteps=total_timesteps,
+                                           eps_start=0.99,
+                                           eps_end=0.01,
+                                           eps_decay=0.2,
+                                           gamma=0.995,
+                                           invalid_actions=15_000,
+                                           penalty_value=1e-5,
+                                           action_type='sell_buy_hold_amount',
+                                           # index_type='target_time',
+                                           index_type='prediction_time',
+                                           )
 
     env_box_4_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                             pnl_stop=-0.9,
-
                             verbose=2,
                             log_interval=1,
                             seed=42,
                             target_balance=100_000.,
                             target_minimum_trade=100.,
-                            target_maximum_trade=1000.,
-                            observation_type='lookback_assets_close_indicators',
+                            target_maximum_trade=500.,
+                            observation_type='lookback_dict',
+                            # observation_type='lookback_assets_close_indicators',
                             # observation_type='indicators_close',
-                            stable_cache_data_n=250,
-                            reuse_data_prob=0.95,
+                            stable_cache_data_n=400,
+                            reuse_data_prob=0.92,
                             eval_reuse_prob=0.9999,
                             # lookback_window=None,
                             lookback_window='2h',
@@ -145,7 +174,7 @@ if __name__ == '__main__':
                             eps_decay=0.2,
                             gamma=0.995,
                             invalid_actions=15_000,
-                            penalty_value=1e-5,
+                            penalty_value=1e-6,
                             action_type='box_4',
                             # index_type='target_time',
                             index_type='prediction_time',
@@ -159,6 +188,7 @@ if __name__ == '__main__':
                                seed=42,
                                target_balance=100_000.,
                                target_minimum_trade=100.,
+                               target_maximum_trade=1000.,
                                observation_type='lookback_assets_close_indicators',
                                # observation_type='indicators_close',
                                stable_cache_data_n=250,
@@ -171,7 +201,7 @@ if __name__ == '__main__':
                                eps_start=0.99,
                                eps_end=0.01,
                                eps_decay=0.2,
-                               gamma=0.9995,  # change to 0.9995 next run
+                               gamma=0.995,  #
                                invalid_actions=15_000,
                                penalty_value=1e-5,
                                action_type='box1_1_4',
@@ -186,6 +216,7 @@ if __name__ == '__main__':
                                log_interval=1,
                                seed=42,
                                target_balance=100_000.,
+                               target_maximum_trade=1000.,
                                target_minimum_trade=100.,
                                observation_type='lookback_assets_close_indicators',
                                # observation_type='indicators_close',
@@ -322,8 +353,7 @@ if __name__ == '__main__':
 
     # net_arch = [256, 128]
     # net_arch = [dict(qf=[256, 128], pi=[256, 32])]
-    # sac_policy_kwargs = dict(activation_fn=torch.nn.ReLU,
-    #                          net_arch=net_arch)
+
     # sac_policy_kwargs = dict(
     #     features_extractor_class=MlpExtractorNN,
     #     features_extractor_kwargs=dict(features_dim=256),
@@ -349,16 +379,21 @@ if __name__ == '__main__':
     #                   device="auto",
     #                   verbose=1)
 
-    features_dim = 256
+    # features_dim = 256
+    # sac_policy_kwargs = dict(
+    #     features_extractor_class='MlpExtractorNN',
+    #     features_extractor_kwargs=dict(features_dim=features_dim, activation_fn='LeakyReLU'),
+    #     share_features_extractor=True,
+    # )
     sac_policy_kwargs = dict(
-        features_extractor_class='MlpExtractorNN',
-        features_extractor_kwargs=dict(features_dim=features_dim, activation_fn='LeakyReLU'),
+        features_extractor_class='MultiExtractorNN',
+        features_extractor_kwargs=dict(activation_fn='LeakyReLU'),
         share_features_extractor=True,
-        activation_fn='ReLU',
-        # net_arch=[features_dim, features_dim]
     )
 
-    sac_kwargs = dict(policy="MlpPolicy",
+    # net_arch = [256, 256, 256]
+    # sac_policy_kwargs = dict(net_arch=net_arch)
+    sac_kwargs = dict(policy="MultiInputPolicy",
                       buffer_size=buffer_size,
                       learning_starts=learning_start,
                       policy_kwargs=sac_policy_kwargs,
@@ -370,11 +405,15 @@ if __name__ == '__main__':
                                                          min_learning_rate=1e-5,
                                                          total_epochs=total_timesteps,
                                                          epsilon=100)},
-                      action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=5e-1 * np.ones(4),
+                      action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=1e-5 * np.ones(4),
                                                                          sigma=1e-1 * np.ones(4),
-                                                                         dt=1e-2)},
-                      train_freq=2,
-                      # target_update_interval=6,  # update target network every 6 _gradient_ steps
+                                                                         dt=1e-2)
+                                    },
+                      # train_freq=(2, 'step'),
+                      # target_update_interval=5,  # update target network every 5 _gradient_ steps
+                      use_sde=False,
+                      sde_sample_freq=-1,
+                      use_sde_at_warmup=False,
                       device="auto",
                       verbose=1)
 
@@ -412,18 +451,5 @@ if __name__ == '__main__':
         deterministic=False,
         verbose=0
     )
-
-    # rllab = LabBase(
-    #     env_cls=[BinanceEnvBase],
-    #     env_kwargs=[env_binbox_kwargs],
-    #     agents_cls=[TD3],
-    #     agents_kwargs=[td3_kwargs],
-    #     agents_n_env=[1],
-    #     env_wrapper='dummy',
-    #     total_timesteps=8_000_000,
-    #     checkpoint_num=80,
-    #     n_eval_episodes=20,
-    #     eval_freq=100_000,
-    #     experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save')
 
     rllab.learn()

@@ -1,7 +1,7 @@
 from typing import Callable, Union, Dict
 import copy
 
-__version__ = 0.009
+__version__ = 0.0010
 
 
 def deserialize_kwargs(_agent_kwargs: Union[dict, str],

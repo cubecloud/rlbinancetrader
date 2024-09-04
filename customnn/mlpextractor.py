@@ -4,9 +4,17 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Box
 from rllab.labtools import deserialize_kwargs
 
+
+# Swish Function
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
+
 nn_serializer: dict = {'ReLU': nn.ReLU,
                        'LeakyReLU': nn.LeakyReLU,
                        'Tanh': nn.Tanh,
+                       'Swish': Swish
                        }
 
 

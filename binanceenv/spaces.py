@@ -1,15 +1,12 @@
-
 import random
 import numpy as np
 import numba
 from numba import jit
 from typing import Tuple, Union, Dict
-
-from gymnasium.spaces import Discrete
-from gymnasium.spaces import Box
+from gymnasium import spaces
 from dbbinance.fetcher.datautils import minmax_normalization_1_1
 
-__version__ = 0.001
+__version__ = 0.009
 
 actions_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2}
 actions_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold"}
@@ -19,7 +16,7 @@ actions_4_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold", 3: 'Close'}
 
 class IndicatorsSpace:
     def __init__(self, ind_num):
-        self.__observation_space = Box(low=0.0, high=1.0, shape=(ind_num,), dtype=np.float32, seed=42)
+        self.__observation_space = spaces.Box(low=0.0, high=1.0, shape=(ind_num,), dtype=np.float32, seed=42)
         self.name = 'indicators'
 
     @property
@@ -37,7 +34,8 @@ class IndicatorsAndAssetsSpace:
         # high = np.ones((assets_num + ind_num,))
         # low[:assets_num] = 0.0
         # high[:assets_num] = 1.0
-        self.__observation_space = Box(low=0.0, high=1.0, shape=(ind_num + assets_num,), dtype=np.float32, seed=42)
+        self.__observation_space = spaces.Box(low=0.0, high=1.0, shape=(ind_num + assets_num,), dtype=np.float32,
+                                              seed=42)
         # self.__observation_space = Box(low=low, high=high, dtype=np.float32, seed=42)
         self.name = 'indicators_assets'
 
@@ -52,12 +50,8 @@ class IndicatorsAndAssetsSpace:
 
 class AssetsCloseIndicatorsSpace:
     def __init__(self, ind_num, assets_num):
-        # low = np.zeros((assets_num + ind_num,))
-        # high = np.ones((assets_num + ind_num,))
-        # low[:assets_num] = 0.0
-        # high[:assets_num] = 1.0
-        self.__observation_space = Box(low=0.0, high=1.0, shape=(ind_num + assets_num + 1,), dtype=np.float32, seed=42)
-        # self.__observation_space = Box(low=low, high=high, dtype=np.float32, seed=42)
+        self.__observation_space = spaces.Box(low=0.0, high=1.0, shape=(ind_num + assets_num + 1,), dtype=np.float32,
+                                              seed=42)
         self.name = 'assets_close_indicators'
 
     @property
@@ -71,14 +65,31 @@ class AssetsCloseIndicatorsSpace:
 
 class LookbackAssetsCloseIndicatorsSpace:
     def __init__(self, ind_num, assets_data, lookback):
-        # low = np.zeros((assets_num + ind_num,))
-        # high = np.ones((assets_num + ind_num,))
-        # low[:assets_num] = 0.0
-        # high[:assets_num] = 1.0
-        self.__observation_space = Box(low=0.0, high=1.0, shape=((ind_num + assets_data + 1) * lookback,),
-                                       dtype=np.float32,
-                                       seed=42)
+        self.__observation_space = spaces.Box(low=0.0, high=1.0, shape=((ind_num + assets_data + 1) * lookback,),
+                                              dtype=np.float32,
+                                              seed=42)
         self.name = 'lookback_assets_close_indicators'
+
+    @property
+    def observation_space(self):
+        return self.__observation_space
+
+    @observation_space.setter
+    def observation_space(self, value):
+        self.__observation_space = value
+
+
+class LookbackDictOHLCAssetsIndicatorsSpace:
+    def __init__(self, ind_num, assets_num, lookback):
+        self.__observation_space = spaces.Dict(
+            {"assets": spaces.Box(low=0.0, high=1.0, shape=(5 * assets_num, ),
+                                  dtype=np.float32, seed=42),
+             "ohlc": spaces.Box(low=0.0, high=1.0, shape=(4, lookback), dtype=np.float32,
+                                seed=42),
+             "indicators": spaces.Box(low=0.0, high=1.0, shape=(ind_num, lookback),
+                                      dtype=np.float32, seed=42),
+             })
+        self.name = 'lookback_dict'
 
     @property
     def observation_space(self):
@@ -95,7 +106,7 @@ class IndicatorsAndPNLSpace:
         high = np.ones((pnl_num + ind_num,))
         low[:pnl_num] = -1.0
         high[:pnl_num] = 3.0
-        self.__observation_space = Box(low=low, high=high, dtype=np.float32, seed=42)
+        self.__observation_space = spaces.Box(low=low, high=high, dtype=np.float32, seed=42)
         self.name = 'indicators_pnl'
 
     @property
@@ -109,7 +120,7 @@ class IndicatorsAndPNLSpace:
 
 class DiscreteActionSpace:
     def __init__(self, n_action):
-        self.__action_space = Discrete(n_action, seed=42)  # {0, 1, 2}
+        self.__action_space = spaces.Discrete(n_action, seed=42)  # {0, 1, 2}
         self.name = 'discrete'
 
     def convert2action(self, action, masked_actions=None):
@@ -164,7 +175,7 @@ class DiscreteActionSpace:
 class BoxActionSpace:
     def __init__(self, n_action):
         self.n_action = n_action
-        self.__action_space = Box(low=0, high=1, shape=(n_action,), dtype=np.float32)
+        self.__action_space = spaces.Box(low=0, high=1, shape=(n_action,), dtype=np.float32)
         self.name = 'box'
 
     def convert2action(self, action, masked_actions=None) -> Tuple[float, float]:
@@ -174,7 +185,6 @@ class BoxActionSpace:
             act = np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
         amount = action[act]
         return act, amount
-
 
     @property
     def action_space(self):
@@ -187,9 +197,7 @@ class BoxActionSpace:
 
 class BoxExtActionSpace:
     def __init__(self, n_action):
-
-        self.__action_space = Box(low=-1., high=1, shape=(n_action,), dtype=np.float32)
-
+        self.__action_space = spaces.Box(low=-1., high=1, shape=(n_action,), dtype=np.float32)
         self.name = 'box1_1'
 
     @staticmethod
@@ -240,21 +248,26 @@ class ActionsBins:
         return act, amount
 
 
-class TwoActionsSpace:
-    def __init__(self, low=-1., high=1.):
-        self.__action_space = Box(low=low, high=high, shape=(1,), dtype=np.float32)
+class SellBuyHoldAmount:
+    def __init__(self):
+        self.__action_space = spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        # self.__action_space = Box(low=-1., high=1., shape=(2,), dtype=np.float32)
         self.name = 'two_actions'
 
     def convert2action(self, action: np.ndarray, masked_actions=None):
-        amount = abs(action[0])
-        if action[0] < 0:
-            act = actions_dict['Sell']
+        if action[1] < 0:
+            act = actions_4_dict['Hold']
+            amount = 0.
         else:
-            act = actions_dict['Buy']
+            amount = action[1]
+            if action[0] < 0:
+                act = actions_4_dict['Sell']
+            else:
+                act = actions_4_dict['Buy']
         if masked_actions is not None:
             if not masked_actions[act]:
                 amount = 0.
-                act = actions_dict['Hold']
+                act = actions_4_dict['Hold']
         return act, amount
 
     @property
@@ -268,7 +281,7 @@ class TwoActionsSpace:
 
 class BinBoxActionSpace:
     def __init__(self, n_action, low=-1., high=1.):
-        self.__action_space = Box(low=low, high=high, shape=(1,), dtype=np.float32)
+        self.__action_space = spaces.Box(low=low, high=high, shape=(1,), dtype=np.float32)
         self.actions_bins_obj = ActionsBins([low, high], n_action)
         self.name = 'binbox'
 
