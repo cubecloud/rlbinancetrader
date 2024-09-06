@@ -2,6 +2,7 @@ import logging
 # import datetime
 # import gc
 import numpy as np
+from dbbinance.fetcher.datautils import get_timeframe_bins
 # from dateutil.relativedelta import relativedelta
 # from dbbinance.fetcher.datautils import get_timedelta_kwargs
 # from dbbinance.fetcher.datafetcher import ceil_time, floor_time
@@ -64,6 +65,7 @@ if __name__ == '__main__':
     buffer_size = 1_500_000
     learning_start = 750_000
     batch_size = 4096
+    lookback_window = '12h'
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -71,10 +73,14 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.020,
-                                 maximum_train_size=0.035,
-                                 minimum_test_size=0.25,
-                                 maximum_test_size=0.33,
+                                 # minimum_train_size=0.020,
+                                 # maximum_train_size=0.035,
+                                 # minimum_test_size=0.25,
+                                 # maximum_test_size=0.33,
+                                 minimum_train_size=0.010,  # reduce the train size by 2 to have more improvement by PNL
+                                 maximum_train_size=0.017,  # reduce the train size by 2 to have more improvement by PNL
+                                 minimum_test_size=0.13,  # reduce the test size  by 2
+                                 maximum_test_size=0.16,  # reduce the test size  by 2
                                  test_size=0.13,
                                  verbose=0,
                                  )
@@ -109,7 +115,7 @@ if __name__ == '__main__':
                           reuse_data_prob=0.95,
                           eval_reuse_prob=0.9999,
                           # lookback_window=None,
-                          lookback_window='2h',
+                          lookback_window=lookback_window,
                           max_hold_timeframes='30d',
                           total_timesteps=total_timesteps,
                           eps_start=0.99,
@@ -156,23 +162,26 @@ if __name__ == '__main__':
                             verbose=2,
                             log_interval=1,
                             seed=42,
-                            target_balance=100_000.,
+                            target_balance=25_000.,
                             target_minimum_trade=100.,
                             target_maximum_trade=500.,
-                            observation_type='lookback_dict',
-                            # observation_type='lookback_assets_close_indicators',
+                            target_scale_decay=100_000,
+                            # observation_type='lookback_dict',
+                            observation_type='lookback_assets_close_indicators',
                             # observation_type='indicators_close',
                             stable_cache_data_n=400,
                             reuse_data_prob=0.92,
                             eval_reuse_prob=0.9999,
                             # lookback_window=None,
-                            lookback_window='2h',
+                            lookback_window=lookback_window,
                             max_hold_timeframes='30d',
                             total_timesteps=total_timesteps,
                             eps_start=0.99,
                             eps_end=0.01,
                             eps_decay=0.2,
-                            gamma=0.995,
+                            # gamma=0.995,
+                            gamma=0.999,
+                            # reduced by 10 (from 0.999) to have less reward backpropagation for 15 min 24h*4 = 96 timesteps
                             invalid_actions=15_000,
                             penalty_value=1e-6,
                             action_type='box_4',
@@ -379,43 +388,53 @@ if __name__ == '__main__':
     #                   device="auto",
     #                   verbose=1)
 
+    features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 1.78)
+    last_features_dim = int(features_dim // 4)
     # features_dim = 256
-    # sac_policy_kwargs = dict(
-    #     features_extractor_class='MlpExtractorNN',
-    #     features_extractor_kwargs=dict(features_dim=features_dim, activation_fn='LeakyReLU'),
-    #     share_features_extractor=True,
-    # )
+    # last_features_dim = 256
     sac_policy_kwargs = dict(
-        features_extractor_class='MultiExtractorNN',
-        features_extractor_kwargs=dict(activation_fn='LeakyReLU'),
+        features_extractor_class='MlpExtractorNN',
+        features_extractor_kwargs=dict(features_dim=features_dim,
+                                       last_features_dim=last_features_dim,
+                                       activation_fn='ReLU'),
         share_features_extractor=True,
+        net_arch=[last_features_dim, 256, 144],
     )
+
+    # sac_policy_kwargs = dict(
+    #     features_extractor_class='MultiExtractorNN',
+    #     features_extractor_kwargs=dict(activation_fn='ReLU'),
+    #     share_features_extractor=True,
+    #     net_arch=[256, 256, 128]
+    # )
 
     # net_arch = [256, 256, 256]
     # sac_policy_kwargs = dict(net_arch=net_arch)
-    sac_kwargs = dict(policy="MultiInputPolicy",
-                      buffer_size=buffer_size,
-                      learning_starts=learning_start,
-                      policy_kwargs=sac_policy_kwargs,
-                      batch_size=batch_size,
-                      stats_window_size=100,
-                      ent_coef='auto_0.0001',
-                      learning_rate={'CoSheduller': dict(warmup=learning_start,
-                                                         learning_rate=0.0003,
-                                                         min_learning_rate=1e-5,
-                                                         total_epochs=total_timesteps,
-                                                         epsilon=100)},
-                      action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=1e-5 * np.ones(4),
-                                                                         sigma=1e-1 * np.ones(4),
-                                                                         dt=1e-2)
-                                    },
-                      # train_freq=(2, 'step'),
-                      # target_update_interval=5,  # update target network every 5 _gradient_ steps
-                      use_sde=False,
-                      sde_sample_freq=-1,
-                      use_sde_at_warmup=False,
-                      device="auto",
-                      verbose=1)
+    sac_kwargs = dict(
+        # policy="MultiInputPolicy",
+        policy="MlpPolicy",
+        buffer_size=buffer_size,
+        learning_starts=learning_start,
+        policy_kwargs=sac_policy_kwargs,
+        batch_size=batch_size,
+        stats_window_size=100,
+        ent_coef=0.0001,  # changed to have stable entropy
+        learning_rate={'CoSheduller': dict(warmup=learning_start,
+                                           learning_rate=0.0003,
+                                           min_learning_rate=1e-5,
+                                           total_epochs=total_timesteps,
+                                           epsilon=100)},
+        action_noise={'OrnsteinUhlenbeckActionNoise': dict(mean=1e-5 * np.ones(4),
+                                                           sigma=1e-1 * np.ones(4),
+                                                           dt=1e-2)
+                      },
+        # train_freq=(2, 'step'),
+        target_update_interval=5,  # update target network every 20 _gradient_ steps
+        use_sde=False,
+        sde_sample_freq=-1,
+        use_sde_at_warmup=False,
+        device="auto",
+        verbose=1)
 
     # rllab = LabBase(
     #     env_cls=[BinanceEnvBase, BinanceEnvBase, BinanceEnvBase],

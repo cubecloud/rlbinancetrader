@@ -36,40 +36,43 @@ class MultiExtractorNN(BaseFeaturesExtractor):
         # so go over all the spaces and compute output feature sizes
         for key, subspace in observation_space.spaces.items():
             if key == "indicators":
-                # indicators_features = subspace.shape[1] * 2
                 extractors[key] = nn.Sequential(nn.Conv1d(in_channels=subspace.shape[0],
-                                                          out_channels=subspace.shape[0] * 2,
-                                                          kernel_size=2),
+                                                          out_channels=subspace.shape[0] * 8,
+                                                          kernel_size=1),
                                                 self.activation_fn(),
-                                                nn.Conv1d(in_channels=subspace.shape[0] * 2,
-                                                          out_channels=subspace.shape[0] * 4,
-                                                          kernel_size=2),
+                                                nn.Conv1d(in_channels=subspace.shape[0] * 8,
+                                                          out_channels=subspace.shape[0] * 8,
+                                                          kernel_size=5, stride=2, padding=3),
+                                                nn.Conv1d(in_channels=subspace.shape[0] * 8,
+                                                          out_channels=subspace.shape[0] * 8,
+                                                          kernel_size=5, stride=2, padding=3),
                                                 self.activation_fn(),
-                                                nn.AdaptiveMaxPool1d(2),
+                                                nn.AdaptiveMaxPool1d(1),
                                                 nn.Flatten(-2, -1)
                                                 )
-                # total_concat_size += indicators_features
 
             elif key == "ohlc":
-                # ohlc_features = 2 * subspace.shape[1]
                 extractors[key] = nn.Sequential(nn.Conv1d(in_channels=subspace.shape[0],
-                                                          out_channels=subspace.shape[0] * 2,
-                                                          kernel_size=2),
-                                                self.activation_fn(),
-                                                nn.Conv1d(in_channels=subspace.shape[0] * 2,
                                                           out_channels=subspace.shape[0] * 4,
-                                                          kernel_size=2),
+                                                          kernel_size=1),
                                                 self.activation_fn(),
-                                                nn.AdaptiveMaxPool1d(2),
+                                                nn.Conv1d(in_channels=subspace.shape[0] * 4,
+                                                          out_channels=subspace.shape[0] * 4,
+                                                          kernel_size=5, stride=2, padding=3),
+                                                nn.Conv1d(in_channels=subspace.shape[0] * 4,
+                                                          out_channels=subspace.shape[0] * 4,
+                                                          kernel_size=5, stride=2, padding=3),
+                                                self.activation_fn(),
+                                                nn.AdaptiveMaxPool1d(1),
                                                 nn.Flatten(-2, -1)
                                                 )
                 # total_concat_size += ohlc_features
 
             elif key == "assets":
                 # Run through a simple MLP
-                extractors[key] = nn.Sequential(nn.Linear(subspace.shape[0], subspace.shape[0] * 2),
+                extractors[key] = nn.Sequential(nn.Linear(subspace.shape[0], subspace.shape[0] * 4),
                                                 self.activation_fn(),
-                                                nn.Linear(subspace.shape[0] * 2, subspace.shape[0] * 2),
+                                                nn.Linear(subspace.shape[0] * 4, subspace.shape[0] * 4),
                                                 self.activation_fn(),
                                                 )
                 # total_concat_size += (subspace.shape[0] * 2)
@@ -90,6 +93,7 @@ class MultiExtractorNN(BaseFeaturesExtractor):
                 _calc_tensor_list.append(calc_sample)
             cat_t = torch.cat(_calc_tensor_list, dim=-1)
         self._features_dim = cat_t.shape[-1]
+        print(f'Features extractor features_dim = {self._features_dim}')
 
     def forward(self, observations) -> torch.Tensor:
         encoded_tensor_list = []

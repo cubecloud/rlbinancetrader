@@ -64,17 +64,17 @@ class Balance:
         self.target = target_obj
         self.scaler = scaler_method
         self.size, self.cost, self.price = initial_balance
-        self.scaled_arr = np.array([self.scaler(self.size),
-                                    self.target.scaler(self.cost),
-                                    self.target.scaler(self.price)],
-                                   dtype=np.float32)
+        self.scaled_arr = self.calc_scaled_arr()
 
     def reset(self, initial_balance: tuple = (0., 0., 0.)):
         self.size, self.cost, self.price = initial_balance
-        self.scaled_arr = np.array([self.scaler(self.size),
-                                    self.target.scaler(self.cost),
-                                    self.target.scaler(self.price)],
-                                   dtype=np.float32)
+        self.scaled_arr = self.calc_scaled_arr()
+
+    def calc_scaled_arr(self):
+        return np.array([self.scaler(self.size),
+                         self.target.scaler(self.cost),
+                         self.target.scaler(self.price)],
+                        dtype=np.float32)
 
     def __str__(self):
         return f'size={self.size}, cost={self.cost}, price={self.price}'
@@ -94,7 +94,7 @@ class Asset:
         self.initial_balance = Bal(*initial_balance)
         self.scale_decay = scale_decay
         self.scaler = self.simple_scaler
-        self.balance = Balance(target_obj=target_obj, scaler_method=self.scaler,  initial_balance=initial_balance, )
+        self.balance = Balance(target_obj=target_obj, scaler_method=self.scaler, initial_balance=initial_balance, )
         self.minimum_trade = minimum_trade
         self.orders = OrdersBook(symbol=self.symbol,
                                  commission=commission,
@@ -145,22 +145,32 @@ class OrdersBook:
         self.recalc_balance()
 
     def recalc_balance(self):
+        """
+        Use for long positions _only_
+        Returns:
+            None
+        """
         last_index = self.last_index
         if self.last_index < len(self.book):
             for ix in range(self.last_index, len(self.book)):
                 if self.book[ix].OrderType == 'buy':
                     self.balance.size += self.book[ix].size
                     self.balance.cost += abs(self.book[ix].order_cash)
-                    self.balance.price = (self.balance.cost / self.balance.size) if self.balance.size > 0 else 0
+                    """ 
+                    balance 'price' contains added commission to 'Sell', 
+                    this helps RL to understand best price for sell order 
+                    """
+                    if self.balance.size > 0:
+                        self.balance.price = (self.balance.cost / self.balance.size) * (1 + self.commission)
+                    else:
+                        self.balance.price = 0
                 elif self.book[ix].OrderType == 'sell':
                     self.balance.size -= self.book[ix].size
+                    """ balance.cost already have payed commission for 'Buy' orders """
                     self.balance.cost = self.balance.size * self.balance.price
                 last_index = ix
             self.last_index = last_index + 1
-            self.balance.scaled_arr = np.array([self.balance.scaler(self.balance.size),
-                                                self.target.scaler(self.balance.cost),
-                                                self.target.scaler(self.balance.price)],
-                                               dtype=np.float32)
+            self.balance.scaled_arr = self.balance.calc_scaled_arr()
 
     def show(self):
         print(self.book)

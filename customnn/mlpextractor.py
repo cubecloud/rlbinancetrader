@@ -26,8 +26,10 @@ class MlpExtractorNN(BaseFeaturesExtractor):
         and hidden layer will be features_dim // 4
     """
 
-    def __init__(self, observation_space: Box, features_dim: int = 256, activation_fn='LeakyReLU'):
+    def __init__(self, observation_space: Box, features_dim: int = 256, last_features_dim: int = 256,
+                 activation_fn='LeakyReLU'):
         super().__init__(observation_space, features_dim)
+        self._features_dim = last_features_dim
         self.activation_fn = deserialize_kwargs(activation_fn, lab_serializer=nn_serializer)
         self.mlp_extractor = nn.Sequential(
             nn.Linear(observation_space.shape[0], features_dim),
@@ -39,7 +41,7 @@ class MlpExtractorNN(BaseFeaturesExtractor):
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(features_dim // 4, features_dim),
+            nn.Linear(features_dim // 4, last_features_dim),
             self.activation_fn(), )
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
