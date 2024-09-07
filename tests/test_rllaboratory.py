@@ -77,10 +77,10 @@ if __name__ == '__main__':
                                  # maximum_train_size=0.035,
                                  # minimum_test_size=0.25,
                                  # maximum_test_size=0.33,
-                                 minimum_train_size=0.010,  # reduce the train size by 2 to have more improvement by PNL
-                                 maximum_train_size=0.017,  # reduce the train size by 2 to have more improvement by PNL
-                                 minimum_test_size=0.13,  # reduce the test size  by 2
-                                 maximum_test_size=0.16,  # reduce the test size  by 2
+                                 minimum_train_size=0.013,  # reduce the train size by 1.6 to have more improvement by PNL
+                                 maximum_train_size=0.022,  # reduce the train size by 1.6 to have more improvement by PNL
+                                 minimum_test_size=0.13,  # reduce the test size by 2
+                                 maximum_test_size=0.16,  # reduce the test size by 2
                                  test_size=0.13,
                                  verbose=0,
                                  )

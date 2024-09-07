@@ -22,6 +22,7 @@ from dbbinance.fetcher.datautils import get_timeframe_bins
 from dbbinance.fetcher.datautils import get_nearest_timeframe
 
 import multiprocessing as mp
+from ctypes import c_bool
 from dbbinance.fetcher.cachemanager import mlp_mutex
 
 from collections import deque
@@ -32,7 +33,7 @@ from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
 import matplotlib.pyplot as plt
 
-__version__ = 0.054
+__version__ = 0.059
 
 logger = logging.getLogger()
 
@@ -54,12 +55,14 @@ def abs_logarithmic_scaler(value):
 
 _target_obj = TargetCash(symbol='USDT', initial_cash=100_000)
 
+mp_timesteps_counter = mp.Value('i', 1)
+mp_episodes_counter = mp.Value('i', -1)
+mp_count = mp.Value('i', 0)
+
 
 class BinanceEnvBase(gymnasium.Env):
-    count = 0
     name = 'BinanceEnvBase'
-    total_timesteps_counter: int = 1
-    total_episodes_counter: int = -1
+    count = mp_count
 
     def __init__(self,
                  data_processor_kwargs: Union[dict, None],
@@ -92,11 +95,14 @@ class BinanceEnvBase(gymnasium.Env):
                  render_mode=None,
                  index_type: str = 'target_time',
                  deterministic: bool = True,
+                 multiprocessing: bool = False,
                  ):
 
-        BinanceEnvBase.count += 1
+        self.multiprocessing = multiprocessing
 
-        self.idnum = int(BinanceEnvBase.count)
+        BinanceEnvBase.count.value += 1
+
+        self.idnum = int(BinanceEnvBase.count.value)
         self.observation_type = observation_type
         self.data_processor_obj = IndicatorProcessor(**data_processor_kwargs)
 
@@ -215,8 +221,24 @@ class BinanceEnvBase(gymnasium.Env):
                                                         columns=['price', 'action', 'amount', 'pnl', 'total'])
             self.last_render_df: Union[pd.DataFrame, None] = None
 
+    @property
+    def total_timesteps_counter(self):
+        return mp_timesteps_counter.value
+
+    @total_timesteps_counter.setter
+    def total_timesteps_counter(self, value):
+        mp_timesteps_counter.value = value
+
+    @property
+    def total_episodes_counter(self):
+        return mp_episodes_counter.value
+
+    @total_episodes_counter.setter
+    def total_episodes_counter(self, value):
+        mp_episodes_counter.value = value
+
     def __del__(self):
-        BinanceEnvBase.count -= 1
+        BinanceEnvBase.count.value -= 1
 
     @property
     def cash(self):
@@ -651,7 +673,7 @@ class BinanceEnvBase(gymnasium.Env):
         if self.render_mode is not None:
             self.last_render_df = self.render_df.copy(deep=True)
         with mlp_mutex:
-            self.total_timesteps_counter += self.timecount
+            self.total_timesteps_counter += (self.timecount - self.lookback_timeframes)
         if self.verbose:
             self.log_reset_msg()
         # self.target_balance = float(self.initial_target_balance)
@@ -800,7 +822,7 @@ class BinanceEnvBase(gymnasium.Env):
 
 
 class BinanceEnvCash(BinanceEnvBase):
-    count: int = 0
+    # count: int = 0
     name = 'BinanceEnvCash'
 
     def __init__(self,
@@ -832,22 +854,19 @@ class BinanceEnvCash(BinanceEnvBase):
                  cache_obj: Union[CacheManager, None] = None,
                  render_mode: Union[str, None] = None,
                  index_type: str = 'target_time',
-                 deterministic: bool = True):
+                 deterministic: bool = True,
+                 multiprocessing: bool = False, ):
         super().__init__(data_processor_kwargs, target_balance, target_minimum_trade, target_maximum_trade,
                          target_scale_decay, coin_balance, pnl_stop, verbose, log_interval, observation_type,
                          action_type, use_period, stable_cache_data_n, reuse_data_prob,
                          eval_reuse_prob, seed, lookback_window, max_hold_timeframes, penalty_value,
                          invalid_actions, total_timesteps, eps_start, eps_end, eps_decay, gamma, cache_obj, render_mode,
-                         index_type, deterministic)
+                         index_type, deterministic, multiprocessing)
 
-        BinanceEnvCash.count += 1
+        # BinanceEnvCash.count += 1
 
-        self.idnum = int(BinanceEnvCash.count)
+        self.idnum = int(BinanceEnvCash.count.value)
 
-        # self.order_opened: bool = False
-        # self.order_closed: bool = False
-        # self.order_opened_pnl: float = 0.
-        # self.order_closed_pnl: float = 0.
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
                 1 - self.asset.orders.commission)
         self.previous_price = self.price
@@ -984,7 +1003,7 @@ class BinanceEnvCash(BinanceEnvBase):
         truncated = bool(self.invalid_action_counter >= self.invalid_actions)
         terminated = bool(self.pnl < self.pnl_stop)
 
-        """ don't move. must be before increasing timecount """
+        """ don't move. use it before increasing timecount """
         """ ----------------------------------------------- """
         self.total_reward = self.total_assets - self.initial_total_assets
         self.previous_pnl = float(self.pnl)
@@ -992,6 +1011,7 @@ class BinanceEnvCash(BinanceEnvBase):
         self.previous_total_assets = float(self.total_assets)
         self.previous_price = self.price
         self.previous_balance = str(self.current_balance)
+        """ ----------------------------------------------- """
         self.timecount += 1
         """ ----------------------------------------------- """
 
@@ -1000,7 +1020,6 @@ class BinanceEnvCash(BinanceEnvBase):
 
         self.reward_step = self.reward_step
         if terminated or truncated:
-            # self.timecount -= 1
             self.dones = True
             """ using the current pnl (as previous_pnl) """
             if self.previous_pnl == 0.:
@@ -1034,7 +1053,7 @@ class BinanceEnvCash(BinanceEnvBase):
         logger.info(msg)
 
     def reset(self, **kwargs):
-        BinanceEnvCash.total_episodes_counter += 1 if self.use_period == 'train' else 0
+        self.total_episodes_counter += 1 if self.use_period == 'train' else 0
         observation, info = super().reset(**kwargs)
         self.size_lst = []
         self.last_sell_order_pnl = 0.
@@ -1045,4 +1064,4 @@ class BinanceEnvCash(BinanceEnvBase):
         return observation, info
 
     def __del__(self):
-        BinanceEnvCash.count -= 1
+        BinanceEnvCash.count.value -= 1

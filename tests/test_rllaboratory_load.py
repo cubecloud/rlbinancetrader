@@ -137,5 +137,5 @@ if __name__ == '__main__':
     # rllab.test_agent(filename='SAC_BinanceEnvCash_7000000_chkp_2700000_steps', verbose=1)
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=5, verbose=1)
-    rllab.backtesting_agent(filename=3_700_000, render_mode='human', n_tests=5, verbose=1)
+    rllab.backtesting_agent(filename=6_600_000, render_mode='human', n_tests=5, verbose=1)
     # rllab.evaluate_agent(0)

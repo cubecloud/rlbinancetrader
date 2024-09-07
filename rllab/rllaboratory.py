@@ -491,7 +491,7 @@ class LabBase:
         return None
 
     @classmethod
-    def load_agent(cls, json_path_filename, best=False, verbose=1):
+    def load_agent(cls, json_path_filename, verbose=1):
         config_kwargs = ConfigMethods.load_config(json_path_filename)
         agent_cfg = LABConfig(**config_kwargs)
         env_kwargs = ConfigMethods.load_config(
