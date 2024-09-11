@@ -6,7 +6,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium import spaces
 from rllab.labtools import deserialize_kwargs
 
-__version__ = 0.011
+__version__ = 0.012
 
 
 # Swish Function

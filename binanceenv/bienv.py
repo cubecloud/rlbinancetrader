@@ -33,7 +33,7 @@ from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
 import matplotlib.pyplot as plt
 
-__version__ = 0.059
+__version__ = 0.065
 
 logger = logging.getLogger()
 
@@ -200,8 +200,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.action_symbol = str()
         self.order_closed = False
         self.reward_step = .0
-        self.total_reward: float = 0.
-        self.previous_pnl: float = .0
+
         self.previous_total_assets: float = 0.
 
         self.order_pnl: float = .0
@@ -220,6 +219,9 @@ class BinanceEnvBase(gymnasium.Env):
                                                         data=0.,
                                                         columns=['price', 'action', 'amount', 'pnl', 'total'])
             self.last_render_df: Union[pd.DataFrame, None] = None
+
+        self.total_reward: float = 0.
+        self.previous_pnl = float(self.pnl)
 
     @property
     def total_timesteps_counter(self):
@@ -661,10 +663,18 @@ class BinanceEnvBase(gymnasium.Env):
         # risk_free_rate = 0.02  # Example risk-free rate
         # std_deviation = self.render_df[:self.timecount + 1]['total'].std()
         # print(std_deviation)
-        std_deviation = np.log(self.ohlcv_df.iloc[:self.timecount + 1]['close']).diff().std()
+        std_deviation = np.log1p(self.ohlcv_df.iloc[:self.timecount + 1]['close']).diff().std()
+        # std_deviation = self.ohlcv_df.iloc[:self.timecount + 1]['close'].pct_change(fill_method='ffill').std()
         # return ((self.total_assets - self.previous_total_assets) * (
         #         1 - risk_free_rate)) / std_deviation if std_deviation != 0 else 0
-        return (self.pnl - self.previous_pnl) / std_deviation if std_deviation != 0 else 0
+        # returns_mean = self.render_df.iloc[:self.timecount + 1]['pnl'].mean()
+        # sharpe_ratio = returns_mean / std_deviation if std_deviation != 0 else 0
+        # returns = self.pnl - self.previous_pnl
+        sharpe_ratio = (self.pnl - self.previous_pnl) / std_deviation if std_deviation != 0 else 0
+        # print(self.timecount, f'{sharpe_ratio}', f'{returns_mean}', f'{std_deviation}')
+        # if self.verbose > 1:
+        #     logger.info(f'{self.timecount}, sr: {sharpe_ratio}, ret: {returns}, std: {std_deviation}')
+        return sharpe_ratio
 
     def get_last_render_df(self):
         return self.last_render_df
@@ -686,7 +696,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
-        stable_cache = max(15.,
+        stable_cache = max(25.,
                            self.stable_cache_data_n * self.first_epsilon) if self.use_period == 'train' else self.stable_cache_data_n
 
         if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
@@ -735,7 +745,7 @@ class BinanceEnvBase(gymnasium.Env):
             self._warmup()
         observation = self._get_obs()
         info = self._get_info()
-        self.previous_pnl = 0.
+        self.previous_pnl = float(self.pnl)
         self.previous_total_assets: float = self.total_assets
 
         return observation, info
@@ -894,8 +904,8 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
             max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
             min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
-            # max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
-            max_trade = max_size if max_size > min_trade else 0.
+            max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
+            # max_trade = max_size if max_size > min_trade else 0.
             size = min(max(min_trade, amount), max_trade)
             if size != 0.:
                 self.asset.orders.buy(size, self.price)
@@ -903,6 +913,10 @@ class BinanceEnvCash(BinanceEnvBase):
                 order_cash = self.asset.orders.book[-1].order_cash
                 # self.reward_step = self.penalty_value
                 # self.reward_step = (self.previous_buy_and_hold_pnl - self.buy_and_hold_pnl) * self.first_epsilon ** 2
+                """ looking for negative situation, we need to have less self.pnl then previous or same"""
+                # self.reward_step = (self.previous_pnl - self.pnl)/self.pnl
+                # self.reward_step = -((self.pnl - self.previous_pnl) + (action_commission / self.initial_total_assets))
+                self.reward_step = self.previous_pnl - self.pnl
             # else:
             #     action = 2
 
@@ -910,9 +924,9 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
             min_trade = max(self.min_coin_trade,
                             (self.target.minimum_trade / self.price) * (1. + self.asset.orders.commission))
-            # max_trade = min(self.asset.balance.size if self.asset.balance.size > min_trade else 0.,
-            #                 self.target.maximum_trade / self.price)
-            max_trade = self.asset.balance.size if self.asset.balance.size > min_trade else 0.
+            max_trade = min(self.asset.balance.size if self.asset.balance.size > min_trade else 0.,
+                            self.target.maximum_trade / self.price)
+            # max_trade = self.asset.balance.size if self.asset.balance.size > min_trade else 0.
             size = min(max(min_trade, amount), max_trade)
 
             if size != 0:
@@ -922,25 +936,28 @@ class BinanceEnvCash(BinanceEnvBase):
                 order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
 
                 """ Sell action reward """
-                self.reward_step += (order_profit / self.initial_total_assets)
+                self.reward_step = order_profit / self.initial_total_assets
+                # self.reward_step = (self.pnl - self.previous_pnl) + (action_commission / self.initial_total_assets)
+
+                # self.reward_step += (order_profit / self.initial_total_assets)
                 # self.last_sell_order_pnl = float(self.pnl)
             # else:
             #     action = 2
 
-        elif action == 3:  # Close all
-            self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
-            size = self.asset.balance.size if self.asset.balance.size > self.min_coin_trade else 0.
-            if size != 0:
-                self.asset.orders.sell(size, self.price)
-                action_commission = self.asset.orders.book[-1].order_commission
-                order_cash = self.asset.orders.book[-1].order_cash
-                order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
-
-                """ Close action reward """
-                self.reward_step += (order_profit / self.initial_total_assets)
-                # self.last_sell_order_pnl = float(self.pnl)
-            # else:
-            #     action = 2
+        # elif action == 3:  # Close all
+        #     self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
+        #     size = self.asset.balance.size if self.asset.balance.size > self.min_coin_trade else 0.
+        #     if size != 0:
+        #         self.asset.orders.sell(size, self.price)
+        #         action_commission = self.asset.orders.book[-1].order_commission
+        #         order_cash = self.asset.orders.book[-1].order_cash
+        #         order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
+        #
+        #         """ Close action reward """
+        #         self.reward_step += (order_profit / self.initial_total_assets)
+        #         # self.last_sell_order_pnl = float(self.pnl)
+        #     # else:
+        #     #     action = 2
 
         if self.verbose == 2:
             if self.timecount % self.log_interval == 0:
@@ -969,14 +986,14 @@ class BinanceEnvCash(BinanceEnvBase):
 
     def step(self, action):
         info = self._get_info()
-        # self.reward_step = .0
+        self.reward_step = .0
         # self.reward_step = (self.pnl - self.previous_pnl) - (
         #         (self.buy_and_hold_pnl - self.previous_buy_and_hold_pnl) * (1 + np.clip(self.first_epsilon,
         #                                                                                 a_min=0.,
         #                                                                                 a_max=0.5)))
-        """ base step reward """
-        self.reward_step = (self.pnl - self.previous_pnl) - (self.buy_and_hold_pnl - self.previous_buy_and_hold_pnl) * (
-                1 + self.first_epsilon ** 2)
+        # """ base step reward """
+        # self.reward_step = (self.pnl - self.previous_pnl) - (self.buy_and_hold_pnl - self.previous_buy_and_hold_pnl) * (
+        #         1 + self.first_epsilon ** 2)
 
         # excess_return = self.pnl - self.previous_pnl
         # std_deviation = np.log(self.ohlcv_df.iloc[:self.timecount + 1]['close']).diff().std()
@@ -993,7 +1010,8 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.render_mode is not None:
             self._render(self.timecount, self.price, real_action, real_size, self.pnl, self.total_assets)
 
-        # self.reward_step += self.calc_sharpe_ratio(risk_free_rate=0.02)
+        # if self.timecount - self.lookback_timeframes > self.ohlcv_df.shape[0] // 2:
+        #     self.reward_step += self.calc_sharpe_ratio()
 
         self.actions_lst.append(real_action)
         self.size_lst.append(real_size)
@@ -1018,20 +1036,22 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
 
-        self.reward_step = self.reward_step
+        self.reward_step = self.reward_step * 10
+
         if terminated or truncated:
             self.dones = True
             """ using the current pnl (as previous_pnl) """
             if self.previous_pnl == 0.:
                 last_reward = (self.pnl_stop - self.previous_buy_and_hold_pnl) * self.first_epsilon ** 2
             elif self.previous_pnl > 0.:
-                if self.previous_pnl - self.previous_buy_and_hold_pnl < 0.:
-                    last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl * (1 + self.first_epsilon ** 2)
-                else:
-                    last_reward = self.previous_pnl
+                last_reward = 0.5 + self.previous_pnl
+                # if self.previous_pnl - self.previous_buy_and_hold_pnl < 0.:
+                #     last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl * (1 + self.first_epsilon)
+                # else:
+                #     last_reward = self.previous_pnl
             else:  # self.pnl < 0.
-                last_reward = self.previous_pnl
-            self.reward_step += last_reward
+                last_reward = -0.5 - abs(self.previous_pnl)
+            self.reward_step += (last_reward * 10)
 
         self.episode_reward += self.reward_step
 

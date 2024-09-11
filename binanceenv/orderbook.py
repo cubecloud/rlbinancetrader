@@ -16,7 +16,7 @@ class TargetCash:
                  initial_cash: float = 100_000.,
                  minimum_trade: float = 5.,
                  maximum_trade: float = 100.,
-                 scale_decay: int = 1_000_0000,
+                 scale_decay: int = 100_0000,
                  use_period: str = 'train'):
         self.symbol = symbol
         self.use_period = use_period
@@ -71,10 +71,12 @@ class Balance:
         self.scaled_arr = self.calc_scaled_arr()
 
     def calc_scaled_arr(self):
-        return np.array([self.scaler(self.size),
-                         self.target.scaler(self.cost),
-                         self.target.scaler(self.price)],
-                        dtype=np.float32)
+        return np.clip(np.array([self.scaler(self.size),
+                                 self.target.scaler(self.cost),
+                                 self.target.scaler(self.price)],
+                                dtype=np.float32),
+                       a_min=0.,
+                       a_max=np.inf)
 
     def __str__(self):
         return f'size={self.size}, cost={self.cost}, price={self.price}'
@@ -87,7 +89,7 @@ class Asset:
                  minimum_trade: float,
                  symbol='BTC',
                  initial_balance: tuple = (0., 0., 0.),
-                 scale_decay: int = 100,
+                 scale_decay: int = 10,
                  ):
         self.symbol = symbol
         self.target = target_obj
@@ -102,7 +104,7 @@ class Asset:
                                  target_obj=self.target,
                                  balance_obj=self.balance)
 
-    def simple_scaler(self, value):
+    def simple_scaler(self, value) -> np.float32:
         return value / self.scale_decay
 
     def set_scaler(self, ref):
