@@ -7,7 +7,7 @@ from binanceenv.bienv import BinanceEnvCash
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 from multiprocessing import freeze_support
 
-__version__ = 0.0016
+__version__ = 0.0019
 
 logger = logging.getLogger()
 
@@ -29,17 +29,21 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    json_cfg = './save/BinanceEnvCash/PPO/exp-1009-140914/PPO_BinanceEnvCash_15000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/PPO/exp-1309-164239/PPO_BinanceEnvCash_33000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename='SAC_BinanceEnvCash_7000000_chkp_2700000_steps', verbose=1)
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1)
-    rllab.loaded_learn(filename='best_model',
-                       render_mode='human',
-                       reset_num_timesteps=True,
-                       total_timesteps=15_000_000,
-                       verbose=1)
+    rllab.loaded_learn(
+        filename=33_000_000,
+        # filename='best_model',
+        # render_mode='human',
+        reset_num_timesteps=True,
+        # total_timesteps=33_000_000,
+        # env_kwargs_update={'gamma': 0.999},
+        verbose=1)
+
     # rllab.backtesting_agent(filename=18_600_000, render_mode='human', n_tests=10, verbose=1)
     # rllab.evaluate_agent(0)

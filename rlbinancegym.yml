@@ -16,6 +16,7 @@ dependencies:
   - pycryptodome~=3.11
   - matplotlib>=3.0.2
   - stable-baselines3[extra]==2.3.2
+  - sb3-contrib==2.3.0
   - pytorch==2.2.0
   - torchvision==0.17.0
   - torchaudio==2.2.0

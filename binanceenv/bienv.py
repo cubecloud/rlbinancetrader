@@ -153,7 +153,7 @@ class BinanceEnvBase(gymnasium.Env):
                            minimum_trade=0.00001,
                            target_obj=self.target,
                            initial_balance=(0., 0., 0.),
-                           scale_decay=100)
+                           scale_decay=10)
 
         self.verbose = verbose
         timedelta = get_nearest_timeframe(
@@ -288,19 +288,6 @@ class BinanceEnvBase(gymnasium.Env):
         elif observation_type == 'indicators':
             space_obj = IndicatorsSpace(self.indicators_df.shape[1])
             self.__get_obs_func = self._get_indicators_obs
-        # elif observation_type == 'assets_close_indicators_action_masks':
-        #     space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 8)
-        #     self.__get_obs_func = self._get_assets_close_indicators_action_masks_obs
-        #     # if self.asset.balance.size == .0:
-        #     #     self.asset.balance = (1e-7, 56000.)
-        # elif observation_type == 'idx_assets_close_indicators_action_masks':
-        #     space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 2 + 1 + 4)
-        #     self.__get_obs_func = self._get_idx_assets_close_indicators_action_masks_obs
-        #     # if self.asset.balance.size == .0:
-        #     #     self.asset.balance = (1e-7, 56000.)
-        # elif observation_type == 'assets_close_action_masks_indicators':
-        #     space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 2 + 4)
-        #     self.__get_obs_func = self._get_assets_close_action_masks_indicators_obs
         else:
             sys.exit(f'Error: Unknown observation type {observation_type}!')
         observation_space = space_obj.observation_space
@@ -368,9 +355,9 @@ class BinanceEnvBase(gymnasium.Env):
 
     def _get_assets_close_indicators_obs(self) -> np.ndarray:
         scaled_price = self.target.scaler(self.price)
-        obs = np.concatenate([[self.target.scaled_cash],
+        obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
                               self.asset.balance.scaled_arr,
-                              [self.asset.balance.size * scaled_price, scaled_price]],
+                              [self.asset.balance.scaled_arr[0] * scaled_price, scaled_price]],
                              dtype=np.float32)
         return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
 
@@ -382,7 +369,9 @@ class BinanceEnvBase(gymnasium.Env):
         scaled_ohlc = self.target.scaler(
             self.ohlcv_df.iloc[self.timecount][['open', 'high', 'low', 'close']].values).astype(np.float32)
         assets = np.concatenate(
-            [[self.target.scaled_cash], self.asset.balance.scaled_arr, [self.asset.balance.size * scaled_ohlc[3]]],
+            [np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
+             self.asset.balance.scaled_arr,
+             [self.asset.balance.scaled_arr[0] * scaled_ohlc[3]]],
             dtype=np.float32)
         indicators = self.indicators_df.iloc[self.timecount].values.astype(np.float32)
         return np.concatenate([assets, scaled_ohlc, indicators]).astype(np.float32)
@@ -697,7 +686,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
         stable_cache = max(25.,
-                           self.stable_cache_data_n * self.first_epsilon) if self.use_period == 'train' else self.stable_cache_data_n
+                           self.stable_cache_data_n * (
+                                   self.first_epsilon + 0.25)) if self.use_period == 'train' else self.stable_cache_data_n
 
         if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
             if not self.key_list:
@@ -722,12 +712,12 @@ class BinanceEnvBase(gymnasium.Env):
             cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
             self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
 
+        size, cost, price = .0, .0, .0
         if self.use_period == 'train':
-            size = self.np_random.random() / 2
-            cost = self.price * size
-            price = self.price
-        else:
-            size, cost, price = .0, .0, .0
+            if self.np_random.random() < 0.11:
+                size = min(self.np_random.random() / 2, (self.initial_cash / self.price) / 2)
+                cost = self.price * size
+                price = self.price
 
         self.asset.reset((size, cost, price))
 
@@ -885,6 +875,15 @@ class BinanceEnvCash(BinanceEnvBase):
         self.previous_balance = str()
         self.size_lst: list = []
 
+    def _prepare_obs_ohlc(self):
+        obs_ohlc_df = np.log(self.ohlcv_df[['open', 'high', 'low', 'close']])
+        obs_ohlc_df['x1'] = obs_ohlc_df.close.pct_change()
+        obs_ohlc_df['x2'] = obs_ohlc_df.high.pct_change()
+        obs_ohlc_df['x3'] = obs_ohlc_df.low.pct_change()
+        obs_ohlc_df['x4'] = (obs_ohlc_df['high'] - obs_ohlc_df['close']) / obs_ohlc_df['close']
+        obs_ohlc_df['x5'] = (obs_ohlc_df['close'] - obs_ohlc_df['low']) / obs_ohlc_df['close']
+        return obs_ohlc_df[['x1', 'x2', 'x3', 'x4', 'x5']]
+
     @property
     def buy_and_hold_pnl(self) -> float:
         return (self.buy_and_hold_start_size * self.price) / self.initial_total_assets - 1
@@ -904,8 +903,8 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
             max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
             min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
-            max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
-            # max_trade = max_size if max_size > min_trade else 0.
+            # max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
+            max_trade = max_size if max_size > min_trade else 0.
             size = min(max(min_trade, amount), max_trade)
             if size != 0.:
                 self.asset.orders.buy(size, self.price)
@@ -916,7 +915,7 @@ class BinanceEnvCash(BinanceEnvBase):
                 """ looking for negative situation, we need to have less self.pnl then previous or same"""
                 # self.reward_step = (self.previous_pnl - self.pnl)/self.pnl
                 # self.reward_step = -((self.pnl - self.previous_pnl) + (action_commission / self.initial_total_assets))
-                self.reward_step = self.previous_pnl - self.pnl
+                # self.reward_step = self.previous_pnl - self.pnl
             # else:
             #     action = 2
 
@@ -924,9 +923,9 @@ class BinanceEnvCash(BinanceEnvBase):
             self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
             min_trade = max(self.min_coin_trade,
                             (self.target.minimum_trade / self.price) * (1. + self.asset.orders.commission))
-            max_trade = min(self.asset.balance.size if self.asset.balance.size > min_trade else 0.,
-                            self.target.maximum_trade / self.price)
-            # max_trade = self.asset.balance.size if self.asset.balance.size > min_trade else 0.
+            # max_trade = min(self.asset.balance.size if self.asset.balance.size > min_trade else 0.,
+            #                 self.target.maximum_trade / self.price)
+            max_trade = self.asset.balance.size if self.asset.balance.size > min_trade else 0.
             size = min(max(min_trade, amount), max_trade)
 
             if size != 0:
@@ -1036,22 +1035,22 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
 
-        self.reward_step = self.reward_step * 10
+        # self.reward_step = self.reward_step * 10
 
         if terminated or truncated:
             self.dones = True
             """ using the current pnl (as previous_pnl) """
             if self.previous_pnl == 0.:
-                last_reward = (self.pnl_stop - self.previous_buy_and_hold_pnl) * self.first_epsilon ** 2
-            elif self.previous_pnl > 0.:
-                last_reward = 0.5 + self.previous_pnl
+                last_reward = self.pnl_stop * self.epsilon
+            # elif self.previous_pnl > 0.:
+            #     last_reward = self.previous_pnl
                 # if self.previous_pnl - self.previous_buy_and_hold_pnl < 0.:
                 #     last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl * (1 + self.first_epsilon)
                 # else:
                 #     last_reward = self.previous_pnl
             else:  # self.pnl < 0.
-                last_reward = -0.5 - abs(self.previous_pnl)
-            self.reward_step += (last_reward * 10)
+                last_reward = self.previous_pnl
+            self.reward_step += last_reward
 
         self.episode_reward += self.reward_step
 
@@ -1072,9 +1071,9 @@ class BinanceEnvCash(BinanceEnvBase):
                f"\t{actions_counted} \t#{self.total_episodes_counter:05d}")
         logger.info(msg)
 
-    def reset(self, **kwargs):
+    def reset(self, seed=None, options=None):
         self.total_episodes_counter += 1 if self.use_period == 'train' else 0
-        observation, info = super().reset(**kwargs)
+        observation, info = super().reset(seed, options)
         self.size_lst = []
         self.last_sell_order_pnl = 0.
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (

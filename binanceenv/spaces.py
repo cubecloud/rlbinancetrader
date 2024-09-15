@@ -82,7 +82,7 @@ class LookbackAssetsCloseIndicatorsSpace:
 class LookbackDictOHLCAssetsIndicatorsSpace:
     def __init__(self, ind_num, assets_num, lookback):
         self.__observation_space = spaces.Dict(
-            {"assets": spaces.Box(low=0.0, high=1.0, shape=(5 * assets_num, ),
+            {"assets": spaces.Box(low=0.0, high=1.0, shape=(5 * assets_num,),
                                   dtype=np.float32, seed=42),
              "ohlc": spaces.Box(low=0.0, high=1.0, shape=(4, lookback), dtype=np.float32,
                                 seed=42),
@@ -120,16 +120,16 @@ class IndicatorsAndPNLSpace:
 
 class DiscreteActionSpace:
     def __init__(self, n_action):
+        self._n_action = n_action
         self.__action_space = spaces.Discrete(n_action, seed=42)  # {0, 1, 2}
         self.name = 'discrete'
 
-    def convert2action(self, action, masked_actions=None):
+    def convert2action(self, action: Union[np.ndarray, list], masked_actions=None):
         amount = 1.
-        if masked_actions is None:
-            act = np.argmax(action)
-        else:
-            act = np.ma.masked_array(action, mask=~masked_actions, fill_value=-np.inf).argmax(axis=0)
-        return act, amount
+        if masked_actions is not None:
+            if action not in list(range(self._n_action))[masked_actions]:
+                action = actions_4_dict['Hold']
+        return action, amount
 
     @property
     def action_space(self):
@@ -138,38 +138,6 @@ class DiscreteActionSpace:
     @action_space.setter
     def action_space(self, value):
         self.__action_space = value
-
-
-# class SellBuyHoldAmount:
-#     def __init__(self, actions):
-#         # self.__action_space = Box(low=0, high=1., shape=(assets_qty,), dtype=np.float32)
-#         self.__action_space: Dict = {"Action": Discrete(actions),
-#                                      "Amount": Box(low=0, high=1, shape=(1,), dtype=np.float32)}
-#         self.name = 'sell_buy_hold_amount'
-#
-#     @staticmethod
-#     def __get_action_amount(action: int) -> Tuple[int, float]:
-#         if action < 0:
-#             amount = abs(action)
-#             action = actions_dict['Sell']
-#         elif action > 0:
-#             amount = action
-#             action = actions_dict['Buy']
-#         else:
-#             amount = 0
-#             action = actions_dict['Hold']
-#         return action, amount
-#
-#     def convert2action(self, action, masked_actions=None):
-#         return self.__get_action_amount(action)
-#
-#     @property
-#     def action_space(self):
-#         return self.__action_space
-#
-#     @action_space.setter
-#     def action_space(self, value):
-#         self.__action_space = value
 
 
 class BoxActionSpace:

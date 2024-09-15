@@ -47,8 +47,12 @@ class TargetCash:
         return float(np.random.randint(max(int(self.minimum_trade * 5), int(self.max_cash // 8)), int(self.max_cash)))
 
     def _train_reset(self):
-        self.initial_cash = self.random_starting_cash()
-        self.cash = self.initial_cash
+        if np.random.rand() > 0.11:
+            self.initial_cash = self.random_starting_cash()
+            self.cash = self.initial_cash
+        else:
+            self.initial_cash = float(self.max_cash)
+            self.cash = self.initial_cash
 
     def _test_reset(self):
         self.cash = self.initial_cash

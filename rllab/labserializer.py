@@ -6,15 +6,17 @@ from torch.nn import ReLU, LeakyReLU, Tanh
 from customnn.mlpextractor import MlpExtractorNN
 from customnn.multiextractor import MultiExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
-from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC
+from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC, HerReplayBuffer
 from binanceenv import BinanceEnvBase
 from binanceenv import BinanceEnvCash
+# from binanceenv import BinanceEnvPPO
 from rllab.labtools import deserialize_kwargs
 
 __version__ = 0.011
 
 #   underscore at the end of class name -> call object itself to get method
 lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
+                        'HerReplayBuffer': HerReplayBuffer,
                         'MlpExtractorNN': MlpExtractorNN,
                         'MultiExtractorNN': MultiExtractorNN,
                         'ReLU': ReLU,
@@ -29,7 +31,8 @@ lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'TD3': TD3,
                         'DDPG': DDPG,
                         'BinanceEnvBase': BinanceEnvBase,
-                        'BinanceEnvCash': BinanceEnvCash
+                        'BinanceEnvCash': BinanceEnvCash,
+                        # 'BinanceEnvPPO': BinanceEnvPPO,
                         }
 
 if __name__ == '__main__':
@@ -52,6 +55,7 @@ if __name__ == '__main__':
                       learning_starts=learning_start,
                       policy_kwargs=sac_policy_kwargs,
                       batch_size=batch_size,
+                      replay_buffer_class='HerReplayBuffer',
                       stats_window_size=100,
                       ent_coef='auto_0.0001',
                       learning_rate={'CoSheduller': dict(warmup=learning_start,

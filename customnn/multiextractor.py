@@ -81,7 +81,7 @@ class MultiExtractorNN(BaseFeaturesExtractor):
 
         # Update the features dim manually
         # self._features_dim = total_concat_size
-        self._features_dim = 1
+        # self._features_dim = 1
         # print(total_concat_size)
 
         # Compute shape by doing one forward pass

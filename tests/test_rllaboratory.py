@@ -24,7 +24,7 @@ from multiprocessing import freeze_support
 
 # import torch
 
-__version__ = 0.087
+__version__ = 0.090
 
 logger = logging.getLogger()
 
@@ -61,10 +61,10 @@ if __name__ == '__main__':
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
-    total_timesteps = 15_000_000
+    total_timesteps = 33_000_000
     buffer_size = 1_500_000
     learning_start = 750_000
-    batch_size = 680 * 15
+    batch_size = 700 * 15
     lookback_window = '1h'
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
@@ -88,19 +88,36 @@ if __name__ == '__main__':
                                  )
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                               pnl_stop=-0.50,
-                               # max_lot_size=0.5,
-                               verbose=1,
-                               log_interval=500,
-                               observation_type='assets_close_indicators_action_masks',
-                               reuse_data_prob=0.98,
-                               eval_reuse_prob=0.99,
-                               max_hold_timeframes='5d',
-                               total_timesteps=8_000_000,
-                               gamma=0.9999,
-                               invalid_actions=5000,
-                               penalty_value=1e-4,
+                               pnl_stop=-0.9,
+                               verbose=2,
+                               log_interval=1,
+                               seed=42,
+                               target_balance=5_000.,
+                               target_minimum_trade=100.,
+                               target_maximum_trade=500.,
+                               target_scale_decay=100_000,
+                               # observation_type='lookback_dict',
+                               observation_type='lookback_assets_close_indicators',
+                               # observation_type='indicators_close',
+                               stable_cache_data_n=400,
+                               reuse_data_prob=0.92,
+                               eval_reuse_prob=0.9999,
+                               # lookback_window=None,
+                               lookback_window=lookback_window,
+                               max_hold_timeframes='30d',
+                               total_timesteps=total_timesteps,
+                               eps_start=0.99,
+                               eps_end=0.01,
+                               eps_decay=0.2,
+                               # gamma=0.995,
+                               # gamma=0.99,    # not used! in agent model
+                               # reduced by 10 (from 0.999) to have less reward backpropagation for 15 min 24h*4 = 96 timesteps
+                               invalid_actions=15_000,
+                               penalty_value=1e-6,
                                action_type='discrete',
+                               index_type='target_time',
+                               # index_type='prediction_time',
+                               render_mode='human',
                                )
     env_box_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                           pnl_stop=-0.9,
@@ -140,12 +157,12 @@ if __name__ == '__main__':
                                            verbose=2,
                                            log_interval=1,
                                            seed=42,
-                                           target_balance=25_000.,
+                                           target_balance=5_000.,
                                            target_minimum_trade=100.,
                                            target_maximum_trade=500.,
                                            target_scale_decay=100_000,
-                                           observation_type='lookback_dict',
-                                           # observation_type='lookback_assets_close_indicators',
+                                           # observation_type='lookback_dict',
+                                           observation_type='lookback_assets_close_indicators',
                                            # observation_type='indicators_close',
                                            stable_cache_data_n=400,
                                            reuse_data_prob=0.92,
@@ -158,7 +175,7 @@ if __name__ == '__main__':
                                            eps_end=0.01,
                                            eps_decay=0.2,
                                            # gamma=0.995,
-                                           gamma=0.99,
+                                           # gamma=0.99,    # not used! in agent model
                                            # reduced by 10 (from 0.999) to have less reward backpropagation for 15 min 24h*4 = 96 timesteps
                                            invalid_actions=15_000,
                                            penalty_value=1e-6,
@@ -465,59 +482,61 @@ if __name__ == '__main__':
     # del rllab
     # gc.collect()
 
-    ppo_policy_kwargs = dict(
-        features_extractor_class='MultiExtractorNN',
-        features_extractor_kwargs=dict(activation_fn='ReLU'),
-        share_features_extractor=False,
-        net_arch=[132, 132, 64]
-    )
-
-    # features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 1.78)
-    # last_features_dim = int(features_dim // 4)
     # ppo_policy_kwargs = dict(
-    #     features_extractor_class='MlpExtractorNN',
-    #     features_extractor_kwargs=dict(features_dim=features_dim,
-    #                                    last_features_dim=last_features_dim,
-    #                                    activation_fn='ReLU'),
+    #     features_extractor_class='MultiExtractorNN',
+    #     features_extractor_kwargs=dict(activation_fn='ReLU'),
     #     share_features_extractor=False,
-    #     net_arch=[last_features_dim, 256, 144],
+    #     net_arch=[256, 256, 64]
     # )
+
+    features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 1.78)
+    last_features_dim = int(features_dim // 4)
+    ppo_policy_kwargs = dict(
+        features_extractor_class='MlpExtractorNN',
+        features_extractor_kwargs=dict(features_dim=features_dim,
+                                       last_features_dim=last_features_dim,
+                                       activation_fn='ReLU'),
+        share_features_extractor=True,
+        net_arch=[last_features_dim, 256, 144],
+    )
 
     agents_n_env = 15
     ppo_kwargs = dict(
-        # policy="MlpPolicy",
-        policy="MultiInputPolicy",
+        policy="MlpPolicy",
+        # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
-        n_steps=680 * agents_n_env,
+        n_steps=700,
         batch_size=batch_size,
-        stats_window_size=200,
+        stats_window_size=100,
         normalize_advantage=False,
         clip_range=0.275,
         use_sde=False,
         # sde_sample_freq=10,
-        learning_rate={'CoSheduller': dict(warmup=learning_start,
+        learning_rate={'CoSheduller': dict(warmup=learning_start * 2,
                                            learning_rate=0.001,
                                            min_learning_rate=1e-5,
                                            total_epochs=total_timesteps,
-                                           epsilon=100)},
+                                           epsilon=10)},
+        gamma=0.999,
         device='cuda',
         verbose=1)
 
     rllab = LabBase(
         env_cls=[BinanceEnvCash],
-        env_kwargs=[env_sell_buy_hold_amount_kwargs],
+        env_kwargs=[env_discrete_kwargs],
         agents_cls=[PPO],
         agents_kwargs=[ppo_kwargs],
         agents_n_env=[agents_n_env],
         env_wrapper='subproc',
         total_timesteps=total_timesteps,
-        checkpoint_num=int(total_timesteps // 100_000),
+        checkpoint_num=int(total_timesteps // 150_000),
         n_eval_episodes=50,
-        log_interval=200,
+        log_interval=100,
         eval_freq=int(150_000 // agents_n_env),
         experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
-        deterministic=False,
+        deterministic=True,
         verbose=0,
+        seed=55,
     )
 
     rllab.learn()

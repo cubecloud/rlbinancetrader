@@ -8,6 +8,7 @@ import pandas as pd
 
 from typing import List, Union, Dict, Type, Optional
 
+from binanceenv import BinanceEnvCash, BinanceEnvBase
 from binanceenv.cache import CacheManager
 from binanceenv.cache import cache_manager_obj
 from binanceenv.cache import eval_cache_manager_obj
@@ -70,6 +71,7 @@ env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv}
 
 
 class LabBase:
+
     def __init__(self,
                  env_cls: Union[object, List[object,]],
                  agents_cls: Union[object, List[object]],
@@ -253,7 +255,8 @@ class LabBase:
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
 
-        train_env_kwargs.update({'use_period': 'train', 'verbose': self.verbose, })
+        train_env_kwargs.update({'use_period': 'train',
+                                 'verbose': self.verbose, })
 
         """ Rlock object can't be copied """
         eval_env_kwargs = copy.deepcopy(train_env_kwargs)
@@ -349,7 +352,7 @@ class LabBase:
 
         self.show_result(result, agent_cfg, save_csv=True)
 
-    def test_agent(self, ix=0, filename: str = 'best_model', verbose=1):
+    def test_agent(self, ix=0, filename: str = 'best_model', n_tests=10, verbose=1):
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
         eval_env_kwargs.update({'use_period': 'test',
@@ -366,25 +369,30 @@ class LabBase:
 
         eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
 
-        logger.info(
-            f'{self.__class__.__name__}: Creating agent: #{ix:02d} {self.agents_classes_lst[ix].__class__.__name__}')
         # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
         # _ = agent_kwargs.pop('action_noise')
 
         agent_cfg = LABConfig(**asdict(self.base_cfg))
 
-        if filename != 'best_model':
-            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', filename),
-                                                         env=eval_vec_env)
-        else:
-            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', filename),
-                                                         env=eval_vec_env)
+        agent_obj = self.agents_classes_lst[ix].load(path=self._get_checkpoint_path_filename(agent_cfg, filename),
+                                                     env=eval_vec_env)
+        logger.info(
+            f'{self.__class__.__name__}: Creating agent: #{ix:02d} {agent_obj.__class__.__name__}')
 
         result = lab_evaluate_policy(agent_obj,
                                      agent_obj.get_env(),
-                                     n_eval_episodes=self.n_eval_episodes,
+                                     n_eval_episodes=n_tests,
                                      deterministic=self.deterministic,
                                      return_episode_rewards=True)
+        self.show_result(result, agent_cfg, save_csv=False)
+
+        """ Check consistency of usinng eval_vec_env"""
+        result = lab_evaluate_policy(agent_obj,
+                                     eval_vec_env,
+                                     n_eval_episodes=n_tests,
+                                     deterministic=self.deterministic,
+                                     return_episode_rewards=True)
+
         self.show_result(result, agent_cfg, save_csv=False)
 
     def show_result(self, result, agent_cfg, save_csv=True):
@@ -402,12 +410,20 @@ class LabBase:
                      render_mode: Union[str, None] = None,
                      reset_num_timesteps: bool = False,
                      total_timesteps: Union[int, None] = None,
+                     env_kwargs_update: Union[dict, None] = None,
                      verbose=1):
 
         # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
 
         # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
         # _ = agent_kwargs.pop('action_noise')
+        if total_timesteps is not None:
+            env_kwargs_update.update({'total_timesteps': total_timesteps})
+
+        if env_kwargs_update is not None:
+            for k, v in env_kwargs_update.items():
+                self.env_kwargs_lst[ix].update({k: v})
+
         agent_cfg = LABConfig(**asdict(self.base_cfg))
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
@@ -448,17 +464,8 @@ class LabBase:
 
         # agent_cfg = LABConfig(**asdict(self.base_cfg))
 
-        if isinstance(filename, int):
-            filename = f'{agent_cfg.FILENAME}_chkp_{filename}_steps'
-
-        if filename != 'best_model':
-            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', filename),
-                                                         env=train_vec_env)
-            path_filename = os.path.join(f'{agent_cfg.DIRS["training"]}', filename)
-        else:
-            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', filename),
-                                                         env=train_vec_env)
-            path_filename = os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model')
+        path_filename = self._get_checkpoint_path_filename(agent_cfg, filename)
+        agent_obj = self.agents_classes_lst[ix].load(path=path_filename, env=train_vec_env)
 
         logger.info(
             f'{self.__class__.__name__}: Creating agent: #{ix:02d} {agent_obj.__class__.__name__}')
@@ -478,18 +485,6 @@ class LabBase:
                 new_agent_cfg.TOTAL_TIMESTEPS = total_timesteps
                 self.total_timesteps = total_timesteps
 
-            # new_agent_cfg.EVAL_FREQ = agent_cfg.EVAL_FREQ
-            # new_agent_cfg.ENV_WRAPPER = agent_cfg.ENV_WRAPPER
-            # new_agent_cfg.DETERMINISTIC = agent_cfg.DETERMINISTIC
-            # new_agent_cfg.N_EVAL_EPISODES = agent_cfg.N_EVAL_EPISODES
-            # new_agent_cfg.LOG_INTERVAL = agent_cfg.LOG_INTERVAL
-            #
-            # new_agent_cfg.ALGO = agent_obj.__class__.__name__
-            # new_agent_cfg.ENV_NAME = agent_cfg.ENV_NAME
-            # new_agent_cfg.OBS_TYPE = train_env_kwargs.get('observation_type', None)
-            # new_agent_cfg.AGENTS_N_ENV = agent_cfg.AGENTS_N_ENV
-
-            # assert new_agent_cfg.OBS_TYPE is not None, 'Error: something wrong with "observation type"'
             new_agent_cfg.FILENAME = f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}'
             dirs = self.create_exp_dirs(new_agent_cfg)
             new_agent_cfg.DIRS = dirs
@@ -501,10 +496,7 @@ class LabBase:
                         os.path.join(new_agent_cfg.DIRS['exp'], f'{new_agent_cfg.FILENAME}_kwargs.json'))
             shutil.copy(os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_env_kwargs.json'),
                         os.path.join(new_agent_cfg.DIRS['exp'], f'{new_agent_cfg.FILENAME}_env_kwargs.json'))
-            # ConfigMethods.save_config(self.agents_kwargs[ix],
-            #                           os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
-            # ConfigMethods.save_config(self.env_kwargs_lst[ix],
-            #                           os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_env_kwargs.json'))
+
             agent_cfg = new_agent_cfg
 
         checkpoint_callback = CheckpointCallback(save_freq=self.eval_freq * self.agents_n_env[ix],
@@ -533,8 +525,19 @@ class LabBase:
 
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
-    def backtesting_agent(self, ix=0, filename: Union[str, int] = 'best_model', render_mode=None, n_tests=10,
-                          verbose=1):
+    @staticmethod
+    def _get_checkpoint_path_filename(agent_cfg: LABConfig, filename: Union[str, int] = 'best_model'):
+        if isinstance(filename, int):
+            filename = f'{agent_cfg.FILENAME}_chkp_{filename}_steps'
+        if filename != 'best_model':
+            path_filename = os.path.join(f'{agent_cfg.DIRS["training"]}', filename)
+        else:
+            path_filename = os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model')
+        return path_filename
+
+    def backtesting_agent(self, ix=0, filename: Union[str, int] = 'best_model', render_mode='human',
+                          n_tests=10, verbose=1):
+
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
         eval_env_kwargs.update({'use_period': 'test',
@@ -557,16 +560,8 @@ class LabBase:
 
         agent_cfg = LABConfig(**asdict(self.base_cfg))
 
-        if isinstance(filename, int):
-            filename = f'{agent_cfg.FILENAME}_chkp_{filename}_steps'
-        if filename != 'best_model':
-            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["training"]}', filename),
-                                                         env=eval_vec_env)
-            path_filename = os.path.join(f'{agent_cfg.DIRS["training"]}', filename)
-        else:
-            agent_obj = self.agents_classes_lst[ix].load(path=os.path.join(f'{agent_cfg.DIRS["best"]}', filename),
-                                                         env=eval_vec_env)
-            path_filename = os.path.join(f'{agent_cfg.DIRS["best"]}', 'best_model')
+        path_filename = self._get_checkpoint_path_filename(agent_cfg, filename)
+        agent_obj = self.agents_classes_lst[ix].load(path=path_filename, env=eval_vec_env)
 
         logger.info(
             f'{self.__class__.__name__}: Creating agent: #{ix:02d} {agent_obj.__class__.__name__}')
