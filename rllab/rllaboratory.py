@@ -1,12 +1,13 @@
-import copy
 import os
+import math
+import copy
 import logging
 import datetime
 from pytz import timezone
 
 import pandas as pd
 
-from typing import List, Union, Dict, Type, Optional
+from typing import List, Union, Dict, Type, Optional, Type, ClassVar, TypeVar
 
 from binanceenv import BinanceEnvCash, BinanceEnvBase
 from binanceenv.cache import CacheManager
@@ -69,12 +70,13 @@ class LABConfig:
 
 env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv}
 
+AGENT_TYPE = Union[PPO, SAC, DQN, DDPG, TD3, A2C]
+
 
 class LabBase:
-
     def __init__(self,
                  env_cls: Union[object, List[object,]],
-                 agents_cls: Union[object, List[object]],
+                 agents_cls: AGENT_TYPE or List[AGENT_TYPE],
                  env_kwargs: Union[List[dict,], dict],
                  agents_kwargs: Union[List[dict,], dict],
                  agents_n_env: Union[List[int], int, None] = None,
@@ -85,7 +87,7 @@ class LabBase:
                  checkpoint_num: int = 20,
                  n_eval_episodes: int = 10,
                  log_interval: int = 200,
-                 deterministic=True,
+                 deterministic: bool = True,
                  verbose: int = 1,
                  exp_cfg: Union[LABConfig, None] = None,
                  seed: int = 42
@@ -94,18 +96,21 @@ class LabBase:
         Get all arguments to instantiate all classes and object inside the Lab
 
         Args:
-            env_cls (class or list):        environment classes
-            agents_cls (class or list):     agents classes
-            env_kwargs (dict or list):      kwargs for environment
-            agents_kwargs (dict or list):   kwargs for each agent
-            agents_n_env (int, list, None): n of environment or list
-            env_wrapper: (str)              'dummy' or 'subproc'
-            total_timesteps (int):          total timesteps
-            experiment_path (str):          path
-            checkpoint_num (int):           n of checkpoints to save
-            eval_freq (int):                frequency of evaluation
-            n_eval_episodes (int):          n of episodes to evaluate
-            deterministic (bool):           deterministic or stochastic
+            env_cls (class or list):                        environment classes
+            agents_cls (AGENT_TYPE, List[AGENT_TYPE,]):     agents classes
+            env_kwargs (dict or list):                      kwargs for environment
+            agents_kwargs (dict or list):                   kwargs for each agent
+            agents_n_env (int, list, None):                 n of environment or list
+            env_wrapper: (str)                              'dummy' or 'subproc'
+            total_timesteps (int):                          total timesteps
+            experiment_path (str):                          path
+            checkpoint_num (int):                           n of checkpoints to save
+            eval_freq (int):                                frequency of evaluation
+            n_eval_episodes (int):                          n of episodes to evaluate
+            deterministic (bool):                           deterministic or stochastic
+
+        Returns:
+            object:
         """
 
         self.policy_n_env_default: dict = {PPO: 3, A2C: 3, DQN: 3, TD3: 3, DDPG: 3, SAC: 2}
@@ -115,7 +120,7 @@ class LabBase:
         self.log_interval = log_interval
         self.experiment_path = experiment_path
         self.total_timesteps = total_timesteps
-        self.deterministic = deterministic
+        self.deterministic: bool = deterministic
         self.env_cls = env_cls
         self.env_kwargs = env_kwargs
         self.np_random = None
@@ -137,9 +142,9 @@ class LabBase:
             self.base_cfg = exp_cfg
 
         if not isinstance(env_cls, list):
-            self.env_classes_lst = list([env_cls, ])
+            self.env_classes_lst: List[ClassVar[PPO, SAC, DQN, DDPG, TD3, A2C]] = list([env_cls, ])
         else:
-            self.env_classes_lst = env_cls
+            self.env_classes_lst: List[ClassVar[PPO, SAC, DQN, DDPG, TD3, A2C]] = env_cls
         assert len(self.env_classes_lst) == len(env_kwargs), \
             "Error: list of env kwargs is not equal env_cls list"
 
@@ -404,6 +409,11 @@ class LabBase:
         if save_csv:
             result_df.to_csv(os.path.join(f'{agent_cfg.DIRS["evaluation"]}', f'{agent_cfg.FILENAME}.csv'))
 
+    @staticmethod
+    def round_up(n, decimals=0):
+        multiplier = 10 ** decimals
+        return math.ceil(n * multiplier) / multiplier
+
     # TODO Load and Learn again
     def loaded_learn(self, ix=0,
                      filename: Union[str, int] = 'best_model',
@@ -411,6 +421,7 @@ class LabBase:
                      reset_num_timesteps: bool = False,
                      total_timesteps: Union[int, None] = None,
                      env_kwargs_update: Union[dict, None] = None,
+                     agent_kwargs_update: Union[dict, None] = None,
                      verbose=1):
 
         # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
@@ -424,6 +435,12 @@ class LabBase:
             for k, v in env_kwargs_update.items():
                 self.env_kwargs_lst[ix].update({k: v})
 
+        # agent_cfg_kwargs = asdict(self.base_cfg)
+        # if agent_kwargs_update is not None:
+        #     for k, v in agent_kwargs_update.items():
+        #         agent_cfg_kwargs.update({k: v})
+        #     agent_cfg = LABConfig(**agent_cfg_kwargs)
+        # else:
         agent_cfg = LABConfig(**asdict(self.base_cfg))
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
@@ -465,7 +482,9 @@ class LabBase:
         # agent_cfg = LABConfig(**asdict(self.base_cfg))
 
         path_filename = self._get_checkpoint_path_filename(agent_cfg, filename)
-        agent_obj = self.agents_classes_lst[ix].load(path=path_filename, env=train_vec_env)
+        agent_obj = self.agents_classes_lst[ix].load(path=path_filename,
+                                                     env=train_vec_env,
+                                                     **deserialize_kwargs(agent_kwargs_update, lab_serializer))
 
         logger.info(
             f'{self.__class__.__name__}: Creating agent: #{ix:02d} {agent_obj.__class__.__name__}')
@@ -499,7 +518,9 @@ class LabBase:
 
             agent_cfg = new_agent_cfg
 
-        checkpoint_callback = CheckpointCallback(save_freq=self.eval_freq * self.agents_n_env[ix],
+        eval_freq = int(self.round_up(self.eval_freq * self.agents_n_env[ix], -3))
+
+        checkpoint_callback = CheckpointCallback(save_freq=eval_freq,
                                                  save_path=agent_cfg.DIRS["training"],
                                                  name_prefix=f'{agent_cfg.FILENAME}_chkp',
                                                  )
@@ -507,7 +528,7 @@ class LabBase:
                                         best_model_save_path=agent_cfg.DIRS["best"],
                                         n_eval_episodes=self.n_eval_episodes,
                                         log_path=agent_cfg.DIRS["evaluation"],
-                                        eval_freq=self.eval_freq * self.agents_n_env[ix],
+                                        eval_freq=eval_freq,
                                         deterministic=self.deterministic
                                         )
         # Create the callback list

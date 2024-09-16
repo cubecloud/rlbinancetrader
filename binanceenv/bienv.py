@@ -685,9 +685,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
-        stable_cache = max(25.,
-                           self.stable_cache_data_n * (
-                                   self.first_epsilon + 0.25)) if self.use_period == 'train' else self.stable_cache_data_n
+        stable_cache = max(50.,
+                           self.stable_cache_data_n * self.first_epsilon) if self.use_period == 'train' else self.stable_cache_data_n
 
         if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
             if not self.key_list:
@@ -1044,10 +1043,10 @@ class BinanceEnvCash(BinanceEnvBase):
                 last_reward = self.pnl_stop * self.epsilon
             # elif self.previous_pnl > 0.:
             #     last_reward = self.previous_pnl
-                # if self.previous_pnl - self.previous_buy_and_hold_pnl < 0.:
-                #     last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl * (1 + self.first_epsilon)
-                # else:
-                #     last_reward = self.previous_pnl
+            # if self.previous_pnl - self.previous_buy_and_hold_pnl < 0.:
+            #     last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl * (1 + self.first_epsilon)
+            # else:
+            #     last_reward = self.previous_pnl
             else:  # self.pnl < 0.
                 last_reward = self.previous_pnl
             self.reward_step += last_reward

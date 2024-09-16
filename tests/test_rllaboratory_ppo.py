@@ -62,10 +62,11 @@ if __name__ == '__main__':
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
-    total_timesteps = 33_000_000
-    buffer_size = 1_500_000
-    learning_start = 50_000
-    batch_size = 695 * 15
+    agents_n_env = 15
+    total_timesteps = 25_000_000
+    # buffer_size = 1_500_000
+    learning_start = 10_000
+    batch_size = 660 * agents_n_env
     lookback_window = '24h'
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
@@ -74,10 +75,10 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.018,
-                                 maximum_train_size=0.025,
-                                 minimum_test_size=0.16,  # reduce the test size by 2
-                                 maximum_test_size=0.18,  # reduce the test size by 2
+                                 minimum_train_size=0.0205,
+                                 maximum_train_size=0.021,
+                                 minimum_test_size=0.16,
+                                 maximum_test_size=0.17,
                                  test_size=0.13,
                                  verbose=0,
                                  )
@@ -127,26 +128,26 @@ if __name__ == '__main__':
         net_arch=[last_features_dim, 256, 144],
     )
 
-    agents_n_env = 15
 
     ppo_kwargs = dict(
         policy="MlpPolicy",
         # policy="MultiInputPolicy",
         # policy_kwargs=ppo_policy_kwargs,
-        n_steps=695 * agents_n_env,
+        n_steps=660 * agents_n_env * 10,
         batch_size=batch_size,
-        stats_window_size=100,
+        n_epochs=120,
+        stats_window_size=10,
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
         use_sde=False,
         # sde_sample_freq=10,
-        learning_rate={'CoSheduller': dict(warmup=learning_start * 2,
+        learning_rate={'CoSheduller': dict(warmup=learning_start,
                                            learning_rate=0.003,
                                            min_learning_rate=1e-5,
                                            total_epochs=total_timesteps,
                                            epsilon=10)},
-        gamma=0.99,
+        gamma=0.999,
         device='auto',
         verbose=1)
 
