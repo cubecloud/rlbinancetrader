@@ -43,6 +43,7 @@ dependencies:
   - cmaes
   - plotly
   - tensorboard
+  - objsize
   - pip:
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git

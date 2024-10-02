@@ -1,5 +1,6 @@
 import sys
 import math
+import copy
 import random
 import logging
 import gymnasium
@@ -24,6 +25,7 @@ from dbbinance.fetcher.datautils import get_nearest_timeframe
 import multiprocessing as mp
 from ctypes import c_bool
 from dbbinance.fetcher.cachemanager import mlp_mutex
+from dbbinance.fetcher import MpCacheManager
 
 from collections import deque
 from datawizard.dataprocessor import IndicatorProcessor
@@ -83,7 +85,7 @@ class BinanceEnvBase(gymnasium.Env):
                  seed: int = 41,
                  lookback_window: Union[str, int, None] = None,
                  # max_lot_size: float = 0.25,
-                 max_hold_timeframes='72h',
+                 max_hold_timeframes='24h',
                  penalty_value: float = 1e-5,
                  invalid_actions: int = 60,
                  total_timesteps: int = 3_000_000,
@@ -95,15 +97,17 @@ class BinanceEnvBase(gymnasium.Env):
                  render_mode=None,
                  index_type: str = 'target_time',
                  deterministic: bool = True,
-                 multiprocessing: bool = False,
+                 # multiprocessing: bool = False,
                  ):
 
-        self.multiprocessing = multiprocessing
+        # self.multiprocessing = multiprocessing
 
         BinanceEnvBase.count.value += 1
 
         self.idnum = int(BinanceEnvBase.count.value)
         self.observation_type = observation_type
+
+        data_processor_kwargs.update({'seed': data_processor_kwargs.get('seed', 42) + self.idnum})
         self.data_processor_obj = IndicatorProcessor(**data_processor_kwargs)
 
         self.index_type = index_type
@@ -156,10 +160,11 @@ class BinanceEnvBase(gymnasium.Env):
                            scale_decay=10)
 
         self.verbose = verbose
+
+        self.ohlcv_df, self.indicators_df = None, None
+
         timedelta = get_nearest_timeframe(
             self.lookback_timeframes * get_timeframe_bins(self.data_processor_obj.timeframe) + get_timeframe_bins('2d'))
-        self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_ohlcv_and_indicators_sample(timedelta=timedelta,
-                                                                                                    index_type=self.index_type)
 
         self.__get_obs_func = None
         self._take_action_func = None
@@ -169,13 +174,22 @@ class BinanceEnvBase(gymnasium.Env):
             # using external cache_manager for multiprocessing or multithreading
             if cache_obj is None:
                 self.CM = cache_manager_obj
+            elif cache_obj == 'MpCacheManager':
+                self.CM = MpCacheManager(port=5005, start_host=False)
+                self.ohlcv_df, self.indicators_df = self.CM.get(self.CM.keys()[0])
             self._take_action_func = self._take_action_train
         else:
             # separated CacheManager for eval environment
             if cache_obj is None:
                 self.CM = eval_cache_manager_obj
+            elif cache_obj == 'MpCacheManager':
+                self.CM = MpCacheManager(port=5006, start_host=False)
             self._take_action_func = self._take_action_test
             self.reuse_data_prob = eval_reuse_prob
+
+        if self.ohlcv_df is None:
+            self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_ohlcv_and_indicators_sample(
+                timedelta=timedelta, index_type=self.index_type)
 
         self.action_space_obj = None
         self.obs_lookback = deque(maxlen=self.lookback_timeframes)
@@ -193,7 +207,6 @@ class BinanceEnvBase(gymnasium.Env):
         self.np_random = None
         self.seed = self.get_seed(seed + self.idnum)
 
-        self.actions_lst: list = []
         self.min_coin_trade = self.asset.orders.minimum_trade + (
                 self.asset.orders.commission * self.asset.orders.minimum_trade)
         self.total_timesteps = total_timesteps
@@ -442,6 +455,9 @@ class BinanceEnvBase(gymnasium.Env):
              self.asset.balance.size >= self.min_coin_trade,
              self.not_max_holding_time(self.max_hold_timeframes)])
 
+    def action_masks(self):
+        return self._get_action_masks()
+
     def _get_info(self) -> dict:
         return {"action_masks": self._get_action_masks(), "pnl": self.pnl}
 
@@ -629,7 +645,7 @@ class BinanceEnvBase(gymnasium.Env):
         values, counts = np.unique(self.actions_lst, return_counts=True)
         actions_counted: dict = dict(zip(values, counts))
         msg = (f"{self.__class__.__name__} #{self.idnum} {self.use_period}: "
-               f"Ep.length(shape): {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.cache):03d}/"
+               f"Ep.length(shape): {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.keys()):03d}/"
                f"inv_act#: {self.invalid_action_counter:03d}/Ep.reward: {self.episode_reward:.4f}"
                # f"\tepsilon: {self.epsilon:.6f}"
                f"\tprofit {self.total_reward:.1f}"
@@ -668,6 +684,19 @@ class BinanceEnvBase(gymnasium.Env):
     def get_last_render_df(self):
         return self.last_render_df
 
+    def get_new_ohlcv_and_indicators(self):
+        self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
+            index_type=self.index_type, period_type=self.use_period)
+
+        if self.ohlcv_df.shape[0] != self.indicators_df.shape[0]:
+            msg = (f"{self.__class__.__name__} #{self.idnum}: ohlcv_df.shape = {self.ohlcv_df.shape}, "
+                   f"indicators_df.shape = {self.indicators_df.shape}")
+            logger.debug(msg)
+            sys.exit('Error: Check data_processor, length of data is not equal!')
+
+        cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
+        self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
+
     def reset(self, seed=None, options=None):
         if self.render_mode is not None:
             self.last_render_df = self.render_df.copy(deep=True)
@@ -685,31 +714,38 @@ class BinanceEnvBase(gymnasium.Env):
         self.gamma_return = 0.
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
-        stable_cache = max(50.,
-                           self.stable_cache_data_n * self.first_epsilon) if self.use_period == 'train' else self.stable_cache_data_n
+        stable_cache = max(20.,
+                           self.stable_cache_data_n * min(1.0,
+                                                          self.first_epsilon + 0.3)) if self.use_period == 'train' else self.stable_cache_data_n
 
-        if self.reuse_data_prob > self.np_random.random() and len(self.CM.cache) >= stable_cache:
-            if not self.key_list:
-                self.key_list = list(self.CM.cache.keys())
+        if len(self.CM.keys()) >= stable_cache:
+            if self.reuse_data_prob > self.np_random.random():
+                if not self.key_list:
+                    """ Creating the list of cache data from probs dict """
+                    self.key_list = list(self.CM.hits_probs().keys())
+                    """ 
+                    if cache filled and reuse prob > rnd and key_list empty,
+                    keep old data from cache * 0.3 (remove top 70%) on this learning cycle
+                    and have a short key_list to have 'actual' probs from global cache 
+                    """
+                    if self.use_period == 'train':
+                        to_keep_ix = min(int(stable_cache * 0.3) + 1, len(self.key_list))
+                        """ Creating list of keys to use data from cache """
+                        self.key_list = self.key_list[:to_keep_ix]
+
                 self.np_random.shuffle(self.key_list)
-            self.ohlcv_df, self.indicators_df = self.CM.cache[self.key_list[0]]
-            rnd_start = self.np_random.integers(
-                max(1, int(200 * self.first_epsilon))) if self.use_period == 'train' else 0
-            self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
-            self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
-            self.key_list = self.key_list[1:]
+                """ Get 1st random key to get data from cache """
+                self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
+                """ random start index for data from cache """
+                rnd_start = self.np_random.integers(
+                    max(16, int(98 * self.first_epsilon))) if self.use_period == 'train' else 0
+                self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
+                self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
+                self.key_list = self.key_list[1:]
+            else:
+                self.get_new_ohlcv_and_indicators()
         else:
-            self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
-                index_type=self.index_type, period_type=self.use_period)
-
-            if self.ohlcv_df.shape[0] != self.indicators_df.shape[0]:
-                msg = (f"{self.__class__.__name__} #{self.idnum}: ohlcv_df.shape = {self.ohlcv_df.shape}, "
-                       f"indicators_df.shape = {self.indicators_df.shape}")
-                logger.debug(msg)
-                sys.exit('Error: Check data_processor, length of data is not equal!')
-
-            cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
-            self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
+            self.get_new_ohlcv_and_indicators()
 
         size, cost, price = .0, .0, .0
         if self.use_period == 'train':
@@ -854,13 +890,17 @@ class BinanceEnvCash(BinanceEnvBase):
                  render_mode: Union[str, None] = None,
                  index_type: str = 'target_time',
                  deterministic: bool = True,
-                 multiprocessing: bool = False, ):
+
+                 # multiprocessing: bool = False,
+                 ):
         super().__init__(data_processor_kwargs, target_balance, target_minimum_trade, target_maximum_trade,
                          target_scale_decay, coin_balance, pnl_stop, verbose, log_interval, observation_type,
                          action_type, use_period, stable_cache_data_n, reuse_data_prob,
                          eval_reuse_prob, seed, lookback_window, max_hold_timeframes, penalty_value,
                          invalid_actions, total_timesteps, eps_start, eps_end, eps_decay, gamma, cache_obj, render_mode,
-                         index_type, deterministic, multiprocessing)
+                         index_type, deterministic,
+                         # multiprocessing
+                         )
 
         # BinanceEnvCash.count += 1
 
@@ -869,6 +909,8 @@ class BinanceEnvCash(BinanceEnvBase):
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
                 1 - self.asset.orders.commission)
         self.previous_price = self.price
+        self.previous_pnl = float(self.pnl)
+        self.previous_lookback_pnl = float(self.pnl)
         self.previous_buy_and_hold_pnl: float = 0.
         self.last_sell_order_pnl: float = 0.
         self.previous_balance = str()
@@ -886,6 +928,12 @@ class BinanceEnvCash(BinanceEnvBase):
     @property
     def buy_and_hold_pnl(self) -> float:
         return (self.buy_and_hold_start_size * self.price) / self.initial_total_assets - 1
+
+    def _get_action_masks(self) -> np.ndarray:
+        return np.array(
+            [self.cash / self.price >= self.min_coin_trade,
+             self.asset.balance.size >= self.min_coin_trade,
+             True])
 
     def _take_action(self, action, amount) -> tuple:
         old_target_balance = float(self.cash)
@@ -985,20 +1033,6 @@ class BinanceEnvCash(BinanceEnvBase):
     def step(self, action):
         info = self._get_info()
         self.reward_step = .0
-        # self.reward_step = (self.pnl - self.previous_pnl) - (
-        #         (self.buy_and_hold_pnl - self.previous_buy_and_hold_pnl) * (1 + np.clip(self.first_epsilon,
-        #                                                                                 a_min=0.,
-        #                                                                                 a_max=0.5)))
-        # """ base step reward """
-        # self.reward_step = (self.pnl - self.previous_pnl) - (self.buy_and_hold_pnl - self.previous_buy_and_hold_pnl) * (
-        #         1 + self.first_epsilon ** 2)
-
-        # excess_return = self.pnl - self.previous_pnl
-        # std_deviation = np.log(self.ohlcv_df.iloc[:self.timecount + 1]['close']).diff().std()
-        # sharpe_ratio = excess_return / std_deviation if std_deviation != 0 else 0
-        # print(self.timecount, f'{excess_return}', std_deviation, sharpe_ratio,  self.calc_sharpe_ratio(risk_free_rate=0.02))
-        # self.reward_step = (self.pnl - self.previous_pnl)
-        # self.reward_step = -self.penalty_value
 
         action, amount = self.action_space_obj.convert2action(action, None)
         # action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
@@ -1008,9 +1042,6 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.render_mode is not None:
             self._render(self.timecount, self.price, real_action, real_size, self.pnl, self.total_assets)
 
-        # if self.timecount - self.lookback_timeframes > self.ohlcv_df.shape[0] // 2:
-        #     self.reward_step += self.calc_sharpe_ratio()
-
         self.actions_lst.append(real_action)
         self.size_lst.append(real_size)
 
@@ -1018,6 +1049,11 @@ class BinanceEnvCash(BinanceEnvBase):
 
         truncated = bool(self.invalid_action_counter >= self.invalid_actions)
         terminated = bool(self.pnl < self.pnl_stop)
+
+        """ To remove sparse -> PNL reward every max_hold_timeframes (24h) """
+        if self.timecount % self.lookback_timeframes == 0:
+            self.reward_step += (self.pnl - self.previous_lookback_pnl)
+            self.previous_lookback_pnl = float(self.pnl)
 
         """ don't move. use it before increasing timecount """
         """ ----------------------------------------------- """
@@ -1034,21 +1070,26 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
 
-        # self.reward_step = self.reward_step * 10
-
         if terminated or truncated:
             self.dones = True
+            """ add last part,  if its not added, to reward """
+            if self.previous_pnl != self.previous_lookback_pnl:
+                self.reward_step += (self.previous_pnl - self.previous_lookback_pnl)
+
             """ using the current pnl (as previous_pnl) """
             if self.previous_pnl == 0.:
                 last_reward = self.pnl_stop * self.epsilon
-            # elif self.previous_pnl > 0.:
-            #     last_reward = self.previous_pnl
-            # if self.previous_pnl - self.previous_buy_and_hold_pnl < 0.:
-            #     last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl * (1 + self.first_epsilon)
-            # else:
-            #     last_reward = self.previous_pnl
-            else:  # self.pnl < 0.
-                last_reward = self.previous_pnl
+            else:
+                if self.previous_pnl > 0:
+                    last_reward = self.previous_pnl
+                else:  # self.pnl < 0.
+                    if self.previous_pnl > self.previous_buy_and_hold_pnl:
+                        """ Positive reward cos of it's better than B&H """
+                        last_reward = self.previous_pnl - self.previous_buy_and_hold_pnl
+                    else:
+                        """ Negative reward if PNL less or equal B&H, to check learn -1.5% """
+                        last_reward = self.previous_pnl * 1.015 - self.previous_buy_and_hold_pnl
+
             self.reward_step += last_reward
 
         self.episode_reward += self.reward_step
@@ -1059,7 +1100,7 @@ class BinanceEnvCash(BinanceEnvBase):
         values, counts = np.unique(self.actions_lst, return_counts=True)
         actions_counted: dict = dict(zip(values, counts))
         msg = (f"{self.__class__.__name__} #{self.idnum} {self.use_period}: "
-               f"Ep.len: {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.cache):03d}/"
+               f"Ep.len: {self.timecount}({self.ohlcv_df.shape[0]}), cache: {len(self.CM.keys()):03d}/"
                f"In.t.asset: {self.initial_total_assets:.0f} "
                # f"inv_act#: {self.invalid_action_counter:03d}/"
                f"Ep.reward: {self.episode_reward:.4f}"
@@ -1079,6 +1120,7 @@ class BinanceEnvCash(BinanceEnvBase):
                 1 - self.asset.orders.commission)
         self.previous_buy_and_hold_pnl = 0.
         self.previous_balance = str()
+        self.previous_lookback_pnl = float(self.pnl)
         return observation, info
 
     def __del__(self):

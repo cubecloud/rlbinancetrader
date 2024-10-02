@@ -7,12 +7,14 @@ from customnn.mlpextractor import MlpExtractorNN
 from customnn.multiextractor import MultiExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC, HerReplayBuffer
+from sb3_contrib import MaskablePPO
+
 from binanceenv import BinanceEnvBase
 from binanceenv import BinanceEnvCash
 # from binanceenv import BinanceEnvPPO
 from rllab.labtools import deserialize_kwargs
-
-__version__ = 0.011
+from dbbinance.fetcher import MpCacheManager
+__version__ = 0.013
 
 #   underscore at the end of class name -> call object itself to get method
 lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
@@ -32,6 +34,8 @@ lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'DDPG': DDPG,
                         'BinanceEnvBase': BinanceEnvBase,
                         'BinanceEnvCash': BinanceEnvCash,
+                        'MpCacheManager': MpCacheManager,
+                        'MaskablePPO': MaskablePPO,
                         # 'BinanceEnvPPO': BinanceEnvPPO,
                         }
 

@@ -15,18 +15,20 @@ from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckA
 
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 from sb3_contrib import MaskablePPO
+from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 # from torch.nn import Tanh, Softmax, LeakyReLU, ReLU
 # from binanceenv.bienv import BinanceEnvBase
 from binanceenv.bienv import BinanceEnvCash
 
-# from customnn.mlpextractor import MlpExtractorNN
+from customnn.mlpextractor import MlpExtractorNN
 from rllab.rllaboratory import LabBase
 # from rllab.labcosheduller import CoSheduller
 from multiprocessing import freeze_support
+import warnings
 
 # import torch
 
-__version__ = 0.095
+__version__ = 0.097
 
 logger = logging.getLogger()
 
@@ -35,7 +37,7 @@ if __name__ == '__main__':
 
     logger.setLevel(logging.DEBUG)
 
-    file_handler = logging.FileHandler('test_rllab_ppo.log')
+    file_handler = logging.FileHandler('test_rllab_mask_ppo.log')
     file_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
@@ -44,6 +46,7 @@ if __name__ == '__main__':
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     logging.getLogger('numba').setLevel(logging.INFO)
+    logging.getLogger('gymnasium').setLevel(logging.INFO)
     logging.getLogger('LoadDbIndicators').setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
@@ -63,12 +66,12 @@ if __name__ == '__main__':
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
-    agents_n_env = 15
-    total_timesteps = 30_000_000
+    agents_n_env = 5
+    total_timesteps = 60_000_000
     # buffer_size = 1_500_000
-    learning_start = 100_000
-    batch_size = 660 * agents_n_env
-    lookback_window = '24h'
+    learning_start = 1_000_000
+    # batch_size = 660 * agents_n_env
+    lookback_window = '12h'
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -76,9 +79,9 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.0205,
-                                 maximum_train_size=0.021,
-                                 minimum_test_size=0.16,
+                                 minimum_train_size=0.0227,
+                                 maximum_train_size=0.0237,
+                                 minimum_test_size=0.148,
                                  maximum_test_size=0.17,
                                  test_size=0.13,
                                  verbose=0,
@@ -86,7 +89,7 @@ if __name__ == '__main__':
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                                pnl_stop=-0.9,
-                               verbose=2,
+                               verbose=0,
                                log_interval=1,
                                seed=42,
                                target_balance=5_000.,
@@ -97,8 +100,8 @@ if __name__ == '__main__':
                                # observation_type='assets_close_indicators',
                                observation_type='lookback_assets_close_indicators',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=75,
-                               reuse_data_prob=0.99,
+                               stable_cache_data_n=1260,  # 150
+                               reuse_data_prob=0.9999,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
                                lookback_window=lookback_window,
@@ -132,41 +135,43 @@ if __name__ == '__main__':
     ppo_kwargs = dict(
         policy="MlpPolicy",
         # policy="MultiInputPolicy",
-        # policy_kwargs=ppo_policy_kwargs,
-        n_steps=660 * agents_n_env * 5,
-        batch_size=batch_size,
-        n_epochs=50,
-        stats_window_size=3,
-        ent_coef=0.03,
+        policy_kwargs=ppo_policy_kwargs,
+        n_steps=700 * int(env_discrete_kwargs['stable_cache_data_n'] // agents_n_env),
+        batch_size=700 * int(env_discrete_kwargs['stable_cache_data_n'] // agents_n_env),
+        n_epochs=10,
+        stats_window_size=2,
+        ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
-        use_sde=False,
-        # sde_sample_freq=10,
         learning_rate={'CoSheduller': dict(warmup=learning_start,
-                                           learning_rate=0.003,
-                                           min_learning_rate=1e-5,
+                                           learning_rate=1e-3,
+                                           min_learning_rate=1e-4,
                                            total_epochs=total_timesteps,
                                            epsilon=100)},
+        # lookback window (timesteps) / 100 -> 12h * 4 = 48
         gamma=0.99,
         device='auto',
         verbose=1)
 
-    rllab = LabBase(
-        env_cls=[BinanceEnvCash],
-        env_kwargs=[env_discrete_kwargs],
-        agents_cls=[PPO],
-        agents_kwargs=[ppo_kwargs],
-        agents_n_env=[agents_n_env],
-        env_wrapper='subproc',
-        total_timesteps=total_timesteps,
-        checkpoint_num=int(total_timesteps // 750_000),
-        n_eval_episodes=50,
-        log_interval=1,
-        eval_freq=int(750_000 // agents_n_env),
-        experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
-        deterministic=False,
-        verbose=0,
-        seed=442,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
 
-    rllab.learn()
+        rllab = LabBase(
+            env_cls=[BinanceEnvCash],
+            env_kwargs=[env_discrete_kwargs],
+            agents_cls=[MaskablePPO],
+            agents_kwargs=[ppo_kwargs],
+            agents_n_env=[agents_n_env],
+            env_wrapper='dummy',
+            total_timesteps=total_timesteps,
+            checkpoint_num=int(total_timesteps // 500_000),
+            n_eval_episodes=50,
+            log_interval=1,
+            eval_freq=int(500_000 // agents_n_env),
+            experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
+            deterministic=False,
+            verbose=0,
+            seed=442,
+        )
+
+        rllab.learn()

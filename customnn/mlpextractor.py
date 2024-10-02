@@ -43,6 +43,7 @@ class MlpExtractorNN(BaseFeaturesExtractor):
         self.linear = nn.Sequential(
             nn.Linear(features_dim // 4, last_features_dim),
             self.activation_fn(), )
+        print(f'Features extractor features_dim = {self._features_dim}')
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         return self.linear(self.mlp_extractor(observations))

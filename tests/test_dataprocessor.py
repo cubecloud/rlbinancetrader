@@ -13,7 +13,6 @@ from dbbinance.config.configpostgresql import ConfigPostgreSQL
 from datawizard.dataprocessor import IndicatorProcessor, ProcessorBase
 from indicators import LoadDbIndicators
 
-
 __version__ = 0.02
 
 logger = logging.getLogger()
@@ -75,7 +74,6 @@ logger.debug(f"{__name__}: Indicators.shape: \n{indicators_df.shape}")
 logger.debug(f"{__name__}: Indicators data head: \n{indicators_df.head(5).to_string()}\n")
 logger.debug(f"{__name__}: Indicators data tail: \n{indicators_df.tail(5).to_string()}\n")
 
-
 _timeframe = '5m'
 _discretization = '15m'
 _gap_period = '1d'
@@ -91,7 +89,6 @@ msg = (
     f"timeframe: {_timeframe}, discretization: {_discretization}\n")
 logger.debug(msg)
 
-
 ohlcv_df, indicators_df = dp.get_random_ohlcv_and_indicators()
 
 logger.debug(f"{__name__}: OHLCV.shape: \n{ohlcv_df.shape}")
@@ -101,3 +98,31 @@ logger.debug(f"{__name__}: OHLCV data tail: \n{ohlcv_df.tail(5).to_string()}\n")
 logger.debug(f"{__name__}: Indicators.shape: \n{indicators_df.shape}")
 logger.debug(f"{__name__}: Indicators data head: \n{indicators_df.head(5).to_string()}\n")
 logger.debug(f"{__name__}: Indicators data tail: \n{indicators_df.tail(5).to_string()}\n")
+
+_timeframe = '15m'
+_discretization = '15m'
+
+_start_datetime = '2023-07-20 01:00:00'
+_end_datetime = '2024-07-30 01:00:00'
+
+data_processor_kwargs = dict(start_datetime=_start_datetime,
+                             end_datetime=_end_datetime,
+                             timeframe=_timeframe,
+                             discretization=_discretization,
+                             symbol_pair='BTCUSDT',
+                             market='spot',
+                             minimum_train_size=0.0227,
+                             maximum_train_size=0.0237,
+                             minimum_test_size=0.148,
+                             maximum_test_size=0.17,
+                             test_size=0.13,
+                             verbose=1,
+                             )
+
+dp = IndicatorProcessor(**data_processor_kwargs)
+
+episodes_lst = dp.get_n_episodes_ohlcv_and_indicators(index_type='target_time',
+                                                      period_type='train',
+                                                      n_episodes=10)
+for (episode_ohlcv_df, episode_indicator_df) in episodes_lst:
+    logger.debug(f"{__name__}: {episode_ohlcv_df.index[0]} - {episode_ohlcv_df.index[-1]}")
