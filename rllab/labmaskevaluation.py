@@ -7,27 +7,27 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecMonitor, is_vecenv_wrapped
 
 from sb3_contrib.common.maskable.utils import is_masking_supported
-# from sb3_contrib.common.maskable.utils import get_action_masks
-from stable_baselines3.common.type_aliases import GymEnv
+from sb3_contrib.common.maskable.utils import get_action_masks
+# from stable_baselines3.common.type_aliases import GymEnv
 from sb3_contrib.ppo_mask import MaskablePPO
 
 EXPECTED_METHOD_NAME = "action_masks"
 
 
-def get_action_masks(env: GymEnv) -> np.ndarray:
-    """
-    Checks whether gym env exposes a method returning invalid action masks
-
-    :param env: the Gym environment to get masks from
-    :return: A numpy array of the masks
-    """
-
-    if isinstance(env, VecEnv):
-        return np.stack(env.env_method(EXPECTED_METHOD_NAME))
-    elif isinstance(env, Monitor):
-        return env.get_wrapper_attr(EXPECTED_METHOD_NAME)()
-    else:
-        return getattr(env, EXPECTED_METHOD_NAME)()
+# def get_action_masks(env: GymEnv) -> np.ndarray:
+#     """
+#     Checks whether gym env exposes a method returning invalid action masks
+#
+#     :param env: the Gym environment to get masks from
+#     :return: A numpy array of the masks
+#     """
+#
+#     if isinstance(env, VecEnv):
+#         return np.stack(env.env_method(EXPECTED_METHOD_NAME))
+#     elif isinstance(env, Monitor):
+#         return env.get_wrapper_attr(EXPECTED_METHOD_NAME)()
+#     else:
+#         return getattr(env, EXPECTED_METHOD_NAME)()
 
 
 def lab_mask_evaluate_policy(

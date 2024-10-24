@@ -20,8 +20,8 @@ def get_base_env(wrapped_env: Union[DummyVecEnv, SubprocVecEnv], env_class):
     """
 
     env_tmp = wrapped_env
-    while isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, Monitor)):
-        if isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv)):
+    while isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, Monitor, VecEnv)):
+        if isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, VecEnv)):
             env_tmp = env_tmp.envs[0]
         elif isinstance(env_tmp, Monitor):
             env_tmp = env_tmp.env

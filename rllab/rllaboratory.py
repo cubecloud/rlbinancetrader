@@ -5,15 +5,17 @@ import time
 import copy
 import logging
 import datetime
+
+from mlthread_tools import mlp_mutex
 from pytz import timezone
 
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 
 from typing import List, Union, Dict, Type, Optional, Type, ClassVar, TypeVar
 
 from binanceenv import BinanceEnvCash, BinanceEnvBase
-from binanceenv.cache import CacheManager
 from binanceenv.cache import CacheManager
 from binanceenv.cache import cache_manager_obj
 from binanceenv.cache import eval_cache_manager_obj
@@ -40,6 +42,9 @@ from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
 from rllab import LabMaskEvalCallback
+from rllab import LabMpVecEnv
+from rllab import LabMltVecEnv
+from rllab import LabSubprocVecEnv
 from rllab.labmaskevaluation import lab_mask_evaluate_policy
 from rllab.labtools import deserialize_kwargs, round_up, get_base_env
 from rllab.labserializer import lab_serializer
@@ -47,13 +52,12 @@ from rllab.labserializer import lab_serializer
 from datawizard.dataprocessor import IndicatorProcessor
 
 from sb3_contrib import MaskablePPO
-import multiprocessing as mp
 from tqdm import tqdm
 
 # from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 # from sb3_contrib.common.maskable.evaluation import evaluate_policy
 
-__version__ = 0.047
+__version__ = 0.049
 
 TZ = timezone('Europe/Moscow')
 
@@ -85,7 +89,9 @@ class LABConfig:
     LOG_INTERVAL: int = field(default_factory=int, init=True)
 
 
-env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv}
+env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv, 'labsubproc': LabSubprocVecEnv,
+                          # 'labmpenv': LabMpVecEnv, 'labmltenv': LabMltVecEnv
+                          }
 
 AGENT_TYPE = Union[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO]
 
@@ -104,7 +110,7 @@ class LabBase:
                  experiment_path: str = './',
                  eval_freq: int = 50_000,
                  checkpoint_num: int = 20,
-                 n_eval_episodes: int = 10,
+                 n_eval_episodes: int = 50,
                  log_interval: int = 200,
                  deterministic: bool = True,
                  verbose: int = 1,
@@ -215,8 +221,8 @@ class LabBase:
         self.cache_manager: CacheManager = cache_manager_obj
         self.eval_cache_manager: CacheManager = eval_cache_manager_obj
         self.data_processor_obj = None
-        self.mp_train_cache_server = None
-        self.mp_test_cache_server = None
+        self.mp_train_cache_server: Union[MpCacheManager, None] = None
+        self.mp_test_cache_server: Union[MpCacheManager, None] = None
         # self.init_agents()
 
     def update_agent_kwargs(self, agent_kwargs):
@@ -255,6 +261,7 @@ class LabBase:
                    cache_obj: Union[MpCacheManager],
                    env_kwargs: dict,
                    ep_start_end_lst: list):
+
         def get_new_ohlcv_and_indicators(start_datetime,
                                          end_datetime,
                                          index_type: str = 'target_time'):
@@ -279,7 +286,7 @@ class LabBase:
             # print(f'#{len(cache_obj.keys())} - {cm_key}')
 
     def mp_fill_cache(self, env_kwargs: dict, n_envs: Union[str, int] = 'auto', seed: int = 42,
-                      port: Union[int, None] = None):
+                      port: Union[int, None] = None, start_host: bool = True):
 
         def pbar_updater(cache_obj: Union[MpCacheManager], ):
             pbar = tqdm(total=env_kwargs['stable_cache_data_n'])
@@ -295,68 +302,103 @@ class LabBase:
             if self.mp_train_cache_server is None:
                 if port is None:
                     port = 5005
-                self.mp_train_cache_server = MpCacheManager(max_memory_gb=4, start_host=True, port=port)
+                self.mp_train_cache_server = MpCacheManager(max_memory_gb=3,
+                                                            start_host=start_host,
+                                                            port=port,
+                                                            unique_name='train')
             mp_cache_server = self.mp_train_cache_server
         else:
             if self.mp_test_cache_server is None:
                 if port is None:
                     port = 5006
-                self.mp_test_cache_server = MpCacheManager(start_host=True, port=port)
+                self.mp_test_cache_server = MpCacheManager(start_host=start_host,
+                                                           port=port,
+                                                           unique_name='test')
             mp_cache_server = self.mp_test_cache_server
 
-        data_processor_kwargs = env_kwargs['data_processor_kwargs']
-
         """ Get the list of episodes start - end """
-        dp_obj = IndicatorProcessor(**data_processor_kwargs)
+        env_kwargs['data_processor_kwargs'].update({'seed': seed})
+        dp_obj = IndicatorProcessor(**env_kwargs['data_processor_kwargs'])
         episodes_start_end_lst = dp_obj.get_n_episodes_start_end_lst(index_type=env_kwargs['index_type'],
                                                                      period_type=env_kwargs['use_period'],
                                                                      n_episodes=env_kwargs['stable_cache_data_n'])
+        logger.info(
+            f'{self.__class__.__name__}: start-end list contains: #{len(episodes_start_end_lst)}')
+
         if n_envs == 'auto':
-            n_envs = max(1, min(env_kwargs['stable_cache_data_n'], mp.cpu_count() - 1))
-            if len(episodes_start_end_lst) < n_envs and n_envs > 1:
-                n_envs = len(episodes_start_end_lst)
+            n_envs = min(len(episodes_start_end_lst), mp.cpu_count() - 1 or 1)
 
         env_start_end_lst: list = []
-        n_episodes_per_env = int(round_up(max(1., len(episodes_start_end_lst) / n_envs), 0))
 
-        indices = np.arange(0, len(episodes_start_end_lst), n_episodes_per_env)
+        n_episodes_per_env = int(round_up(max(1., len(episodes_start_end_lst) / n_envs), 0))
+        indices = np.arange(0, len(episodes_start_end_lst) + 1, n_episodes_per_env)
         for idx in indices:
-            ep_start_end = episodes_start_end_lst[idx: min(idx + n_episodes_per_env, len(episodes_start_end_lst))]
+            ep_start_end = episodes_start_end_lst[idx: min(idx + n_episodes_per_env, len(episodes_start_end_lst) + 1)]
             env_start_end_lst.append(ep_start_end)
         """ Get the list of episodes start - end """
 
         job_lst: list = []
         for ix, start_end_lst in zip(range(len(env_start_end_lst)), env_start_end_lst):
-            # data_processor_kwargs.update({'seed': seed + ix})
             job_lst.append(mp.Process(target=LabBase.fill_cache,
                                       args=(dp_obj,
                                             mp_cache_server,
                                             env_kwargs,
                                             start_end_lst)))
             job_lst[ix].start()
+
         job_lst.append(mp.Process(target=pbar_updater, args=(mp_cache_server,), name=f'pbar'))
         job_lst[-1].start()
         for job in job_lst:
             job.join()
 
-    def get_cache_obj_dict(self, env_wrapper, use_period) -> dict:
+        mp_cache_server.update_cache_size()
+        cache_size_mb = round(mp_cache_server.current_memory_usage / (1024 * 1024), 1)
+        logger.info(
+            f'{self.__class__.__name__}: {env_kwargs["use_period"].upper()} cache_size = {cache_size_mb} Mb')
+
+        return mp_cache_server
+
+    def get_cache_obj_dict(self, env_wrapper, env_kwargs) -> dict:
+        if env_kwargs['use_period'] == 'train':
+            port = 5005
+        else:
+            port = 5006
+
+        if not MpCacheManager.is_server_running(port=port):
+            start_host = True
+            mp_cache_server = self.mp_fill_cache(env_kwargs)
+        else:
+            start_host = False
+            mp_cache_server = MpCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
+
         if env_wrapper == 'dummy':
-            update_dict = dict({'cache_obj': 'MpCacheManager'})
-            # if use_period == 'train':
-            #     # update_dict = dict({'cache_obj': cache_manager_obj})
-            #     update_dict = dict({'cache_obj': 'MpCacheManager'})
-            # else:
-            #     update_dict = dict({'cache_obj': eval_cache_manager_obj})
+            update_dict = {}
+            if env_kwargs['use_period'] == 'train':
+                _mp_train_cache_items = mp_cache_server.items()
+                for k, v in _mp_train_cache_items:
+                    cache_manager_obj.update_cache(key=k, value=v)
+                del _mp_train_cache_items
+                if start_host:
+                    mp_cache_server.clear()
+                    del self.mp_train_cache_server
+                    del mp_cache_server
+                    self.mp_train_cache_server = None
+                # cache_obj = None by default and next load initialized cache_manager_obj
+            else:
+                _mp_test_cache_items = mp_cache_server.items()
+                for k, v in _mp_test_cache_items:
+                    eval_cache_manager_obj.update_cache(key=k, value=v)
+                del _mp_test_cache_items
+                if start_host:
+                    mp_cache_server.clear()
+                    del self.mp_test_cache_server
+                    del mp_cache_server
+                    self.mp_test_cache_server = None
+
         elif self.env_wrapper == 'subproc':
-            # update_dict = dict({'cache_obj': None})
             update_dict = dict({'cache_obj': 'MpCacheManager'})
-            # if use_period == 'train':
-            #     if self.mp_train_cache_manager is None:
-            #         self.mp_train_cache_manager = MpCacheManager(start_host=True, port=5005)
-            # else:
-            #     if self.mp_eval_cache_manager is None:
-            #         self.mp_eval_cache_manager = MpCacheManager(start_host=True, port=5006)
-            # update_dict = dict({'cache_obj': 'MpCacheManager'})
+        elif self.env_wrapper == 'labsubproc':
+            update_dict = dict({'cache_obj': 'MpCacheManager'})
         else:
             msg = f'Error: unknown env wrapper {self.env_wrapper}'
             sys.exit(msg)
@@ -385,6 +427,9 @@ class LabBase:
         if eval_freq is not None:
             agent_cfg.EVAL_FREQ = eval_freq
             self.eval_freq = eval_freq
+        else:
+            self.eval_freq = int(round_up(agent_cfg.EVAL_FREQ, -3))
+
         if n_envs is not None:
             agent_cfg.AGENTS_N_ENV = n_envs
             self.agents_n_env[ix] = n_envs
@@ -404,16 +449,16 @@ class LabBase:
                                 'stable_cache_data_n': self.n_eval_episodes,
                                 'render_mode': render_mode})
 
-        """ To check mp cache fill """
-        self.mp_fill_cache(train_env_kwargs)
-        self.mp_fill_cache(eval_env_kwargs)
-
+        """ Fill cache  """
         if self.env_wrapper == 'dummy':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs['use_period']))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         elif self.env_wrapper == 'subproc':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs['use_period']))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
+        elif self.env_wrapper == 'labsubproc':
+            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         else:
             msg = f'Error: unknown env wrapper {self.env_wrapper}'
             sys.exit(msg)
@@ -423,17 +468,21 @@ class LabBase:
                                     seed=self.seed,
                                     env_kwargs=train_env_kwargs,
                                     vec_env_cls=self.env_wrapper_cls if self.agents_n_env[ix] > 1 else DummyVecEnv)
-        # vec_env_cls=DummyVecEnv)
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
-                                   n_envs=1,
+                                   n_envs=2,
                                    seed=self.seed,
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=self.env_wrapper_cls)
 
-        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
+        # if self.env_wrapper == 'labsubproc':
+        #     train_process_shared_objs = dict(process_shared_objs=dict(CM=cache_manager_obj))
+        #     train_vec_env_kwargs.update({'vec_env_kwargs': train_process_shared_objs})
+        #     eval_process_shared_objs = dict(process_shared_objs=dict(CM=eval_cache_manager_obj))
+        #     eval_vec_env_kwargs.update({'vec_env_kwargs': eval_process_shared_objs})
 
         train_vec_env = make_vec_env(**train_vec_env_kwargs)
+        eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
 
         # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
         # _ = agent_kwargs.pop('action_noise')
@@ -483,10 +532,8 @@ class LabBase:
 
             agent_cfg = new_agent_cfg
 
-        self.eval_freq = int(round_up(agent_cfg.EVAL_FREQ, -3))
-
         logger.info(
-            f'{self.__class__.__name__}: Eval freq: {eval_freq}')
+            f'{self.__class__.__name__}: Eval freq: {self.eval_freq}')
 
         eval_callback_kwargs = dict(eval_env=eval_vec_env,
                                     best_model_save_path=agent_cfg.DIRS["best"],
@@ -578,18 +625,19 @@ class LabBase:
         eval_env_kwargs = copy.deepcopy(train_env_kwargs)
         eval_env_kwargs.update({'use_period': 'test',
                                 'verbose': self.verbose,
-                                'stable_cache_data_n': self.n_eval_episodes
+                                'stable_cache_data_n': self.n_eval_episodes,
                                 })
 
-        self.mp_fill_cache(train_env_kwargs)
-        self.mp_fill_cache(eval_env_kwargs)
-
+        """ Fill Cache """
         if self.env_wrapper == 'dummy':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs['use_period']))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         elif self.env_wrapper == 'subproc':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs['use_period']))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
+        elif self.env_wrapper == 'labsubproc':
+            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         else:
             msg = f'Error: unknown env wrapper {self.env_wrapper}'
             sys.exit(msg)
@@ -605,13 +653,19 @@ class LabBase:
                                     n_envs=self.agents_n_env[ix],
                                     seed=env.get_seed(),
                                     env_kwargs=train_env_kwargs,
-                                    vec_env_cls=self.env_wrapper_cls if self.agents_n_env[ix] > 1 else DummyVecEnv)
+                                    vec_env_cls=self.env_wrapper_cls)
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
-                                   n_envs=1,
+                                   n_envs=2,
                                    seed=env.get_seed(),
                                    env_kwargs=eval_env_kwargs,
-                                   vec_env_cls=self.env_wrapper_cls if self.agents_n_env[ix] > 1 else DummyVecEnv)
+                                   vec_env_cls=self.env_wrapper_cls)
+
+        # if self.env_wrapper == 'labsubproc':
+        #     train_process_shared_objs = dict(process_shared_objs=dict(CM=cache_manager_obj))
+        #     train_vec_env_kwargs.update({'vec_env_kwargs': train_process_shared_objs})
+        #     eval_process_shared_objs = dict(process_shared_objs=dict(CM=eval_cache_manager_obj))
+        #     eval_vec_env_kwargs.update({'vec_env_kwargs': eval_process_shared_objs})
 
         self.train_vecenv_lst.append(make_vec_env(**train_vec_env_kwargs))
         self.eval_vecenv_lst.append(make_vec_env(**eval_vec_env_kwargs))
@@ -663,7 +717,9 @@ class LabBase:
 
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
-        eval_env_kwargs.update({'use_period': 'test', 'verbose': verbose, 'stable_cache_data_n': self.n_eval_episodes})
+        eval_env_kwargs.update({'use_period': 'test',
+                                'verbose': verbose,
+                                'stable_cache_data_n': self.n_eval_episodes})
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,
@@ -700,10 +756,11 @@ class LabBase:
                                 'verbose': verbose,
                                 'stable_cache_data_n': self.n_eval_episodes})
 
+        """Fill cache"""
         if self.env_wrapper == 'dummy':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         elif self.env_wrapper == 'subproc':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         else:
             msg = f'Error: unknown env wrapper {self.env_wrapper}'
             sys.exit(msg)
@@ -788,13 +845,12 @@ class LabBase:
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=DummyVecEnv)
 
-        if not MpCacheManager.is_server_running(port=5006):
-            self.mp_fill_cache(eval_env_kwargs)
-
         if self.env_wrapper == 'dummy':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         elif self.env_wrapper == 'subproc':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs['use_period']))
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
+        elif self.env_wrapper == 'labsubproc':
+            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
         else:
             msg = f'Error: unknown env wrapper {self.env_wrapper}'
             sys.exit(msg)

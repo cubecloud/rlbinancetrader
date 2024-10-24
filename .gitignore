@@ -148,4 +148,5 @@ dmypy.json
 .vscode/launch.json
 *.zip
 *.pkl
-.tests/save/
+tests/save
+.vscode

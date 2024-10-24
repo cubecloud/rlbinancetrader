@@ -51,6 +51,7 @@ data_processor_kwargs = dict(start_datetime=_start_datetime,
                              maximum_test_size=0.17,
                              test_size=0.13,
                              verbose=1,
+                             indicators_sign=True,
                              )
 
 dp = IndicatorProcessor(**data_processor_kwargs)

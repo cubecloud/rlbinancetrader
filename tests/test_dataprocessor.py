@@ -13,7 +13,7 @@ from dbbinance.config.configpostgresql import ConfigPostgreSQL
 from datawizard.dataprocessor import IndicatorProcessor, ProcessorBase
 from indicators import LoadDbIndicators
 
-__version__ = 0.02
+__version__ = 0.025
 
 logger = logging.getLogger()
 
@@ -62,8 +62,18 @@ msg = (
     f"{__name__}: Load data with IndicatorProcessor start_datetime-end_datetime: {_start_datetime} - {_end_datetime} "
     f"timeframe: {_timeframe}, discretization: {_discretization}\n")
 logger.debug(msg)
+
+""" Test rolling """
+rolling_frames = 96
+s = ((ohlcv_df['high'] + ohlcv_df['low'] + ohlcv_df['close']) / 3) * ohlcv_df['volume']
+s = s.rolling(window=rolling_frames, min_periods=1).sum()
+s_df = s / ohlcv_df['volume'].rolling(window=rolling_frames, min_periods=1).sum()
+
+logger.debug(f"{__name__}: Rolling test vwap tail: \n{s_df.tail(5).to_string()}\n")
+
+""" Test indicators """
 dp = IndicatorProcessor(_start_datetime, _end_datetime, _timeframe, _discretization, symbol_pair='BTCUSDT',
-                        market='spot')
+                        market='spot', indicators_sign=True, )
 ohlcv_df, indicators_df = dp.get_random_ohlcv_and_indicators()
 
 logger.debug(f"{__name__}: OHLCV.shape: \n{ohlcv_df.shape}")
@@ -99,6 +109,10 @@ logger.debug(f"{__name__}: Indicators.shape: \n{indicators_df.shape}")
 logger.debug(f"{__name__}: Indicators data head: \n{indicators_df.head(5).to_string()}\n")
 logger.debug(f"{__name__}: Indicators data tail: \n{indicators_df.tail(5).to_string()}\n")
 
+
+
+""" Test episodes start-end list """
+
 _timeframe = '15m'
 _discretization = '15m'
 
@@ -117,6 +131,7 @@ data_processor_kwargs = dict(start_datetime=_start_datetime,
                              maximum_test_size=0.17,
                              test_size=0.13,
                              verbose=1,
+                             indicators_sign=True,
                              )
 
 dp = IndicatorProcessor(**data_processor_kwargs)

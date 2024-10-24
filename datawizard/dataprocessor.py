@@ -2,6 +2,7 @@ import random
 import sys
 import logging
 
+from numpy import unique as np_unique
 import pandas as pd
 
 from datetime import timezone, datetime
@@ -15,8 +16,9 @@ from dbbinance.fetcher.datautils import get_timedelta_kwargs
 from dbbinance.fetcher.constants import Constants
 
 from indicators import LoadDbIndicators
+import multiprocessing as mp
 
-__version__ = 0.08
+__version__ = 0.091
 
 from rllab.labtools import round_up
 
@@ -24,8 +26,11 @@ from rllab.labtools import round_up
 
 logger = logging.getLogger()
 
+mp_count = mp.Value('i', 0)
+
 
 class ProcessorBase:
+    count = mp_count
 
     def __init__(self, start_datetime, end_datetime, timeframe, discretization,
                  symbol_pair='BTCUSDT',
@@ -37,6 +42,11 @@ class ProcessorBase:
                  test_size: float = 0.2,
                  verbose: int = 0,
                  seed=42):
+
+        ProcessorBase.count.value += 1
+
+        self.idnum = int(ProcessorBase.count.value)
+
         self.start_datetime = check_convert_to_datetime(start_datetime, utc_aware=False)
         self.end_datetime = check_convert_to_datetime(end_datetime, utc_aware=False)
         self.timeframe = timeframe
@@ -60,12 +70,17 @@ class ProcessorBase:
         self.train_timeframes_num = int(len(self.all_period_timeframes) * (1 - test_size))
         self.test_timeframes_num = len(self.all_period_timeframes) - self.train_timeframes_num
 
-        msg = (f"TRAIN pool timeframes: {self.train_timeframes_num}, "
-               f"Pool period: {self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num - 1]}")
-        logger.info(msg)
-        msg = (f"TEST pool timeframes: {self.test_timeframes_num}, "
-               f"Pool period: {self.all_period_timeframes[self.train_timeframes_num]} - {self.all_period_timeframes[-1]}")
-        logger.info(msg)
+        if self.verbose > 0:
+            msg = (f"{self.__class__.__name__} #{self.idnum}: TRAIN pool timeframes: {self.train_timeframes_num}, "
+                   f"Pool period: {self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num - 1]}")
+            logger.info(msg)
+            msg = (f"{self.__class__.__name__} #{self.idnum}: TEST pool timeframes: {self.test_timeframes_num}, "
+                   f"Pool period: {self.all_period_timeframes[self.train_timeframes_num]} - {self.all_period_timeframes[-1]}")
+            logger.info(msg)
+        else:
+            msg = f"{self.__class__.__name__} #{self.idnum}: Initialized..."
+            logger.info(msg)
+
         assert self.train_timeframes_num >= 50, f'Error: train_timeframes_num is to LOW {self.train_timeframes_num}'
         assert self.test_timeframes_num >= 50, f'Error: test_timeframes_num is to LOW {self.test_timeframes_num}'
         self.minimum_train_timeframes_num: Union[int, None] = None
@@ -176,9 +191,38 @@ class ProcessorBase:
         return avg_period_len
 
     def _prepare_episodes_start_end_lst(self, num_episodes: int, period_type: str = 'train') -> List[tuple]:
+
+        def generate_shifts(num_shifts: int) -> List[int]:
+            def half_list(half: List[int]) -> List[int]:
+                result: list = []
+                if len(half) <= 2:
+                    half.reverse()
+                    result.extend(half)
+                else:
+                    mid = len(half) // 2
+                    if mid > 0:
+                        result.append(half[mid])
+                        result.extend(half_list(list(range(half[0], half[mid]))))
+                        result.extend(half_list(list(range(half[mid + 1], half[-1] + 1))))
+                return result
+
+            shifts_lst = [0]
+            mid = num_shifts // 2
+            shifts_lst.append(mid)
+            first_half = half_list(list(range(1, mid)))
+            second_half = half_list(list(range(mid + 1, num_shifts)))
+            max_len = min(len(first_half), len(second_half))
+            for a, b in zip(first_half, second_half):
+                shifts_lst.extend([a, b])
+            shifts_lst.extend(first_half[max_len:])
+            shifts_lst.extend(second_half[max_len:])
+            return shifts_lst
+
         def get_shifted_range(shifted_minute_ix):
             return pd.Series(index=pd.date_range(start=minute_timeframes[shifted_minute_ix], end=minute_timeframes[-1],
                                                  freq=convert_timeframe_to_freq(self.timeframe)), dtype=int)
+
+        shifts = generate_shifts(Constants.binsizes[self.timeframe])
 
         if period_type == 'train':
             minute_timeframes = self.train_minute_timeframes_series
@@ -194,7 +238,7 @@ class ProcessorBase:
 
         finished = False
         ix = 0
-        selected_period = get_shifted_range(ix)
+        selected_period = get_shifted_range(shifts[ix])
 
         """ 
         if q-ty of current_total_timeframes (all minute shifts) greater
@@ -206,10 +250,9 @@ class ProcessorBase:
         if current_total_timeframes > maximum_total_timeframes_needed:
             n_shifted_episodes = min(num_episodes, int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
             # n_shifted_episodes = selected_period.shape[0] / maximum_timeframes_num
-            shifts = round_up(num_episodes / n_shifted_episodes, 0)
+            # shifts = shifts[:int(round_up(num_episodes / n_shifted_episodes, 0))]
         else:
-            shifts = Constants.binsizes[self.timeframe]
-            n_shifted_episodes = int(round_up(num_episodes / shifts, 0))
+            n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
 
         episodes_start_end_lst: list = []
         """ one_shift_start_end_lst to reverse each shift """
@@ -222,8 +265,9 @@ class ProcessorBase:
             else:
                 start_offset = 0
 
-            msg = (f"{self.__class__.__name__}: shift = +{ix}: {selected_period_episodes_len} < {maximum_timeframes_num} "
-                   f"-> start_offset = +{start_offset}")
+            msg = (
+                f"{self.__class__.__name__}: shift = +{shifts[ix]}: {selected_period_episodes_len} < {maximum_timeframes_num} "
+                f"-> start_offset = +{start_offset}")
             logger.info(msg)
 
             _end_datetime = selected_period.index[-1]
@@ -257,11 +301,12 @@ class ProcessorBase:
             one_shift_start_end_lst.reverse()
             episodes_start_end_lst.extend(one_shift_start_end_lst)
             one_shift_start_end_lst.clear()
-            if len(episodes_start_end_lst) < num_episodes - 1:
+            unique_episodes_counts = len(list(set(episodes_start_end_lst)))
+            if unique_episodes_counts < num_episodes:
                 selected_period = get_shifted_range(ix)
                 ix += 1
-                if ix == shifts - 1:
-                    n_shifted_episodes = num_episodes - len(episodes_start_end_lst)
+                if ix == len(shifts) - 1:
+                    n_shifted_episodes = num_episodes - unique_episodes_counts
             else:
                 finished = True
 
@@ -296,11 +341,16 @@ class ProcessorBase:
 class IndicatorProcessor(ProcessorBase):
     def __init__(self, start_datetime, end_datetime, timeframe, discretization, symbol_pair='BTCUSDT', market='spot',
                  minimum_train_size: float = 0.05, maximum_train_size: float = 0.4, minimum_test_size: float = 0.15,
-                 maximum_test_size: float = 0.7, test_size: float = 0.2, verbose: int = 0, seed=42):
+                 maximum_test_size: float = 0.7, test_size: float = 0.2, verbose: int = 0, seed=42,
+                 indicators_sign=False):
         super().__init__(start_datetime, end_datetime, timeframe, discretization, symbol_pair, market,
                          minimum_train_size, maximum_train_size, minimum_test_size, maximum_test_size, test_size,
                          verbose, seed)
-        logger.debug(f"{self.__class__.__name__}: Initialize LoadDbIndicators")
+        self.indicators_sign = indicators_sign
+        self.idnum = int(IndicatorProcessor.count.value)
+
+        logger.debug(f"{self.__class__.__name__} {self.idnum}: Initialize LoadDbIndicators...")
+
         self.loaded_indicators = LoadDbIndicators(self.start_datetime,
                                                   self.end_datetime,
                                                   symbol_pairs=[symbol_pair, ],
@@ -323,6 +373,10 @@ class IndicatorProcessor(ProcessorBase):
         logger.debug(
             f"\n{self.__class__.__name__}: Get indicator_df with start_datetime - end_datetime: {_start_datetime} - {_end_datetime}\n")
         _indicators_df = self.loaded_indicators.get_data_df(index_type)
+        if self.indicators_sign:
+            for col_name in _indicators_df.columns:
+                if 'minus' in col_name:
+                    _indicators_df[col_name] = _indicators_df[col_name].values * -1
         return _indicators_df
 
     def check_cache(self, index_type):

@@ -5,6 +5,7 @@ from rllab.labcosheduller import CoSheduller
 from torch.nn import ReLU, LeakyReLU, Tanh
 from customnn.mlpextractor import MlpExtractorNN
 from customnn.multiextractor import MultiExtractorNN
+from customnn.lstmextractor import LSTMExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC, HerReplayBuffer
 from sb3_contrib import MaskablePPO
@@ -20,6 +21,7 @@ __version__ = 0.013
 lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'HerReplayBuffer': HerReplayBuffer,
                         'MlpExtractorNN': MlpExtractorNN,
+                        'LSTMExtractorNN': LSTMExtractorNN,
                         'MultiExtractorNN': MultiExtractorNN,
                         'ReLU': ReLU,
                         'LeakyReLU': LeakyReLU,

@@ -6,8 +6,9 @@ from rllab.rllaboratory import LabBase
 from binanceenv.bienv import BinanceEnvCash
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 from multiprocessing import freeze_support
+from stable_baselines3.common.buffers import RolloutBuffer
 
-__version__ = 0.0019
+__version__ = 0.0020
 
 logger = logging.getLogger()
 
@@ -30,7 +31,7 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0110-000853/MaskablePPO_BinanceEnvCash_60000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2410-111355/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -38,6 +39,6 @@ if __name__ == '__main__':
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1, seed=443,
     #                         use_period='test')
-    rllab.backtesting_agent(filename=59_000_000, render_mode='human', n_tests=10, verbose=1, seed=1443,
+    rllab.backtesting_agent(filename=11_340_000, render_mode='human', n_tests=10, verbose=1, seed=1443,
                             use_period='test')
     # rllab.evaluate_agent(0)

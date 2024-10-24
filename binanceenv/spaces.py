@@ -65,10 +65,29 @@ class AssetsCloseIndicatorsSpace:
 
 class LookbackAssetsCloseIndicatorsSpace:
     def __init__(self, ind_num, assets_data, lookback):
-        self.__observation_space = spaces.Box(low=0.0, high=1.0, shape=((ind_num + assets_data + 1) * lookback,),
+        self.__observation_space = spaces.Box(low=0.0, high=1.0,
+                                              shape=((ind_num + assets_data + 1) * lookback,),
                                               dtype=np.float32,
                                               seed=42)
         self.name = 'lookback_assets_close_indicators'
+
+    @property
+    def observation_space(self):
+        return self.__observation_space
+
+    @observation_space.setter
+    def observation_space(self, value):
+        self.__observation_space = value
+
+
+class LookbackAssetsCloseIndicatorsActionSpace:
+    def __init__(self, ind_num, assets_data, lookback, actions, low=0.0, high=1.0):
+        self.__observation_space = spaces.Box(low=low,
+                                              high=high,
+                                              shape=(lookback, ind_num + assets_data + 1 + actions),
+                                              dtype=np.float32,
+                                              seed=42)
+        self.name = 'lookback_assets_close_indicators_action'
 
     @property
     def observation_space(self):
@@ -120,14 +139,14 @@ class IndicatorsAndPNLSpace:
 
 class DiscreteActionSpace:
     def __init__(self, n_action):
-        self._n_action = n_action
+        self.n_action = n_action
         self.__action_space = spaces.Discrete(n_action, seed=42)  # {0, 1, 2}
         self.name = 'discrete'
 
     def convert2action(self, action: Union[np.ndarray, list], masked_actions=None):
         amount = 1.
         if masked_actions is not None:
-            if action not in list(range(self._n_action))[masked_actions]:
+            if action not in list(range(self.n_action))[masked_actions]:
                 action = actions_4_dict['Hold']
         return action, amount
 
