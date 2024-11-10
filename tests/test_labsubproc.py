@@ -56,13 +56,16 @@ if __name__ == "__main__":
 
     train_vec_env_kwargs = dict(env_id="LunarLander-v2",
                                 env_kwargs=env_kwargs,
-                                n_envs=2000,
+                                n_envs=10000,
                                 seed=seed,
-                                vec_env_cls=LabSubprocVecEnv)
+                                vec_env_cls=LabSubprocVecEnv,
+                                vec_env_kwargs=dict(use_threads=False, 
+                                                    use_period='train')
+                                )
 
     train_vec_env = make_vec_env(**train_vec_env_kwargs)
 
-    model = PPO("MlpPolicy", train_vec_env, verbose=1, device="cuda", n_steps=60, batch_size=2_000, n_epochs=10,
+    model = PPO("MlpPolicy", train_vec_env, verbose=1, device="auto", n_steps=60, batch_size=20000, n_epochs=10,
                 learning_rate=3e-5, ent_coef=0.01, gamma=0.99, stats_window_size=200, seed=seed)
 
     # Train the model

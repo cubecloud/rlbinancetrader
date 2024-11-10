@@ -31,7 +31,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.108
+__version__ = 0.1011
 
 logger = logging.getLogger()
 
@@ -69,13 +69,13 @@ if __name__ == '__main__':
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
-    agents_n_env = 3780
-    total_timesteps = 300_000_000
+    agents_n_env = 2
+    total_timesteps = 126_000_000
     # buffer_size = 1_500_000
-    learning_start = (3780 * 1000 * 3)
+    learning_start = 630_000
     # batch_size = 660 * agents_n_env
-    lookback_window = '6h'
-    seed = 42
+    lookback_window = '12h'
+    seed = 531
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -84,7 +84,7 @@ if __name__ == '__main__':
                                  symbol_pair='BTCUSDT',
                                  market='spot',
                                  minimum_train_size=0.0267,
-                                 maximum_train_size=0.031,
+                                 maximum_train_size=0.03,
                                  minimum_test_size=0.168,
                                  maximum_test_size=0.188,
                                  test_size=0.13,
@@ -105,8 +105,8 @@ if __name__ == '__main__':
                                # observation_type='assets_close_indicators',
                                observation_type='lookback_assets_close_indicators_action_ret',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=3780*2,  # 630*5 = 3150, 630*6 = 3780
-                               reuse_data_prob=1.0,
+                               stable_cache_data_n=2520,  # 630*5 = 3150
+                               reuse_data_prob=0.9999,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
                                lookback_window=lookback_window,
@@ -116,15 +116,14 @@ if __name__ == '__main__':
                                # eps_end=0.01,
                                # eps_decay=0.2,
                                # gamma=0.995,
-                               gamma=0.92,
+                               # gamma=0.99,    # not used! in agent model
                                # reduced by 10 (from 0.999) to have less reward backpropagation for 15 min 24h*4 = 96 timesteps
-                               # invalid_actions=15_000,
-                               # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
+                               invalid_actions=15_000,
+                               # penalty_value=1e-6,
                                action_type='discrete',
-                               # index_type='target_time',
-                               index_type='prediction_time',
+                               index_type='target_time',
+                               # index_type='prediction_time',
                                render_mode='human',
-                               reward_scaler=10
                                )
 
     features_dim = 256
@@ -132,7 +131,7 @@ if __name__ == '__main__':
         features_extractor_class='LSTMExtractorNN',
         features_extractor_kwargs=dict(features_dim=features_dim,
                                        activation_fn='Swish'),
-        share_features_extractor=False,      # Better to use
+        share_features_extractor=True,
         net_arch=[features_dim, 256, 128],
     )
 
@@ -140,24 +139,22 @@ if __name__ == '__main__':
         policy="MlpPolicy",
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
-        n_steps=200,
-        batch_size=27000,
+        n_steps=250,
+        batch_size=22500,
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
-        clip_range_vf=0.3,
         learning_rate={'CoSheduller': dict(warmup=learning_start,
-                                           learning_rate=4.5e-6,
-                                           min_learning_rate=3.5e-6,
+                                           learning_rate=1e-4,
+                                           min_learning_rate=5e-6,
                                            total_epochs=total_timesteps,
-                                           epsilon=1)
+                                           epsilon=100)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.92,
+        gamma=0.99,
         device='auto',
-        seed=seed,
         verbose=1)
 
     with warnings.catch_warnings():
@@ -169,13 +166,13 @@ if __name__ == '__main__':
             agents_cls=[MaskablePPO],
             agents_kwargs=[ppo_kwargs],
             agents_n_env=[agents_n_env],
-            env_wrapper='labsubproc',
-            env_wrapper_kwargs={'use_threads': False},
+            env_wrapper='labmpenv',
+            # env_wrapper='labmpenv',
             total_timesteps=total_timesteps,
-            checkpoint_num=200,
+            checkpoint_num=int(total_timesteps // 630_000),
             n_eval_episodes=50,
             log_interval=1,
-            eval_freq=200,
+            eval_freq=int(630_000 // agents_n_env),
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,

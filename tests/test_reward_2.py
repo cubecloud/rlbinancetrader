@@ -7,10 +7,10 @@ def combined_reward(previous_pnl, previous_buy_and_hold_pnl):
                   (previous_pnl > 0) & (previous_buy_and_hold_pnl < 0),
                   (previous_pnl < 0) & (previous_buy_and_hold_pnl > 0),
                   (previous_pnl < 0) & (previous_buy_and_hold_pnl < 0)]
-    choices = [(previous_pnl + previous_buy_and_hold_pnl) * 0.1,
-               (previous_pnl - previous_buy_and_hold_pnl) * 0.1,
-               (previous_buy_and_hold_pnl - previous_pnl) * 0.1,
-               (previous_pnl + previous_buy_and_hold_pnl) * 0.5]  # <--- modified this line
+    choices = [(previous_pnl - previous_buy_and_hold_pnl*0.2),
+               (previous_pnl - previous_buy_and_hold_pnl),
+               (previous_pnl - previous_buy_and_hold_pnl),
+               (previous_pnl - previous_buy_and_hold_pnl)]
     reward = np.select(conditions, choices, default=0)
     return reward
 

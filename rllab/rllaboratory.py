@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 
-from typing import List, Union, Dict, Type, Optional, Type, ClassVar, TypeVar
+from typing import List, Union, Dict, Type, Optional, Type, ClassVar, TypeVar, Any
 
 from binanceenv import BinanceEnvCash, BinanceEnvBase
 from binanceenv.cache import CacheManager
@@ -106,6 +106,7 @@ class LabBase:
                  agents_kwargs: Union[List[dict,], dict],
                  agents_n_env: Union[List[int], int, None] = None,
                  env_wrapper: str = 'dummy',
+                 env_wrapper_kwargs: Union[Dict[str, Any]] = None,
                  total_timesteps: int = 500_000,
                  experiment_path: str = './',
                  eval_freq: int = 50_000,
@@ -156,6 +157,11 @@ class LabBase:
         self.verbose = verbose
         self.use_masking: bool = False
 
+        if env_wrapper_kwargs is None:
+            self.env_wrapper_kwargs = {}
+        else:
+            self.env_wrapper_kwargs = env_wrapper_kwargs
+
         if exp_cfg is None:
             self.base_cfg = LABConfig()
             self.base_cfg.EXPERIMENT_PATH = experiment_path
@@ -169,9 +175,9 @@ class LabBase:
             self.base_cfg: LABConfig = exp_cfg
 
         if not isinstance(env_cls, list):
-            self.env_classes_lst: List[ClassVar[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO]] = list([env_cls, ])
+            self.env_classes_lst: List[Type[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO]] = list([env_cls, ])
         else:
-            self.env_classes_lst: List[ClassVar[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO]] = env_cls
+            self.env_classes_lst: List[Type[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO]] = env_cls
         assert len(self.env_classes_lst) == len(env_kwargs), \
             "Error: list of env kwargs is not equal env_cls list"
 
@@ -449,25 +455,16 @@ class LabBase:
                                 'stable_cache_data_n': self.n_eval_episodes,
                                 'render_mode': render_mode})
 
-        """ Fill cache  """
-        if self.env_wrapper == 'dummy':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'subproc':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'labsubproc':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        else:
-            msg = f'Error: unknown env wrapper {self.env_wrapper}'
-            sys.exit(msg)
+        """ Fill cache and add cache_obj to kwargs """
+        train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+        eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
 
         train_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                     n_envs=self.agents_n_env[ix],
                                     seed=self.seed,
                                     env_kwargs=train_env_kwargs,
-                                    vec_env_cls=self.env_wrapper_cls if self.agents_n_env[ix] > 1 else DummyVecEnv)
+                                    vec_env_cls=self.env_wrapper_cls,
+                                    )
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=2,
@@ -475,11 +472,14 @@ class LabBase:
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=self.env_wrapper_cls)
 
-        # if self.env_wrapper == 'labsubproc':
-        #     train_process_shared_objs = dict(process_shared_objs=dict(CM=cache_manager_obj))
-        #     train_vec_env_kwargs.update({'vec_env_kwargs': train_process_shared_objs})
-        #     eval_process_shared_objs = dict(process_shared_objs=dict(CM=eval_cache_manager_obj))
-        #     eval_vec_env_kwargs.update({'vec_env_kwargs': eval_process_shared_objs})
+        if self.env_wrapper == 'labsubproc':
+            if self.env_wrapper_kwargs:
+                train_vec_env_kwargs.update(vec_env_kwargs=dict(self.env_wrapper_kwargs))
+                eval_vec_env_kwargs.update(vec_env_kwargs=dict(self.env_wrapper_kwargs))
+
+            train_vec_env_kwargs.update(vec_env_kwargs=dict(use_period='train'))
+            eval_vec_env_kwargs.update(vec_env_kwargs=dict(use_period='test',
+                                                           n_processes=1))
 
         train_vec_env = make_vec_env(**train_vec_env_kwargs)
         eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
@@ -565,12 +565,26 @@ class LabBase:
         agent_obj.set_env(train_vec_env)
         # env = agent_obj.get_env()
 
-        agent_obj.learn(total_timesteps=self.total_timesteps,
+        agent_obj.learn(total_timesteps=int(self.total_timesteps//3),
                         callback=callbacks,
                         log_interval=self.log_interval,
                         progress_bar=False,
                         reset_num_timesteps=reset_num_timesteps,
                         tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.OBS_TYPE}/{agent_cfg.EXP_ID}')
+
+        agent_obj.learn(total_timesteps=int(self.total_timesteps//3),
+                        callback=callbacks,
+                        log_interval=self.log_interval,
+                        progress_bar=False,
+                        reset_num_timesteps=False,
+                        tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.OBS_TYPE}/{agent_cfg.EXP_ID}_2_3')
+
+        agent_obj.learn(total_timesteps=int(self.total_timesteps//3),
+                        callback=callbacks,
+                        log_interval=self.log_interval,
+                        progress_bar=False,
+                        reset_num_timesteps=False,
+                        tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.OBS_TYPE}/{agent_cfg.EXP_ID}_3_3')
 
         agent_obj.save(path=os.path.join(f'{agent_cfg.DIRS["training"]}', agent_cfg.FILENAME))
 
@@ -628,19 +642,9 @@ class LabBase:
                                 'stable_cache_data_n': self.n_eval_episodes,
                                 })
 
-        """ Fill Cache """
-        if self.env_wrapper == 'dummy':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'subproc':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'labsubproc':
-            train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        else:
-            msg = f'Error: unknown env wrapper {self.env_wrapper}'
-            sys.exit(msg)
+        """ Fill cache and add cache_obj to kwargs """
+        train_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, train_env_kwargs))
+        eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
 
         logger.info(f'{self.__class__.__name__}: Using vectorized env "{self.env_wrapper}"')
         env = self.env_classes_lst[ix](**train_env_kwargs)
@@ -661,11 +665,14 @@ class LabBase:
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=self.env_wrapper_cls)
 
-        # if self.env_wrapper == 'labsubproc':
-        #     train_process_shared_objs = dict(process_shared_objs=dict(CM=cache_manager_obj))
-        #     train_vec_env_kwargs.update({'vec_env_kwargs': train_process_shared_objs})
-        #     eval_process_shared_objs = dict(process_shared_objs=dict(CM=eval_cache_manager_obj))
-        #     eval_vec_env_kwargs.update({'vec_env_kwargs': eval_process_shared_objs})
+        if self.env_wrapper == 'labsubproc':
+            if self.env_wrapper_kwargs:
+                train_vec_env_kwargs.update(vec_env_kwargs=dict(self.env_wrapper_kwargs))
+                eval_vec_env_kwargs.update(vec_env_kwargs=dict(self.env_wrapper_kwargs))
+
+            train_vec_env_kwargs.update(vec_env_kwargs=dict(use_period='train'))
+            eval_vec_env_kwargs.update(vec_env_kwargs=dict(use_period='test',
+                                                           n_processes=1))
 
         self.train_vecenv_lst.append(make_vec_env(**train_vec_env_kwargs))
         self.eval_vecenv_lst.append(make_vec_env(**eval_vec_env_kwargs))
@@ -730,7 +737,6 @@ class LabBase:
         if self.agents_classes_lst[ix] != MaskablePPO:
             evaluation_func = lab_evaluate_policy
             self.use_masking = False
-
         else:
             evaluation_func = lab_mask_evaluate_policy
             self.use_masking = True
@@ -757,13 +763,7 @@ class LabBase:
                                 'stable_cache_data_n': self.n_eval_episodes})
 
         """Fill cache"""
-        if self.env_wrapper == 'dummy':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'subproc':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        else:
-            msg = f'Error: unknown env wrapper {self.env_wrapper}'
-            sys.exit(msg)
+        eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,
@@ -845,15 +845,7 @@ class LabBase:
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=DummyVecEnv)
 
-        if self.env_wrapper == 'dummy':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'subproc':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        elif self.env_wrapper == 'labsubproc':
-            eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
-        else:
-            msg = f'Error: unknown env wrapper {self.env_wrapper}'
-            sys.exit(msg)
+        eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
 
         eval_vec_env = make_vec_env(**eval_vec_env_kwargs)
 

@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 
 def combined_reward(previous_pnl, previous_buy_and_hold_pnl):
     conditions = [previous_pnl > 0, previous_pnl < 0]
-    choices = [previous_pnl , previous_pnl * 0.6,]
+    choices = [previous_pnl * 0.001, previous_pnl * 0.001,]
     pnl_signal = np.select(conditions, choices)
     bh_conditions = [previous_pnl > previous_buy_and_hold_pnl, previous_pnl < previous_buy_and_hold_pnl]
-    bh_choices = [(previous_pnl - previous_buy_and_hold_pnl + 0.05) * 0.2, (previous_pnl - previous_buy_and_hold_pnl - 0.05) * 0.2, ]
+    bh_choices = [(previous_pnl - previous_buy_and_hold_pnl + 0.002), (previous_pnl - previous_buy_and_hold_pnl - 0.002), ]
     bh_comparison_signal = np.select(bh_conditions, bh_choices, default=0)
     return pnl_signal + bh_comparison_signal
 
@@ -63,3 +63,4 @@ plt.xlabel("Previous PNL")
 plt.ylabel("Previous Buy and Hold PNL")
 plt.title("Combined Reward Function")
 plt.show()
+print(combined_reward(previous_pnl=0.001, previous_buy_and_hold_pnl=-0.001))

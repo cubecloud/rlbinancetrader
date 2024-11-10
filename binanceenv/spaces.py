@@ -64,8 +64,9 @@ class AssetsCloseIndicatorsSpace:
 
 
 class LookbackAssetsCloseIndicatorsSpace:
-    def __init__(self, ind_num, assets_data, lookback):
-        self.__observation_space = spaces.Box(low=0.0, high=1.0,
+    def __init__(self, ind_num, assets_data, lookback, low=0.0, high=1.0):
+        self.__observation_space = spaces.Box(low=low,
+                                              high=high,
                                               shape=((ind_num + assets_data + 1) * lookback,),
                                               dtype=np.float32,
                                               seed=42)

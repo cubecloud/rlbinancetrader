@@ -1,3 +1,4 @@
+from curses import wrapper
 import logging
 import time
 import threading
@@ -11,6 +12,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from dbbinance.fetcher.slocks import SThLock
+from sympy import use
 
 from rllab.fakelock import FakeRLock
 from stable_baselines3.common.vec_env.base_vec_env import (
@@ -22,15 +24,19 @@ from stable_baselines3.common.vec_env.base_vec_env import (
 )
 from stable_baselines3.common.vec_env.patch_gym import _patch_env
 
-__version__ = 0.019
+from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
+
+__version__ = 0.022
 
 
 class EnvWrapper(gym.Env):
 
     def __init__(self, envs: dict):
         self.envs = envs
-        self.tsteps = 0
-        pass
+        # checking objects idnum (check seed)
+        # check = [f'# {env_idx}:idnum {env.idnum}:seed {env.seed}' for env_idx, env in self.envs.items()]
+        # print(check)
 
     def step(self, actions: List[np.ndarray]) -> Dict[int, Any]:
         envs_results: dict = {}
@@ -97,29 +103,127 @@ class EnvWrapper(gym.Env):
             envs_results.update({env_idx: isinstance(self.envs[env_idx], wrapper_class)})
         return envs_results
 
-    
+
+class ThreadedEnvWrapper(gym.Env):
+    def __init__(self, envs: dict):
+        self.envs = envs
+        self.executor = ThreadPoolExecutor()
+
+    def _step_env(self, env_idx: int, action: np.ndarray) -> Tuple[int, Any]:
+        reset_info: Optional[Dict[str, Any]] = {}
+        observation, reward, terminated, truncated, info = self.envs[env_idx].step(action)
+        done = terminated or truncated
+        info["TimeLimit.truncated"] = truncated and not terminated
+        if done:
+            # save final observation where user can get it, then reset
+            info["terminal_observation"] = observation
+            observation, reset_info = self.envs[env_idx].reset()
+        return env_idx, (observation, reward, done, info, reset_info)
+
+    def step(self, actions: List[np.ndarray]) -> Dict[int, Any]:
+        futures = []
+        for ix, env_idx in enumerate(self.envs.keys()):
+            futures.append(self.executor.submit(self._step_env, env_idx, actions[ix]))
+        results = [future.result() for future in futures]
+        return dict(results)
+
+    def reset(self, seed: Union[List[int], List[None]] = [], options: Optional[List[Dict]] = None) -> Dict[int, Any]:
+        futures = []
+        for ix, env_idx in enumerate(self.envs.keys()):
+            futures.append(self.executor.submit(
+                lambda env_idx=env_idx: (env_idx, self.envs[env_idx].reset(seed=seed[ix], options=options[ix]))))
+        results = [future.result() for future in futures]
+        return dict(results)
+
+    def render(self, mode: Optional[str] = None) -> Dict[int, Any]:
+        futures = []
+        for env_idx in self.envs.keys():
+            futures.append(self.executor.submit(lambda env_idx=env_idx: (env_idx, self.envs[env_idx].render(mode))))
+        results = [future.result() for future in futures]
+        return dict(results)
+
+    def close(self) -> None:
+        for env in self.envs.values():
+            env.close()
+        self.executor.shutdown()
+
+    def get_spaces(self, indices) -> Dict[int, Any]:
+        futures = []
+        for env_idx in indices:
+            futures.append(self.executor.submit(lambda env_idx=env_idx: (
+            env_idx, (self.envs[env_idx].observation_space, self.envs[env_idx].action_space))))
+        results = [future.result() for future in futures]
+        return dict(results)
+
+    def get_attr(self, attr, indices: List[int]) -> Dict[int, Any]:
+        if attr == 'action_masks':
+            return {env_idx: True for env_idx in indices}
+        futures = []
+        for env_idx in indices:
+            futures.append(
+                self.executor.submit(lambda env_idx=env_idx: (env_idx, getattr(self.envs[env_idx].unwrapped, attr))))
+        results = [future.result() for future in futures]
+        results = dict(results)
+        return results
+
+    def set_attr(self, attr: str, value: Any, indices: List[int]) -> None:
+        futures = []
+        for env_idx in indices:
+            futures.append(self.executor.submit(setattr, self.envs[env_idx], attr, value))
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+    def env_method(self, method_name: str, args: List[Any], kwargs: Dict[str, Any], indices: List[int]) -> Dict[
+        int, Any]:
+        futures = []
+        for env_idx in indices:
+            futures.append(self.executor.submit(
+                lambda env_idx=env_idx: (env_idx, getattr(self.envs[env_idx].unwrapped, method_name)(*args, **kwargs))))
+        results = [future.result() for future in futures]
+        return dict(results)
+
+    def is_wrapped(self, wrapper_class, indices: List[int]) -> Dict[int, bool]:
+        futures = []
+        for env_idx in indices:
+            futures.append(
+                self.executor.submit(lambda env_idx=env_idx: (env_idx, isinstance(self.envs[env_idx], wrapper_class))))
+        results = [future.result() for future in futures]
+        results = dict(results)
+        return results
+
+
 def _worker(remote: mp.connection.Connection, parent_remote: mp.connection.Connection,
-            envs_fn_lst_wrapper: CloudpickleWrapper, process_env_indices: List[int]) -> None:
-
-
-    """
-    we don't need in our case threading.RLock for MpCacheManager cos all environments method's
-    called sequentially. We just need FakeRlock with singleton wrapper
-    """
-    _lock = SThLock(FakeRLock(), unique_name=f'train_rlock')
+            envs_fn_lst_wrapper: CloudpickleWrapper, process_env_indices: List[int],
+            use_threads=False, use_period='train') -> None:
+    if use_threads:
+        """
+        we  need in this case threading.RLock for MpCacheManager cos all environments method's
+        called with ThreadPoolExecutor. We using it with singleton wrapper
+        """
+        _lock = SThLock(threading.RLock(), unique_name=f'{use_period}_rlock')
+        use_wrapper = ThreadedEnvWrapper
+    else:
+        """
+        we don't need in this case threading.RLock for MpCacheManager cos all environments method's
+        called sequentially. We just need FakeRlock with singleton wrapper
+        """
+        _lock = SThLock(FakeRLock(), unique_name=f'{use_period}_rlock')
+        use_wrapper = EnvWrapper
 
     parent_remote.close()
     envs = [_patch_env(env()) for env in envs_fn_lst_wrapper.var]
-    env = EnvWrapper(dict(zip(process_env_indices, envs)))
+    env = use_wrapper(dict(zip(process_env_indices, envs)))
 
     while True:
         try:
             cmd, data = remote.recv()
             if cmd == "step":
-                remote.send(env.step(data))
+                envs_data = env.step(data)
+                remote.send(envs_data)
             elif cmd == "reset":
                 maybe_options = {"options": data[1]} if data[1] else {}
-                remote.send(env.reset(seed=data[0], **maybe_options))
+                envs_data = env.reset(seed=data[0], **maybe_options)
+                remote.send(envs_data)
             elif cmd == "render":
                 remote.send(env.render())
             elif cmd == "close":
@@ -172,7 +276,9 @@ class LabSubprocVecEnv(VecEnv):
     """
 
     def __init__(self, env_fns: List[Callable[[], gym.Env]], start_method: Optional[str] = None,
-                 n_processes: Optional[int] = None, process_shared_objs: Optional[Dict] = None):
+                 n_processes: Optional[int] = None, process_shared_objs: Optional[Dict] = None,
+                 use_threads: bool = False, use_period: str = 'train',
+                 seed: int = 42):
 
         def calculate_indices(n_envs, n_processes) -> List[List[int]]:
             # Calculate the number of environments per process
@@ -205,13 +311,17 @@ class LabSubprocVecEnv(VecEnv):
             self.process_shared_objs = process_shared_objs
         self.waiting = False
         self.closed = False
-        self.n_envs = len(env_fns)
+        self.num_envs = len(env_fns)
+        #   generate random seed's for first reset, cos the reconstructed object's have same seed
+        self._seeds: List[Optional[int]] = [None for _ in range(self.num_envs)]
+        self.seed(seed)
+
         if n_processes is None:
             self.n_processes = max(1, mp.cpu_count() - 2)
         else:
             self.n_processes = n_processes
 
-        self.env_indices_per_process = calculate_indices(self.n_envs, self.n_processes)
+        self.env_indices_per_process = calculate_indices(self.num_envs, self.n_processes)
 
         if start_method is None:
             # Fork is not a thread safe method (see issue #217)
@@ -227,7 +337,8 @@ class LabSubprocVecEnv(VecEnv):
         for pr_idx in range(len(self.env_indices_per_process)):
             process_env_indices = self.env_indices_per_process[pr_idx]
             envs_lst = [env_fns[i] for i in process_env_indices]
-            args = (self.work_remotes[pr_idx], self.remotes[pr_idx], CloudpickleWrapper(envs_lst), process_env_indices)
+            args = (self.work_remotes[pr_idx], self.remotes[pr_idx], CloudpickleWrapper(envs_lst), process_env_indices,
+                    use_threads, use_period)
             # daemon=True: if the main process crashes, we should not cause things to hang
             process = ctx.Process(target=_worker, args=args, daemon=True)  # type: ignore[attr-defined]
             process.start()
@@ -254,23 +365,22 @@ class LabSubprocVecEnv(VecEnv):
                 data.update(result)
                 break
         observation_space, action_space = data[0]
-        super().__init__(len(env_fns), observation_space, action_space)
+        super().__init__(self.num_envs, observation_space, action_space)
+        # generate random seed's for first reset, cos the reconstructed object's have same seed
+        self.seed()
 
     def step_async(self, actions: np.ndarray) -> None:
-        # assert len(actions) == self.n_envs
         for pr_idx in range(len(self.env_indices_per_process)):
-            process_env_indices = self.env_indices_per_process[pr_idx]
-            # actions_indices = [actions[ix] for ix in process_env_indices]
-            actions_indices = actions[np.asarray(process_env_indices)]
+            actions_indices = actions[np.array(self.env_indices_per_process[pr_idx])]
             self.remotes[pr_idx].send(("step", actions_indices))
         self.waiting = True
 
     def step_wait(self) -> VecEnvStepReturn:
-        results = [None] * self.n_envs
+        results = [None] * self.num_envs
         data = {}
         for pr_idx in range(len(self.env_indices_per_process)):
             data.update(self.remotes[pr_idx].recv())
-        for env_ix in range(self.n_envs):
+        for env_ix in range(self.num_envs):
             results[env_ix] = data[env_ix]
 
         self.waiting = False
@@ -281,7 +391,7 @@ class LabSubprocVecEnv(VecEnv):
     def reset(self) -> VecEnvObs:
         _seed = []
         _options = []
-        results = [None] * self.n_envs
+        results = [None] * self.num_envs
 
         for pr_idx in range(len(self.env_indices_per_process)):
             process_env_indices = self.env_indices_per_process[pr_idx]
@@ -293,7 +403,7 @@ class LabSubprocVecEnv(VecEnv):
         data = {}
         for pr_idx in range(len(self.env_indices_per_process)):
             data.update(self.remotes[pr_idx].recv())
-        for env_ix in range(self.n_envs):
+        for env_ix in range(self.num_envs):
             results[env_ix] = data[env_ix]
         obs, self.reset_infos = zip(*results)  # type: ignore[assignment]
         # Seeds and options are only used once
@@ -317,7 +427,7 @@ class LabSubprocVecEnv(VecEnv):
         self.closed = True
 
     def get_images(self) -> Sequence[Optional[np.ndarray]]:
-        outputs = [None] * self.n_envs
+        outputs = [None] * self.num_envs
         if self.render_mode != "rgb_array":
             warnings.warn(
                 f"The render mode is {self.render_mode}, but this method assumes it is `rgb_array` to obtain images."
@@ -331,7 +441,7 @@ class LabSubprocVecEnv(VecEnv):
         data = {}
         for pr_idx in range(len(self.env_indices_per_process)):
             data.update(self.remotes[pr_idx].recv())
-        for env_ix in range(self.n_envs):
+        for env_ix in range(self.num_envs):
             outputs[env_ix] = data[env_ix]
         return outputs
 

@@ -4,6 +4,7 @@ import math
 import copy
 import random
 import logging
+import time
 
 import gymnasium
 import numpy as np
@@ -36,7 +37,7 @@ from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
 import matplotlib.pyplot as plt
 
-__version__ = 0.065
+__version__ = 0.073
 
 logger = logging.getLogger()
 
@@ -99,9 +100,11 @@ class BinanceEnvBase(gymnasium.Env):
                  index_type: str = 'target_time',
                  deterministic: bool = True,
                  use_multiprocessing: bool = False,
-                #  mlp_rlock: Union[Any, None] = None
+                 reward_scaler: int = 10
+                 #  mlp_rlock: Union[Any, None] = None
                  ):
 
+        self.reward_scaler = reward_scaler
         self.use_multiprocessing = use_multiprocessing
         # if (self.use_multiprocessing and mlp_rlock is None) or (not self.use_multiprocessing and mlp_rlock is not None):
         #     raise AssertionError("Error: invalid use of mlp_rlock with multiprocessing")
@@ -168,7 +171,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.ohlcv_df, self.indicators_df = None, None
 
         timedelta = get_nearest_timeframe(
-            self.lookback_timeframes * get_timeframe_bins(self.data_processor_kwargs['timeframe']) + get_timeframe_bins('2d'))
+            self.lookback_timeframes * get_timeframe_bins(self.data_processor_kwargs['timeframe']) + get_timeframe_bins(
+                '2d'))
 
         self.__get_obs_func = None
         self._take_action_func = None
@@ -177,7 +181,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.cache_obj = cache_obj
         self.data_processor_obj = None
         self.eval_reuse_prob = eval_reuse_prob
-        
+
         self.set_CM(self.cache_obj)
 
         if self.ohlcv_df is None:
@@ -300,7 +304,13 @@ class BinanceEnvBase(gymnasium.Env):
             space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 5)
             self.__get_obs_func = self._get_assets_close_indicators_obs
         elif observation_type == 'lookback_assets_close_indicators':
-            space_obj = LookbackAssetsCloseIndicatorsSpace(ind_num=self.indicators_df.shape[1],
+            if self.data_processor_kwargs.get('indicators_sign', False):
+                low = -1.0
+            else:
+                low = 0.0
+            space_obj = LookbackAssetsCloseIndicatorsSpace(low=low,
+                                                           high=1.0,
+                                                           ind_num=self.indicators_df.shape[1],
                                                            assets_data=5,
                                                            lookback=self.lookback_timeframes)
             self.__get_obs_func = self._get_lookback_assets_close_indicators_obs
@@ -818,7 +828,6 @@ class BinanceEnvBase(gymnasium.Env):
         self.reward_step = 0.
         self.actions_lst: list = []
         self.invalid_action_counter = 0
-        self.gamma_return = 0.
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
         stable_cache = max(20.,
@@ -975,6 +984,10 @@ class BinanceEnvBase(gymnasium.Env):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        BinanceEnvBase.count = mp_count
+        BinanceEnvBase.count.value += 1
+        self.idnum = int(BinanceEnvBase.count.value)
+        self.seed = self.get_seed(self.seed + self.idnum)
         self.set_CM(self.cache_obj)
 
 
@@ -1013,17 +1026,19 @@ class BinanceEnvCash(BinanceEnvBase):
                  index_type: str = 'target_time',
                  deterministic: bool = True,
                  use_multiprocessing: bool = False,
-                #  mlp_rlock = None
+                 reward_scaler: int = 10,
+                 #  mlp_rlock = None
                  ):
         super().__init__(data_processor_kwargs, target_balance, target_minimum_trade, target_maximum_trade,
                          target_scale_decay, coin_balance, pnl_stop, verbose, log_interval, observation_type,
                          action_type, use_period, stable_cache_data_n, reuse_data_prob,
                          eval_reuse_prob, seed, lookback_window, max_hold_timeframes, penalty_value,
                          invalid_actions, total_timesteps, eps_start, eps_end, eps_decay, gamma, cache_obj, render_mode,
-                         index_type, deterministic, use_multiprocessing, 
-                        #  mlp_rlock
+                         index_type, deterministic, use_multiprocessing, reward_scaler,
+                         #  mlp_rlock
                          )
 
+        # self.reward_scaler = reward_scaler
         self.idnum = int(BinanceEnvCash.count.value)
 
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
@@ -1035,6 +1050,8 @@ class BinanceEnvCash(BinanceEnvBase):
         self.last_sell_order_pnl: float = 0.
         self.previous_balance = str()
         self.size_lst: list = []
+        self.stop_buy_timecount = self.ohlcv_df.shape[0] - self.np_random.integers(int(self.timeframes_24h // 2),
+                                                                                   self.timeframes_24h)
 
     @property
     def buy_and_hold_pnl(self) -> float:
@@ -1042,108 +1059,108 @@ class BinanceEnvCash(BinanceEnvBase):
 
     def _get_action_masks(self) -> np.ndarray:
         return np.array(
-            [(self.cash / self.price) >= self.min_coin_trade,
+            [(self.cash / self.price) >= self.min_coin_trade and self.timecount < self.stop_buy_timecount and not (
+                    self.timecount >= self.ohlcv_df.shape[0] - 1),
              self.asset.balance.size >= self.min_coin_trade,
-             True], dtype=bool)
+             self.timecount < self.ohlcv_df.shape[0] - 1 or self.order_closed],
+            dtype=bool)
+
+    def _action_msg(self, action, size, amount, action_commission, order_cash, order_profit, old_target_balance,
+                    old_coin_balance):
+        if self.timecount % self.log_interval == 0:
+            ohlcv = (
+                f"{self.timecount}\t {self.ohlcv_df.index[self.timecount]} \t"
+                f"open: \t{self.ohlcv_df.iloc[self.timecount]['open']:.2f} \t"
+                f"high: \t{self.ohlcv_df.iloc[self.timecount]['high']:.2f} \t"
+                f"low: \t{self.ohlcv_df.iloc[self.timecount]['low']:.2f} \t"
+                f"close: \t{self.ohlcv_df.iloc[self.timecount]['close']:.2f} \t"
+                f"volume: \t{self.ohlcv_df.iloc[self.timecount]['volume']:.2f}")
+            old_balance = (
+                f"OLD Assets =>\t{self.target.symbol}: {old_target_balance:.4f}, "
+                f"{self.asset.symbol}: {old_coin_balance:.4f}"
+                f"\tTotal assets(old): "
+                f"{(old_target_balance + (old_coin_balance * self.price)):.1f} {self.asset.symbol}")
+            msg = (f"{ohlcv}\n"
+                   f"\tAction num: {action}\t{old_balance} "
+                   f"\tACTION => {actions_4_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f})(a:{amount:.2f} "
+                   f"{self.action_symbol}, commission: {action_commission:.2f}"
+                   f"\t{self.current_balance}\tprofit {order_profit:.4f}\tPNL {self.pnl:.4f}"
+                   f"\treward:{self.reward_step:.5f}")
+            logger.info(msg)
+
+    def _buy_action(self, amount):
+        order_cash, action_commission = 0., 0.
+        self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
+        max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
+        min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
+        # max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
+        max_trade = max_size if max_size > min_trade else 0.
+        size = min(max(min_trade, amount), max_trade)
+        if size != 0.:
+            self.asset.orders.buy(size, self.price)
+            action_commission = self.asset.orders.book[-1].order_commission
+            order_cash = self.asset.orders.book[-1].order_cash
+            self.gamma_return = 0.
+            self.order_closed = False
+        return size, order_cash, action_commission
+
+    def _sell_action(self, amount):
+        order_cash, order_profit, action_commission = 0., 0., 0.
+        self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
+        min_trade = max(self.min_coin_trade,
+                        (self.target.minimum_trade / self.price) * (1. + self.asset.orders.commission))
+        max_trade = self.asset.balance.size if self.asset.balance.size > min_trade else 0.
+        size = min(max(min_trade, amount), max_trade)
+
+        if size != 0:
+            self.asset.orders.sell(size, self.price)
+            action_commission = self.asset.orders.book[-1].order_commission
+            order_cash = self.asset.orders.book[-1].order_cash
+            order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
+
+            """
+            Sell action reward - removed cos of added trade tracking to
+            hold action -> from order_closed=False until order_closed=True
+            """
+            """ Trade tracking data from buy to sell """
+            self.reward_step += (self.pnl - self.previous_pnl)
+            # self.reward_step += (order_profit / self.initial_total_assets)
+            self.order_closed = True
+        return size, order_cash, order_profit, action_commission
+
+    def _hold_action(self) -> None:
+        self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
+        if not self.order_closed:
+            """ Trade tracking data form buy to sell """
+            self.reward_step += (self.pnl - self.previous_pnl)
 
     def _take_action(self, action, amount) -> tuple:
         old_target_balance = float(self.cash)
         old_coin_balance = float(self.asset.balance.size)
         action_commission = .0
         order_cash: float = 0.
-        # action_symbol = self.target.symbol
-        msg = str()
         size = 0.
         order_profit = 0.
 
         """buy or sell stock"""
         if action == 0:  # Buy
-            self.action_symbol = f'{self.target.symbol}->{self.asset.symbol}'
-            max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
-            min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
-            # max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
-            max_trade = max_size if max_size > min_trade else 0.
-            size = min(max(min_trade, amount), max_trade)
-            if size != 0.:
-                self.asset.orders.buy(size, self.price)
-                action_commission = self.asset.orders.book[-1].order_commission
-                order_cash = self.asset.orders.book[-1].order_cash
-                # self.reward_step = self.penalty_value
-                # self.reward_step = (self.previous_buy_and_hold_pnl - self.buy_and_hold_pnl) * self.first_epsilon ** 2
-                """ looking for negative situation, we need to have less self.pnl then previous or same"""
-                # self.reward_step = (self.previous_pnl - self.pnl)/self.pnl
-                # self.reward_step = -((self.pnl - self.previous_pnl) + (action_commission / self.initial_total_assets))
-                # self.reward_step = self.previous_pnl - self.pnl
-            # else:
-            #     action = 2
+            size, order_cash, action_commission = self._buy_action(amount)
 
         elif action == 1:  # Sell
-            self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
-            min_trade = max(self.min_coin_trade,
-                            (self.target.minimum_trade / self.price) * (1. + self.asset.orders.commission))
-            # max_trade = min(self.asset.balance.size if self.asset.balance.size > min_trade else 0.,
-            #                 self.target.maximum_trade / self.price)
-            max_trade = self.asset.balance.size if self.asset.balance.size > min_trade else 0.
-            size = min(max(min_trade, amount), max_trade)
+            size, order_cash, order_profit, action_commission = self._sell_action(amount)
 
-            if size != 0:
-                self.asset.orders.sell(size, self.price)
-                action_commission = self.asset.orders.book[-1].order_commission
-                order_cash = self.asset.orders.book[-1].order_cash
-                order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
-
-                """ Sell action reward """
-                self.reward_step = order_profit / self.initial_total_assets
-                # self.reward_step = (self.pnl - self.previous_pnl) + (action_commission / self.initial_total_assets)
-
-                # self.reward_step += (order_profit / self.initial_total_assets)
-                # self.last_sell_order_pnl = float(self.pnl)
-            # else:
-            #     action = 2
-
-        # elif action == 3:  # Close all
-        #     self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
-        #     size = self.asset.balance.size if self.asset.balance.size > self.min_coin_trade else 0.
-        #     if size != 0:
-        #         self.asset.orders.sell(size, self.price)
-        #         action_commission = self.asset.orders.book[-1].order_commission
-        #         order_cash = self.asset.orders.book[-1].order_cash
-        #         order_profit = order_cash - self.asset.orders.book[-1].size * self.asset.balance.price
-        #
-        #         """ Close action reward """
-        #         self.reward_step += (order_profit / self.initial_total_assets)
-        #         # self.last_sell_order_pnl = float(self.pnl)
-        #     # else:
-        #     #     action = 2
+        elif action == 2:  # Hold
+            self._hold_action()
 
         if self.verbose == 2:
-            if self.timecount % self.log_interval == 0:
-                ohlcv = (
-                    f"{self.timecount}\t {self.ohlcv_df.index[self.timecount]} \t"
-                    f"open: \t{self.ohlcv_df.iloc[self.timecount]['open']:.2f} \t"
-                    f"high: \t{self.ohlcv_df.iloc[self.timecount]['high']:.2f} \t"
-                    f"low: \t{self.ohlcv_df.iloc[self.timecount]['low']:.2f} \t"
-                    f"close: \t{self.ohlcv_df.iloc[self.timecount]['close']:.2f} \t"
-                    f"volume: \t{self.ohlcv_df.iloc[self.timecount]['volume']:.2f}")
-
-                old_balance = (
-                    f"OLD Assets =>\t{self.target.symbol}: {old_target_balance:.4f}, "
-                    f"{self.asset.symbol}: {old_coin_balance:.4f}"
-                    f"\tTotal assets(old): "
-                    f"{(old_target_balance + (old_coin_balance * self.price)):.1f} {self.asset.symbol}")
-                msg = (f"{ohlcv}\n{msg}"
-                       f"\tAction num: {action}\t{old_balance} "
-                       f"\tACTION => {actions_4_reversed_dict[action]}: size:{size:.4f}({order_cash:.2f})(a:{amount:.2f} "
-                       f"{self.action_symbol}, commission: {action_commission:.2f}"
-                       f"\t{self.current_balance}\tprofit {order_profit:.4f}\tPNL {self.pnl:.4f}"
-                       f"\treward:{self.reward_step:.5f}")
-                logger.info(msg)
+            self._action_msg(action, size, amount, action_commission, order_cash, order_profit, old_target_balance,
+                             old_coin_balance)
 
         return action, size
 
     def step(self, action):
         info = self._get_info()
-        self.reward_step = .0
+        self.reward_step = 0.
 
         action, amount = self.action_space_obj.convert2action(action, None)
         # action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
@@ -1177,37 +1194,37 @@ class BinanceEnvCash(BinanceEnvBase):
         """ ----------------------------------------------- """
         self.timecount += 1
         """ ----------------------------------------------- """
-        """ Calculate reward on Buy & Sell action """
-        if action == 0 or action == 1:
-            self.reward_step += self.calculate_last_reward()
 
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
 
         if terminated or truncated:
             self.dones = True
-            # """ add last part,  if its not added, to reward """
-            # if self.previous_pnl != self.previous_lookback_pnl:
-            #     self.reward_step += (self.previous_pnl - self.previous_lookback_pnl)
+            if self.previous_pnl > 0.:
+                """ using the current pnl (as previous_pnl) """
+                self.reward_step += 0.001
+            elif self.previous_pnl <= 0.:
+                self.reward_step += -0.001
 
-            """ using the current pnl (as previous_pnl) """
-            if not (action == 0 or action == 1):
-                self.reward_step += self.calculate_last_reward()
-
+        self.gamma_return = self.gamma_return * self.gamma + self.reward_step
+        self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
+        if self.order_closed:
+            self.gamma_return = 0.
+        # self.reward_step = self.reward_step/(self.timecount/self.ohlcv_df.shape[0])
         self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
 
-    def calculate_last_reward(self):
-        conditions = [self.previous_pnl > 0, self.previous_pnl < 0]
-        choices = [self.previous_pnl, self.previous_pnl * 0.6, ]
-        pnl_signal = np.select(conditions, choices)
-        bh_conditions = [self.previous_pnl > self.previous_buy_and_hold_pnl,
-                         self.previous_pnl < self.previous_buy_and_hold_pnl]
-        bh_choices = [(self.previous_pnl - self.previous_buy_and_hold_pnl + 0.05) * 0.2,
-                      (self.previous_pnl - self.previous_buy_and_hold_pnl - 0.05) * 0.2, ]
-        bh_comparison_signal = np.select(bh_conditions, bh_choices, default=0)
-        return pnl_signal + bh_comparison_signal
+    # def calculate_reward(self):
+    #     conditions = [self.previous_pnl > 0, self.previous_pnl < 0]
+    #     choices = [self.previous_pnl, self.previous_pnl * 0.6, ]
+    #     pnl_signal = np.select(conditions, choices)
+    #     bh_conditions = [self.previous_pnl > self.previous_buy_and_hold_pnl,
+    #                      self.previous_pnl < self.previous_buy_and_hold_pnl]
+    #     bh_choices = [(self.previous_pnl - self.previous_buy_and_hold_pnl + 0.05) * 0.2,
+    #                   (self.previous_pnl - self.previous_buy_and_hold_pnl - 0.05) * 0.2, ]
+    #     bh_comparison_signal = np.select(bh_conditions, bh_choices, default=0)
+    #     return pnl_signal + bh_comparison_signal
 
     def log_reset_msg(self):
         values, counts = np.unique(self.actions_lst, return_counts=True)
@@ -1233,6 +1250,8 @@ class BinanceEnvCash(BinanceEnvBase):
                 1 - self.asset.orders.commission)
         self.previous_buy_and_hold_pnl = 0.
         self.previous_balance = str()
+        self.stop_buy_timecount = self.ohlcv_df.shape[0] - self.np_random.integers(int(self.timeframes_24h // 2),
+                                                                                   self.timeframes_24h)
         # self.previous_lookback_pnl = float(self.pnl)
         return observation, info
 

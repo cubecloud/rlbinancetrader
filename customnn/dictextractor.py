@@ -1,5 +1,4 @@
 import numpy as np
-
 import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
@@ -7,7 +6,7 @@ from gymnasium import spaces
 from rllab.labtools import deserialize_kwargs
 from customnn.nnserializerdata import nn_serializer
 
-__version__ = 0.013
+__version__ = 0.015
 
 
 class MultiExtractorNN(BaseFeaturesExtractor):
