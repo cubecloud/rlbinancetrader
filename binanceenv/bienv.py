@@ -1052,6 +1052,9 @@ class BinanceEnvCash(BinanceEnvBase):
         self.size_lst: list = []
         self.stop_buy_timecount = self.ohlcv_df.shape[0] - self.np_random.integers(int(self.timeframes_24h // 2),
                                                                                    self.timeframes_24h)
+        self.order_buy = False
+        self.order_sell = False
+        self.gamma_return_reset = False
 
     @property
     def buy_and_hold_pnl(self) -> float:
@@ -1100,8 +1103,12 @@ class BinanceEnvCash(BinanceEnvBase):
             self.asset.orders.buy(size, self.price)
             action_commission = self.asset.orders.book[-1].order_commission
             order_cash = self.asset.orders.book[-1].order_cash
-            self.gamma_return = 0.
+            # self.reward_step += (self.previous_pnl - self.pnl)
+            self.reward_step += (((self.previous_price - self.price) * size) / self.initial_total_assets)
             self.order_closed = False
+            self.order_buy = True
+            self.order_sell = False
+            self.gamma_return_reset = True
         return size, order_cash, action_commission
 
     def _sell_action(self, amount):
@@ -1126,13 +1133,25 @@ class BinanceEnvCash(BinanceEnvBase):
             self.reward_step += (self.pnl - self.previous_pnl)
             # self.reward_step += (order_profit / self.initial_total_assets)
             self.order_closed = True
+            self.order_buy = False
+            self.order_sell = True
+            self.gamma_return_reset = True
         return size, order_cash, order_profit, action_commission
 
-    def _hold_action(self) -> None:
+    def _hold_action(self, amount) -> None:
         self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
-        if not self.order_closed:
-            """ Trade tracking data form buy to sell """
+
+        if not self.order_closed and self.order_buy:
+            """ Trade tracking data from buy to sell (we checking uptrend)"""
             self.reward_step += (self.pnl - self.previous_pnl)
+        elif self.order_closed and self.order_sell:
+            max_size = (self.cash / self.price) / (1. + self.asset.orders.commission)
+            min_trade = max(self.asset.minimum_trade, self.target.minimum_trade / self.price)
+            # max_trade = min(max_size if max_size > min_trade else 0., self.target.maximum_trade / self.price)
+            max_trade = max_size if max_size > min_trade else 0.
+            size = min(max(min_trade, amount), max_trade)
+            """ Trade tracking data from sell to buy (we checking downtrend) through potential action value """
+            self.reward_step += (((self.previous_price - self.price) * size) / self.initial_total_assets)
 
     def _take_action(self, action, amount) -> tuple:
         old_target_balance = float(self.cash)
@@ -1150,7 +1169,7 @@ class BinanceEnvCash(BinanceEnvBase):
             size, order_cash, order_profit, action_commission = self._sell_action(amount)
 
         elif action == 2:  # Hold
-            self._hold_action()
+            self._hold_action(amount)
 
         if self.verbose == 2:
             self._action_msg(action, size, amount, action_commission, order_cash, order_profit, old_target_balance,
@@ -1208,8 +1227,9 @@ class BinanceEnvCash(BinanceEnvBase):
 
         self.gamma_return = self.gamma_return * self.gamma + self.reward_step
         self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
-        if self.order_closed:
+        if self.gamma_return_reset:
             self.gamma_return = 0.
+            self.gamma_return_reset = False
         # self.reward_step = self.reward_step/(self.timecount/self.ohlcv_df.shape[0])
         self.episode_reward += self.reward_step
 
@@ -1253,6 +1273,9 @@ class BinanceEnvCash(BinanceEnvBase):
         self.stop_buy_timecount = self.ohlcv_df.shape[0] - self.np_random.integers(int(self.timeframes_24h // 2),
                                                                                    self.timeframes_24h)
         # self.previous_lookback_pnl = float(self.pnl)
+        self.order_closed = True
+        self.order_buy = False
+        self.order_sell = False
         return observation, info
 
     def __del__(self):

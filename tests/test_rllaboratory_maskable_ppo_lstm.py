@@ -147,7 +147,7 @@ if __name__ == '__main__':
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
-        clip_range_vf=0.3,
+        clip_range_vf=0.2,
         learning_rate={'CoSheduller': dict(warmup=learning_start,
                                            learning_rate=4.5e-6,
                                            min_learning_rate=3.5e-6,

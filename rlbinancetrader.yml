@@ -44,6 +44,7 @@ dependencies:
   - plotly
   - tensorboard
   - objsize
+  - mplfinance>=0.12.9b7
   - pip:
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git

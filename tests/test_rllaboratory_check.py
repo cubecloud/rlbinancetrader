@@ -31,14 +31,14 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0911-102637/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1011-230816/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename=750_000, n_tests=15, verbose=1)
     """ Sell action reward """
-    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1, seed=443,
-    #                         use_period='test')
-    rllab.backtesting_agent(filename=131_544_000, render_mode='human', n_tests=10, verbose=1, seed=443,
+    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1, seed=443,
                             use_period='test')
+    # rllab.backtesting_agent(filename=158_760_000, render_mode='human', n_tests=10, verbose=1, seed=443,
+    #                         use_period='test')
     # rllab.evaluate_agent(0)
