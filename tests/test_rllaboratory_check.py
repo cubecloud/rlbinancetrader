@@ -31,14 +31,61 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1011-230816/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    _timeframe = '15m'
+    _discretization = '15m'
+    _gap_period = '5d'
+
+    # _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
+    _start_datetime = '2023-07-20 01:00:00'
+    # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
+
+    # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
+    # _end_datetime = '2024-07-30 01:00:00'
+    _end_datetime = '2024-11-13 01:00:00'
+
+    data_processor_kwargs = dict(start_datetime=_start_datetime,
+                                 end_datetime=_end_datetime,
+                                 timeframe=_timeframe,
+                                 discretization=_discretization,
+                                 symbol_pair='BTCUSDT',
+                                 market='spot',
+                                 minimum_train_size=0.0267,
+                                 maximum_train_size=0.031,
+                                 minimum_test_size=0.7,
+                                 maximum_test_size=0.9,
+                                 test_size=0.13,
+                                 verbose=0,
+                                 indicators_sign=True
+                                 )
+
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=0.0267,
+    #                              maximum_train_size=0.031,
+    #                              minimum_test_size=0.2,
+    #                              maximum_test_size=0.3,
+    #                              test_size=0.2,
+    #                              verbose=0,
+    #                              indicators_sign=True
+    #                              )
+
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1011-230816/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2311-021257/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2411-231048/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename=750_000, n_tests=15, verbose=1)
     """ Sell action reward """
-    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1, seed=443,
-                            use_period='test')
-    # rllab.backtesting_agent(filename=158_760_000, render_mode='human', n_tests=10, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
+    rllab.backtesting_agent(filename=464_940_000, render_mode='human', n_tests=20, verbose=1, seed=443,
+                            use_period='test')
+    # rllab.backtesting_agent(filename=464_940_000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    #                         use_period='check',
+    #                         data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

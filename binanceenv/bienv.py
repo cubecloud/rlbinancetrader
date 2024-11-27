@@ -5,6 +5,7 @@ import copy
 import random
 import logging
 import time
+from binascii import Error
 
 import gymnasium
 import numpy as np
@@ -109,7 +110,8 @@ class BinanceEnvBase(gymnasium.Env):
         # if (self.use_multiprocessing and mlp_rlock is None) or (not self.use_multiprocessing and mlp_rlock is not None):
         #     raise AssertionError("Error: invalid use of mlp_rlock with multiprocessing")
 
-        BinanceEnvBase.count.value += 1
+        with BinanceEnvBase.count.get_lock():
+            BinanceEnvBase.count.value += 1
 
         self.idnum = int(BinanceEnvBase.count.value)
         self.observation_type = observation_type
@@ -240,6 +242,13 @@ class BinanceEnvBase(gymnasium.Env):
         self.ret_obs_df = None
 
     def set_CM(self, cache_obj):
+        def get_ohlcv_and_indicators():
+            """ Creating the list of cache data from probs dict with 3 values """
+            self.key_list = list(self.CM.hits_probs().keys())[:3]
+            self.np_random.shuffle(self.key_list)
+            self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
+            self.key_list = self.key_list[1:]
+
         if self.CM is None:
             if self.use_period == 'train':
                 # using external cache_manager for multiprocessing or multithreading
@@ -248,20 +257,28 @@ class BinanceEnvBase(gymnasium.Env):
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': 5005, 'start_host': False, 'unique_name': 'train'}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
-                if len(self.CM):
-                    self.ohlcv_df, self.indicators_df = self.CM.get(list(self.CM.keys())[0])
+                    if len(self.CM):
+                        get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_train
-            else:
+            elif self.use_period == 'test' or self.use_period == 'check':
+                if self.use_period == 'test':
+                    port = 5006
+                    unique_name = 'test'
+                else:
+                    port = 5007
+                    unique_name = 'check'
                 # separated CacheManager for eval environment
                 if cache_obj is None:
                     self.CM = eval_cache_manager_obj
                 elif cache_obj == 'MpCacheManager':
-                    mp_cache_manager_kwargs = {'port': 5006, 'start_host': False, 'unique_name': 'test'}
+                    mp_cache_manager_kwargs = {'port': port, 'start_host': False, 'unique_name': unique_name}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
-                if len(self.CM):
-                    self.ohlcv_df, self.indicators_df = self.CM.get(list(self.CM.keys())[0])
+                    if len(self.CM):
+                        get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_test
                 self.reuse_data_prob = self.eval_reuse_prob
+            else:
+                AssertionError(f'{self.use_period} unknown period')
 
     @property
     def total_timesteps_counter(self):
@@ -278,9 +295,6 @@ class BinanceEnvBase(gymnasium.Env):
     @total_episodes_counter.setter
     def total_episodes_counter(self, value):
         mp_episodes_counter.value = value
-
-    def __del__(self):
-        BinanceEnvBase.count.value -= 1
 
     @property
     def cash(self):
@@ -830,7 +844,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.invalid_action_counter = 0
         self.recalc_epsilon()  # recalculate epsilon
         self.dones = False
-        stable_cache = max(20.,
+        stable_cache = max(15.,
                            self.stable_cache_data_n * min(1.0,
                                                           self.first_epsilon + 0.3)) if self.use_period == 'train' else self.stable_cache_data_n
 
@@ -914,6 +928,7 @@ class BinanceEnvBase(gymnasium.Env):
         fig, ax1 = plt.subplots(figsize=(30, 17))
         scale_factor = 20
         ax2 = ax1.twinx()
+        # ax3 = ax1.twinx()
 
         ax1.set_axisbelow(True)
         ax1.minorticks_on()
@@ -929,6 +944,7 @@ class BinanceEnvBase(gymnasium.Env):
 
         line1, = ax1.plot(df.index, df['price'], c='cyan', label='Price ("Close")')
         line2, = ax2.plot(df.index, df['total'], c='grey', label='Total assets', alpha=0.5)
+        # line3, = ax3.plot(df.index, df['pnl'], c='green', label='PNL', alpha=0.5)
         # labels_handles = [line1, line2,]
         buy_kwargs = dict(alpha=0.6, label='Buy')
         sell_kwargs = dict(alpha=0.6, label='Sell')
@@ -985,10 +1001,15 @@ class BinanceEnvBase(gymnasium.Env):
     def __setstate__(self, state):
         self.__dict__.update(state)
         BinanceEnvBase.count = mp_count
-        BinanceEnvBase.count.value += 1
+        with BinanceEnvBase.count.get_lock():
+            BinanceEnvBase.count.value += 1
         self.idnum = int(BinanceEnvBase.count.value)
         self.seed = self.get_seed(self.seed + self.idnum)
         self.set_CM(self.cache_obj)
+
+    def __del__(self):
+        with BinanceEnvBase.count.get_lock():
+            BinanceEnvBase.count.value -= 1
 
 
 class BinanceEnvCash(BinanceEnvBase):
@@ -1273,11 +1294,7 @@ class BinanceEnvCash(BinanceEnvBase):
         self.stop_buy_timecount = self.ohlcv_df.shape[0] - self.np_random.integers(int(self.timeframes_24h // 2),
                                                                                    self.timeframes_24h)
         # self.previous_lookback_pnl = float(self.pnl)
-        self.order_closed = True
-        self.order_buy = False
-        self.order_sell = False
         return observation, info
 
     def __del__(self):
-        with BinanceEnvCash.count.get_lock():
-            BinanceEnvCash.count.value -= 1
+        super().__del__()

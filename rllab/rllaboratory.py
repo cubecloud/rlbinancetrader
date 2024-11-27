@@ -42,8 +42,8 @@ from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
 from rllab import LabMaskEvalCallback
-from rllab import LabMpVecEnv
-from rllab import LabMltVecEnv
+# from rllab import LabMpVecEnv
+# from rllab import LabMltVecEnv
 from rllab import LabSubprocVecEnv
 from rllab.labmaskevaluation import lab_mask_evaluate_policy
 from rllab.labtools import deserialize_kwargs, round_up, get_base_env
@@ -51,7 +51,7 @@ from rllab.labserializer import lab_serializer
 
 from datawizard.dataprocessor import IndicatorProcessor
 
-from sb3_contrib import MaskablePPO
+from sb3_contrib import MaskablePPO, TRPO
 from tqdm import tqdm
 
 # from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
@@ -93,7 +93,7 @@ env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv, 'labsu
                           # 'labmpenv': LabMpVecEnv, 'labmltenv': LabMltVecEnv
                           }
 
-AGENT_TYPE = Union[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO]
+AGENT_TYPE = Union[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO, TRPO]
 
 
 class LabBase:
@@ -364,19 +364,21 @@ class LabBase:
 
         return mp_cache_server
 
-    def get_cache_obj_dict(self, env_wrapper, env_kwargs) -> dict:
+    def get_cache_obj_dict(self, env_wrapper, env_kwargs, train_port: int = 5005, test_port: int = 5006,
+                           check_port: int = 5007) -> dict:
         if env_kwargs['use_period'] == 'train':
-            port = 5005
+            port = train_port
+        elif env_kwargs['use_period'] == 'test':
+            port = test_port
         else:
-            port = 5006
+            port = check_port
 
         if not MpCacheManager.is_server_running(port=port):
             start_host = True
-            mp_cache_server = self.mp_fill_cache(env_kwargs)
+            mp_cache_server = self.mp_fill_cache(env_kwargs, port=port)
         else:
             start_host = False
             mp_cache_server = MpCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
-
         if env_wrapper == 'dummy':
             update_dict = {}
             if env_kwargs['use_period'] == 'train':
@@ -419,7 +421,9 @@ class LabBase:
                      agent_kwargs_update: Union[dict, None] = None,
                      n_envs: Union[int, None] = None,
                      env_wrapper: Union[str, None] = None,
+                     env_wrapper_kwargs_update: Union[dict, None] = None,
                      eval_freq: Union[int, None] = None,
+                     n_eval_episodes: Union[int, None] = None,
                      verbose=1):
 
         if total_timesteps is not None:
@@ -444,6 +448,10 @@ class LabBase:
             agent_cfg.ENV_WRAPPER = env_wrapper
             self.env_wrapper = env_wrapper
             self.env_wrapper_cls = env_wrapper_dict.get(self.env_wrapper, DummyVecEnv)
+
+        if n_eval_episodes is not None:
+            agent_cfg.N_EVAL_EPISODES = n_eval_episodes
+            self.n_eval_episodes = n_eval_episodes
 
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
         train_env_kwargs.update({'use_period': 'train', 'verbose': verbose, })
@@ -471,6 +479,9 @@ class LabBase:
                                    seed=self.seed,
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=self.env_wrapper_cls)
+
+        if env_wrapper_kwargs_update is not None:
+            self.env_wrapper_kwargs.update(env_wrapper_kwargs_update)
 
         if self.env_wrapper == 'labsubproc':
             if self.env_wrapper_kwargs:
@@ -565,21 +576,21 @@ class LabBase:
         agent_obj.set_env(train_vec_env)
         # env = agent_obj.get_env()
 
-        agent_obj.learn(total_timesteps=int(self.total_timesteps//3),
+        agent_obj.learn(total_timesteps=int(self.total_timesteps // 3),
                         callback=callbacks,
                         log_interval=self.log_interval,
                         progress_bar=False,
                         reset_num_timesteps=reset_num_timesteps,
                         tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.OBS_TYPE}/{agent_cfg.EXP_ID}')
 
-        agent_obj.learn(total_timesteps=int(self.total_timesteps//3),
+        agent_obj.learn(total_timesteps=int(self.total_timesteps // 3),
                         callback=callbacks,
                         log_interval=self.log_interval,
                         progress_bar=False,
                         reset_num_timesteps=False,
                         tb_log_name=f'{agent_cfg.ENV_NAME}/{agent_cfg.ALGO}/{agent_cfg.OBS_TYPE}/{agent_cfg.EXP_ID}_2_3')
 
-        agent_obj.learn(total_timesteps=int(self.total_timesteps//3),
+        agent_obj.learn(total_timesteps=int(self.total_timesteps // 3),
                         callback=callbacks,
                         log_interval=self.log_interval,
                         progress_bar=False,
@@ -829,7 +840,8 @@ class LabBase:
         return path_filename
 
     def backtesting_agent(self, ix=0, filename: Union[str, int] = 'best_model', render_mode='human',
-                          n_tests=10, verbose=1, use_period='test', seed=42):
+                          n_tests=10, verbose=1, use_period='test', seed=42,
+                          data_processor_kwargs: Union[Dict, None] = None):
 
         """ Create independent evaluation env """
         eval_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
@@ -837,7 +849,19 @@ class LabBase:
                                 'verbose': verbose,
                                 'stable_cache_data_n': n_tests,
                                 'render_mode': render_mode})
-        eval_env_kwargs['data_processor_kwargs'].update({'seed': seed})
+
+        if data_processor_kwargs is not None:
+            eval_env_kwargs['data_processor_kwargs'].update({'seed': seed})
+            eval_env_kwargs['data_processor_kwargs'].update(data_processor_kwargs)
+            if use_period == 'check':
+                eval_env_kwargs.update({'use_period': 'check',
+                                        'verbose': self.verbose,
+                                        'stable_cache_data_n': self.n_eval_episodes,
+                                        })
+                """ Fill cache and add cache_obj to kwargs """
+                eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs, test_port=5007))
+        else:
+            eval_env_kwargs['data_processor_kwargs'].update({'seed': seed})
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,

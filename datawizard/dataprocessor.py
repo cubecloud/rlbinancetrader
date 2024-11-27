@@ -2,7 +2,7 @@ import random
 import sys
 import logging
 
-from numpy import unique as np_unique
+# from numpy import unique as np_unique
 import pandas as pd
 
 from datetime import timezone, datetime
@@ -18,11 +18,9 @@ from dbbinance.fetcher.constants import Constants
 from indicators import LoadDbIndicators
 import multiprocessing as mp
 
-__version__ = 0.091
-
 from rllab.labtools import round_up
 
-# from tests.test_dataprocessor import episodes_lst
+__version__ = 0.091
 
 logger = logging.getLogger()
 
@@ -43,7 +41,8 @@ class ProcessorBase:
                  verbose: int = 0,
                  seed=42):
 
-        ProcessorBase.count.value += 1
+        with ProcessorBase.count.get_lock():
+            ProcessorBase.count.value += 1
 
         self.idnum = int(ProcessorBase.count.value)
 
@@ -148,7 +147,7 @@ class ProcessorBase:
         return tuple(minute_timeframes_series.sample(n=2, random_state=self.seed))
 
     def _get_random_start(self, minute_timeframes_series: Union[pd.DataFrame, None]):
-        return minute_timeframes_series.sample(n=2, random_state=self.seed)[random.randint(0, 1)]
+        return minute_timeframes_series.sample(n=1, random_state=self.seed)[0]
 
     def _get_random_period(self, period_type='train'):
         if period_type == 'train':
@@ -163,8 +162,14 @@ class ProcessorBase:
         done = False
         random_start_datetime, random_end_datetime = None, None
         period_timeframes_len = None
+        counter = 0
         while not done:
-            random_start_datetime = self._get_random_start(minute_timeframes)
+            if counter < 20:
+                random_start_datetime = self._get_random_start(minute_timeframes)
+            else:
+                random_start_datetime = self._get_random_start(
+                    minute_timeframes[:minute_timeframes.shape[0] - maximum_timeframes_num + 1])
+            counter += 1
             timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
             timedelta_kwargs = get_timedelta_kwargs(f'{timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
                                                     current_timeframe=self.timeframe)
@@ -206,7 +211,7 @@ class ProcessorBase:
                         result.extend(half_list(list(range(half[mid + 1], half[-1] + 1))))
                 return result
 
-            shifts_lst = [0]
+            shifts_lst: list = [0]
             mid = num_shifts // 2
             shifts_lst.append(mid)
             first_half = half_list(list(range(1, mid)))
@@ -286,10 +291,10 @@ class ProcessorBase:
                             done = True
                     else:
                         done = True
+                one_shift_start_end_lst.append((_start_datetime, _end_datetime))
                 if selected_period[:_start_datetime].shape[0] < minimum_timeframes_num:
                     break
 
-                one_shift_start_end_lst.append((_start_datetime, _end_datetime))
                 if start_offset:
                     timedelta_kwargs = get_timedelta_kwargs(
                         f'{start_offset * Constants.binsizes[self.timeframe]}m',
@@ -305,7 +310,10 @@ class ProcessorBase:
             if unique_episodes_counts < num_episodes:
                 selected_period = get_shifted_range(ix)
                 ix += 1
-                if ix == len(shifts) - 1:
+                if ix == len(shifts):
+                    ix = 0
+                    n_shifted_episodes = num_episodes - unique_episodes_counts
+                elif ix == len(shifts) - 1:
                     n_shifted_episodes = num_episodes - unique_episodes_counts
             else:
                 finished = True
@@ -337,6 +345,10 @@ class ProcessorBase:
         _ohlcv_df = self.get_ohlcv_df(start_datetime, end_datetime, symbol_pair=self.symbol_pair, market=self.market)
         return _ohlcv_df
 
+    def __del__(self):
+        with ProcessorBase.count.get_lock():
+            ProcessorBase.count.value -= 1
+
 
 class IndicatorProcessor(ProcessorBase):
     def __init__(self, start_datetime, end_datetime, timeframe, discretization, symbol_pair='BTCUSDT', market='spot',
@@ -346,6 +358,7 @@ class IndicatorProcessor(ProcessorBase):
         super().__init__(start_datetime, end_datetime, timeframe, discretization, symbol_pair, market,
                          minimum_train_size, maximum_train_size, minimum_test_size, maximum_test_size, test_size,
                          verbose, seed)
+
         self.indicators_sign = indicators_sign
         self.idnum = int(IndicatorProcessor.count.value)
 
@@ -460,3 +473,6 @@ class IndicatorProcessor(ProcessorBase):
             _ohlcv_df, _indicators_df = self.get_ohlcv_and_indicators(start_datetime, end_datetime, index_type)
             episodes_lst.append((_ohlcv_df, _indicators_df))
         return episodes_lst
+
+    def __del__(self):
+        super().__del__()

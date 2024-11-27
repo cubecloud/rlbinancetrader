@@ -46,11 +46,13 @@ dependencies:
   - objsize
   - mplfinance>=0.12.9b7
   - pip:
+      - git+https://github.com/mementum/backtrader.git
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git
       - git+https://github.com/cubecloud/dbbinance-storage.git
       - git+https://github.com/cubecloud/ensembletools.git
       - git+https://github.com/cubecloud/backtesting_optuna.git
       - json-numpy
+      - backtrader_plotting>=2.0.0
 prefix: /home/cubecloud/anaconda3/envs/rlbinancetrader
 

@@ -1,4 +1,5 @@
 import sys
+
 sys.path.insert(0, '/home/cubecloud/Python/projects/rlbinancetrader')
 import logging
 # import datetime
@@ -31,7 +32,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.108
+__version__ = 0.112
 
 logger = logging.getLogger()
 
@@ -70,11 +71,11 @@ if __name__ == '__main__':
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
     agents_n_env = 3780
-    total_timesteps = 300_000_000
+    total_timesteps = 900_000_000
     # buffer_size = 1_500_000
-    learning_start = (3780 * 1000 * 3)
+    learning_start = (3780 * 2 * 300)
     # batch_size = 660 * agents_n_env
-    lookback_window = '6h'
+    lookback_window = '8h'
     seed = 42
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
@@ -92,6 +93,20 @@ if __name__ == '__main__':
                                  indicators_sign=True
                                  )
 
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=0.0267,
+    #                              maximum_train_size=0.031,
+    #                              minimum_test_size=0.98,
+    #                              maximum_test_size=1.0,
+    #                              test_size=0.13,
+    #                              verbose=0,
+    #                              indicators_sign=True
+    #                              )
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                                pnl_stop=-0.9,
                                verbose=0,
@@ -105,7 +120,7 @@ if __name__ == '__main__':
                                # observation_type='assets_close_indicators',
                                observation_type='lookback_assets_close_indicators_action_ret',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=3780*2,  # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=3780 * 2,  # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -115,9 +130,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               # gamma=0.995,
                                gamma=0.92,
-                               # reduced by 10 (from 0.999) to have less reward backpropagation for 15 min 24h*4 = 96 timesteps
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete',
@@ -132,7 +145,7 @@ if __name__ == '__main__':
         features_extractor_class='LSTMExtractorNN',
         features_extractor_kwargs=dict(features_dim=features_dim,
                                        activation_fn='Swish'),
-        share_features_extractor=False,      # Better to use
+        share_features_extractor=False,  # Better to use
         net_arch=[features_dim, 256, 128],
     )
 
@@ -140,13 +153,14 @@ if __name__ == '__main__':
         policy="MlpPolicy",
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
-        n_steps=200,
-        batch_size=27000,
+        n_steps=300,
+        batch_size=31500,
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
+        # clip_range_vf=0.03,
         clip_range_vf=0.2,
         learning_rate={'CoSheduller': dict(warmup=learning_start,
                                            learning_rate=4.5e-6,
@@ -172,10 +186,10 @@ if __name__ == '__main__':
             env_wrapper='labsubproc',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
-            checkpoint_num=200,
+            checkpoint_num=300,
             n_eval_episodes=50,
             log_interval=1,
-            eval_freq=200,
+            eval_freq=300,
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,
@@ -183,4 +197,3 @@ if __name__ == '__main__':
         )
 
         rllab.learn()
-

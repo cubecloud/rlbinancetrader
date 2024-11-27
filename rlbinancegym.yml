@@ -46,6 +46,7 @@ dependencies:
   - objsize
 #  - mplfinance>=0.12.9b7
   - pip:
+      - git+https://github.com/mementum/backtrader.git
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git
       - git+https://github.com/cubecloud/dbbinance-storage.git
