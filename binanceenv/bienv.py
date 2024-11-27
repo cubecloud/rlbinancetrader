@@ -1247,10 +1247,13 @@ class BinanceEnvCash(BinanceEnvBase):
                 self.reward_step += -0.001
 
         self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-        self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
         if self.gamma_return_reset:
+            self.reward_step = ((self.gamma_return / (1. + self.asset.orders.commission)) * 0.6 ** (
+                        self.timeframes_24h / self.timecount)) * self.reward_scaler
             self.gamma_return = 0.
             self.gamma_return_reset = False
+        else:
+            self.reward_step = (self.reward_step * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
         # self.reward_step = self.reward_step/(self.timecount/self.ohlcv_df.shape[0])
         self.episode_reward += self.reward_step
 
