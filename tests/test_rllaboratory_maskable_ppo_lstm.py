@@ -64,14 +64,15 @@ if __name__ == '__main__':
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
-    _end_datetime = '2024-07-30 01:00:00'
+    # _end_datetime = '2024-07-30 01:00:00'
+    _end_datetime = '2024-11-01 01:00:00'
     # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
     agents_n_env = 3780
-    total_timesteps = 900_000_000
+    total_timesteps = 600_000_000
     # buffer_size = 1_500_000
     learning_start = (3780 * 2 * 300)
     # batch_size = 660 * agents_n_env
@@ -137,7 +138,7 @@ if __name__ == '__main__':
                                # index_type='target_time',
                                index_type='prediction_time',
                                render_mode='human',
-                               reward_scaler=10
+                               reward_scaler=100
                                )
 
     features_dim = 256
@@ -160,7 +161,6 @@ if __name__ == '__main__':
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
-        # clip_range_vf=0.03,
         clip_range_vf=0.2,
         learning_rate={'CoSheduller': dict(warmup=learning_start,
                                            learning_rate=4.5e-6,
