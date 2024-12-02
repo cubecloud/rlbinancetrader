@@ -315,7 +315,11 @@ class BinanceEnvBase(gymnasium.Env):
             # if self.asset.balance.size == .0:
             #     self.asset.balance = (1e-7, 56000.)
         elif observation_type == 'assets_close_indicators':
-            space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 5)
+            if self.data_processor_kwargs.get('indicators_sign', False):
+                low = -1.0
+            else:
+                low = 0.0
+            space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 5, low=low, high=1.0)
             self.__get_obs_func = self._get_assets_close_indicators_obs
         elif observation_type == 'lookback_assets_close_indicators':
             if self.data_processor_kwargs.get('indicators_sign', False):

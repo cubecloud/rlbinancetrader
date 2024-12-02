@@ -94,20 +94,6 @@ if __name__ == '__main__':
                                  indicators_sign=True
                                  )
 
-    # data_processor_kwargs = dict(start_datetime=_start_datetime,
-    #                              end_datetime=_end_datetime,
-    #                              timeframe=_timeframe,
-    #                              discretization=_discretization,
-    #                              symbol_pair='BTCUSDT',
-    #                              market='spot',
-    #                              minimum_train_size=0.0267,
-    #                              maximum_train_size=0.031,
-    #                              minimum_test_size=0.98,
-    #                              maximum_test_size=1.0,
-    #                              test_size=0.13,
-    #                              verbose=0,
-    #                              indicators_sign=True
-    #                              )
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                                pnl_stop=-0.9,
                                verbose=0,
@@ -119,7 +105,7 @@ if __name__ == '__main__':
                                target_scale_decay=100_000,
                                # observation_type='lookback_dict',
                                # observation_type='assets_close_indicators',
-                               observation_type='lookback_assets_close_indicators_action_ret',
+                               observation_type='lookback_assets_close_indicators',
                                # observation_type='indicators_close',
                                stable_cache_data_n=3780 * 2,  # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
@@ -135,19 +121,21 @@ if __name__ == '__main__':
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete',
-                               # index_type='target_time',
-                               index_type='prediction_time',
+                               index_type='target_time',
+                               # index_type='prediction_time',
                                render_mode='human',
                                reward_scaler=10
                                )
 
-    features_dim = 256
+    features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 14 * 1.78)
+    last_features_dim = int(features_dim // 4)
     ppo_policy_kwargs = dict(
-        features_extractor_class='LSTMExtractorNN',
+        features_extractor_class='MlpExtractorNN',
         features_extractor_kwargs=dict(features_dim=features_dim,
-                                       activation_fn='Swish'),
-        share_features_extractor=False,  # Better to use
-        net_arch=[features_dim, 256, 128],
+                                       last_features_dim=last_features_dim,
+                                       activation_fn='ReLU'),
+        share_features_extractor=True,
+        net_arch=[last_features_dim, 256, 144],
     )
 
     ppo_kwargs = dict(
