@@ -866,9 +866,9 @@ class BinanceEnvBase(gymnasium.Env):
                         to_keep_ix = int(len(self.key_list) * 0.01) + 2
                         """ Creating list of keys to use data from cache """
                         self.key_list = self.key_list[:to_keep_ix]
+                        self.np_random.shuffle(self.key_list)
 
-                self.np_random.shuffle(self.key_list)
-                """ Get 1st random key to get data from cache """
+                """ Get 1st key to get data from cache """
                 self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
                 """ random start index for data from cache """
                 rnd_start = self.np_random.integers(self.timeframes_24h) if self.use_period == 'train' else 0
@@ -1244,15 +1244,18 @@ class BinanceEnvCash(BinanceEnvBase):
 
         if terminated or truncated:
             self.dones = True
-            if self.previous_pnl > 0.:
-                """ using the current pnl (as previous_pnl) """
-                self.reward_step += 0.001
-            elif self.previous_pnl <= 0.:
-                self.reward_step += -0.001
+            # if self.previous_pnl > 0.:
+            #     """ using the current pnl (as previous_pnl) """
+            #     self.reward_step += 0.001
+            # elif self.previous_pnl <= 0.:
+            #     self.reward_step += -0.001
 
         self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-        self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
+        # self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
+        self.reward_step = ((self.gamma_return / (1. + self.asset.orders.commission)) * 0.6 ** (
+                self.timeframes_24h / self.timecount)) * self.reward_scaler
         if self.gamma_return_reset:
+
             self.gamma_return = 0.
             self.gamma_return_reset = False
         # self.reward_step = self.reward_step/(self.timecount/self.ohlcv_df.shape[0])

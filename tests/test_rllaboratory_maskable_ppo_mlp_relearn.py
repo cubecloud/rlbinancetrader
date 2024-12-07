@@ -30,7 +30,7 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3011-174850/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0212-222359/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1)
     _start_datetime = '2023-07-20 01:00:00'
-    _end_datetime = '2024-11-01 01:00:00'
+    _end_datetime = '2024-11-02 01:00:00'
     _timeframe = '15m'
     _discretization = '15m'
     total_timesteps = 900_000_000

@@ -81,17 +81,19 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2411-231048/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2911-102136/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3011-174850/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0112-232354/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0112-232354/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0212-222359/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0312-120029/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename=750_000, n_tests=15, verbose=1)
     """ Sell action reward """
-    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-                            use_period='test')
-    # rllab.backtesting_agent(filename=190_512_000, render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='check',
-    #                         data_processor_kwargs=data_processor_kwargs)
+    #                         use_period='test')
+    # rllab.backtesting_agent(filename=649_782_000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    #                         use_period='test')
+    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
+                            use_period='check',
+                            data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

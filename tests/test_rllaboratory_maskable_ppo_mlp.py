@@ -32,7 +32,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.112
+__version__ = 0.115
 
 logger = logging.getLogger()
 
@@ -65,6 +65,7 @@ if __name__ == '__main__':
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
     _end_datetime = '2024-07-30 01:00:00'
+    # _end_datetime = '2024-11-01 01:00:00'
     # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
