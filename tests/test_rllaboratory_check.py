@@ -83,7 +83,8 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3011-174850/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0112-232354/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0212-222359/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0312-120029/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0312-120029/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0812-012052/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)

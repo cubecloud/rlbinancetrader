@@ -6,6 +6,7 @@ import random
 import logging
 import time
 from binascii import Error
+from datetime import datetime
 
 import gymnasium
 import numpy as np
@@ -32,10 +33,13 @@ from dbbinance.fetcher import MpCacheManager
 
 from collections import deque
 from datawizard.dataprocessor import IndicatorProcessor
+from datawizard.weightdatetime import DateTimeWeight
+
 # from datawizard.dataprocessor import Constants
 from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
+from binanceenv.scalers import minmax_normalization
 import matplotlib.pyplot as plt
 
 __version__ = 0.073
@@ -186,6 +190,11 @@ class BinanceEnvBase(gymnasium.Env):
 
         self.set_CM(self.cache_obj)
 
+        """ Add DateTimeWeight object """
+        self.dt_weight_obj = DateTimeWeight(start_datetime=data_processor_kwargs['start_datetime'],
+                                            end_datetime=data_processor_kwargs['end_datetime']
+                                            )
+
         if self.ohlcv_df is None:
             self.data_processor_obj = IndicatorProcessor(**self.data_processor_kwargs)
             self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_ohlcv_and_indicators_sample(
@@ -335,6 +344,20 @@ class BinanceEnvBase(gymnasium.Env):
             # filling deque stack
             self._warmup_func = self._lookback_warmup
 
+        elif observation_type == 'lookback_norm_assets_close_indicators':
+            if self.data_processor_kwargs.get('indicators_sign', False):
+                low = -1.0
+            else:
+                low = 0.0
+            space_obj = LookbackAssetsCloseIndicatorsSpace(low=low,
+                                                           high=1.0,
+                                                           ind_num=self.indicators_df.shape[1],
+                                                           assets_data=5,
+                                                           lookback=self.lookback_timeframes)
+            self.__get_obs_func = self._get_lookback_norm_assets_close_indicators_obs
+            # filling deque stack
+            self._warmup_func = self._lookback_warmup
+
         elif observation_type == 'lookback_assets_close_indicators_action':
             if self.data_processor_kwargs.get('indicators_sign', False):
                 low = -1.0
@@ -419,6 +442,10 @@ class BinanceEnvBase(gymnasium.Env):
         self.epsilon = 1 - self.first_epsilon
         # self.epsilon = self.eps_end + (self.eps_start - self.eps_end) * math.exp(
         #     -1. * self.total_timesteps_counter / (self.total_timesteps * self.eps_decay))
+
+    @property
+    def current_datetime(self) -> datetime:
+        return self.ohlcv_df.index[self.timecount].to_pydatetime()
 
     @property
     def price(self) -> float:
@@ -518,6 +545,24 @@ class BinanceEnvBase(gymnasium.Env):
     def _get_lookback_assets_close_indicators_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_assets_close_indicators_obs())
         return np.asarray(self.obs_lookback).astype(np.float32).flatten()
+
+    def _get_norm_assets_close_indicators_obs(self) -> np.ndarray:
+        obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
+                              [self.asset.balance.scaled_arr[0],  # balance.size
+                               self.asset.balance.cost,  # balance.cost
+                               self.asset.balance.price],  # balance.price
+                              [self.price,  # balance.scaled_cost * self.price
+                               self.price]],
+                             dtype=np.float32)
+        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
+
+    def _get_lookback_norm_assets_close_indicators_obs(self) -> np.ndarray:
+        self.obs_lookback.append(self._get_assets_close_indicators_obs())
+        obs = np.array(self.obs_lookback).astype(np.float32)
+        obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
+        obs[:, 2] = obs[:, 3] * obs[:, 1]
+        obs[:, 4] = obs[:, 4] * obs[:, 1]
+        return obs.flatten()
 
     def _get_assets_close_indicators_action_obs(self) -> np.ndarray:
         scaled_price = self.target.scaler(self.price)
@@ -1255,7 +1300,6 @@ class BinanceEnvCash(BinanceEnvBase):
         self.reward_step = ((self.gamma_return / (1. + self.asset.orders.commission)) * 0.6 ** (
                 self.timeframes_24h / self.timecount)) * self.reward_scaler
         if self.gamma_return_reset:
-
             self.gamma_return = 0.
             self.gamma_return_reset = False
         # self.reward_step = self.reward_step/(self.timecount/self.ohlcv_df.shape[0])

@@ -32,7 +32,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.115
+__version__ = 0.121
 
 logger = logging.getLogger()
 
@@ -103,10 +103,10 @@ if __name__ == '__main__':
                                target_balance=5_000.,
                                target_minimum_trade=100.,
                                target_maximum_trade=500.,
-                               target_scale_decay=100_000,
+                               target_scale_decay=200_000,
                                # observation_type='lookback_dict',
                                # observation_type='assets_close_indicators',
-                               observation_type='lookback_assets_close_indicators',
+                               observation_type='lookback_norm_assets_close_indicators',
                                # observation_type='indicators_close',
                                stable_cache_data_n=3780 * 2,  # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
