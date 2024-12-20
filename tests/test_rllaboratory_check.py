@@ -42,7 +42,7 @@ if __name__ == '__main__':
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
     # _end_datetime = '2024-07-30 01:00:00'
     # _end_datetime = '2024-11-01 01:00:00'
-    _end_datetime = '2024-11-13 01:00:00'
+    _end_datetime = '2024-12-11 01:00:00'
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -52,11 +52,11 @@ if __name__ == '__main__':
                                  market='spot',
                                  minimum_train_size=0.0267,
                                  maximum_train_size=0.031,
-                                 minimum_test_size=0.158,
-                                 maximum_test_size=0.178,
+                                 minimum_test_size=0.258,
+                                 maximum_test_size=0.278,
                                  # minimum_test_size=0.7,
                                  # maximum_test_size=0.9,
-                                 test_size=0.13,
+                                 test_size=0.05,
                                  verbose=0,
                                  indicators_sign=True
                                  )
@@ -84,7 +84,13 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0112-232354/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0212-222359/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0312-120029/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0812-012052/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0812-012052/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0912-140611/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1112-020256/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1612-220439/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1912-124618/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -92,9 +98,9 @@ if __name__ == '__main__':
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
-    # rllab.backtesting_agent(filename=649_782_000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=190_512_000, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
-    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
+    rllab.backtesting_agent(filename=281_232_000, render_mode='human', n_tests=20, verbose=1, seed=443,
                             use_period='check',
                             data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

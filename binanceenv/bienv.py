@@ -192,7 +192,9 @@ class BinanceEnvBase(gymnasium.Env):
 
         """ Add DateTimeWeight object """
         self.dt_weight_obj = DateTimeWeight(start_datetime=data_processor_kwargs['start_datetime'],
-                                            end_datetime=data_processor_kwargs['end_datetime']
+                                            end_datetime=data_processor_kwargs['end_datetime'],
+                                            start_weight=0.5,
+                                            end_weight=1.0,
                                             )
 
         if self.ohlcv_df is None:
@@ -911,13 +913,20 @@ class BinanceEnvBase(gymnasium.Env):
                         to_keep_ix = int(len(self.key_list) * 0.01) + 2
                         """ Creating list of keys to use data from cache """
                         self.key_list = self.key_list[:to_keep_ix]
-                        self.np_random.shuffle(self.key_list)
 
+                if self.use_period == 'train':
+                    self.np_random.shuffle(self.key_list)
+                    """ random start index for data from cache """
+                    rnd_start = self.np_random.integers(self.timeframes_24h)
+                else:
+                    rnd_start = 0
                 """ Get 1st key to get data from cache """
                 self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
-                """ random start index for data from cache """
-                rnd_start = self.np_random.integers(self.timeframes_24h) if self.use_period == 'train' else 0
                 self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
+                if self.use_period == 'train':
+                    # Scaling OHLC with 50% probability
+                    if 0.5 > self.np_random.uniform():
+                        self._scale_ohlc()
                 self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
                 self.key_list = self.key_list[1:]
             else:
@@ -959,6 +968,22 @@ class BinanceEnvBase(gymnasium.Env):
         self.previous_total_assets: float = self.total_assets
 
         return observation, info
+
+    def _scale_ohlc(self):
+        # Find the maximum value among all OHLC columns
+        ohlc_max_value = self.ohlcv_df[["open", "high", "low", "close"]].max().max()
+
+        # Determine the range for generating a random multiplier
+        range_max = (self.target.scale_decay - ohlc_max_value) / ohlc_max_value
+
+        if range_max <= 0.0:
+            msg = (f"Error: target_scale_decay = {self.target.scale_decay} "
+                   f"is too small for scaling with max OHLC = {ohlc_max_value}")
+            raise msg
+
+        # Apply scaling to all OHLC columns at once
+        self.ohlcv_df[["open", "high", "low", "close"]] *= (
+                self.np_random.uniform(0.8, 1.0) + self.np_random.uniform(0.0, range_max))
 
     def close(self):
         if self.verbose:
@@ -1119,6 +1144,7 @@ class BinanceEnvCash(BinanceEnvBase):
         self.previous_buy_and_hold_pnl: float = 0.
         self.last_sell_order_pnl: float = 0.
         self.previous_balance = str()
+        self.previous_datetime: Union[datetime or None] = None
         self.size_lst: list = []
         self.stop_buy_timecount = self.ohlcv_df.shape[0] - self.np_random.integers(int(self.timeframes_24h // 2),
                                                                                    self.timeframes_24h)
@@ -1280,6 +1306,8 @@ class BinanceEnvCash(BinanceEnvBase):
         self.previous_total_assets = float(self.total_assets)
         self.previous_price = self.price
         self.previous_balance = str(self.current_balance)
+        self.previous_datetime = self.current_datetime
+
         """ ----------------------------------------------- """
         self.timecount += 1
         """ ----------------------------------------------- """
@@ -1297,8 +1325,10 @@ class BinanceEnvCash(BinanceEnvBase):
 
         self.gamma_return = self.gamma_return * self.gamma + self.reward_step
         # self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
-        self.reward_step = ((self.gamma_return / (1. + self.asset.orders.commission)) * 0.6 ** (
-                self.timeframes_24h / self.timecount)) * self.reward_scaler
+        self.reward_step = ((self.gamma_return / (
+                1. + self.asset.orders.commission)) * self.dt_weight_obj.calc_weight(
+            self.previous_datetime)) * self.reward_scaler
+
         if self.gamma_return_reset:
             self.gamma_return = 0.
             self.gamma_return_reset = False

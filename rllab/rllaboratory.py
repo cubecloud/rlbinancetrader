@@ -319,7 +319,7 @@ class LabBase:
                     port = 5006
                 self.mp_test_cache_server = MpCacheManager(start_host=start_host,
                                                            port=port,
-                                                           unique_name='test')
+                                                           unique_name=env_kwargs['use_period'])
             mp_cache_server = self.mp_test_cache_server
 
         """ Get the list of episodes start - end """
@@ -856,7 +856,7 @@ class LabBase:
             if use_period == 'check':
                 eval_env_kwargs.update({'use_period': 'check',
                                         'verbose': self.verbose,
-                                        'stable_cache_data_n': self.n_eval_episodes,
+                                        'stable_cache_data_n':  n_tests,
                                         })
                 """ Fill cache and add cache_obj to kwargs """
                 eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs, test_port=5007))

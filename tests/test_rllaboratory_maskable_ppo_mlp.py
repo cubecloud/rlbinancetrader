@@ -76,7 +76,7 @@ if __name__ == '__main__':
     # buffer_size = 1_500_000
     learning_start = (3780 * 2 * 300)
     # batch_size = 660 * agents_n_env
-    lookback_window = '8h'
+    lookback_window = '10h'
     # lookback_window = '8h'
     seed = 42
 
