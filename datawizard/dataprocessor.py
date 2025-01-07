@@ -5,6 +5,8 @@ import logging
 # from numpy import unique as np_unique
 import pandas as pd
 
+from itertools import cycle
+
 from datetime import timezone, datetime
 from dateutil.relativedelta import relativedelta
 from typing import Union, List, Tuple
@@ -20,9 +22,9 @@ import multiprocessing as mp
 
 from rllab.labtools import round_up
 
-__version__ = 0.091
+__version__ = 0.094
 
-logger = logging.getLogger()
+logger = mp.get_logger()
 
 mp_count = mp.Value('i', 0)
 
@@ -33,10 +35,10 @@ class ProcessorBase:
     def __init__(self, start_datetime, end_datetime, timeframe, discretization,
                  symbol_pair='BTCUSDT',
                  market='spot',
-                 minimum_train_size: float = 0.05,
-                 maximum_train_size: float = 0.4,
-                 minimum_test_size: float = 0.15,
-                 maximum_test_size: float = 0.7,
+                 minimum_train_size: Union[float, int] = 0.05,
+                 maximum_train_size: Union[float, int] = 0.4,
+                 minimum_test_size: Union[float, int] = 0.15,
+                 maximum_test_size: Union[float, int] = 0.7,
                  test_size: float = 0.2,
                  verbose: int = 0,
                  seed=42):
@@ -108,27 +110,54 @@ class ProcessorBase:
     def initial_maximum_test_size(self):
         return self.__initial_maximum_test_size
 
-    def change_train_test_timeframes_num(self, minimum_train_size: float = 0.05, maximum_train_size: float = 0.4,
-                                         minimum_test_size: float = 0.15, maximum_test_size: float = 0.7, ):
-
+    def change_train_test_timeframes_num(self,
+                                         minimum_train_size: Union[int, float] = 0.05,
+                                         maximum_train_size: Union[int, float] = 0.4,
+                                         minimum_test_size: Union[int, float] = 0.15,
+                                         maximum_test_size: Union[int, float] = 0.7,
+                                         ):
         self.change_train_timeframes_num(minimum_train_size, maximum_train_size)
         self.change_test_timeframes_num(minimum_test_size, maximum_test_size)
 
-    def change_train_timeframes_num(self, minimum_train_size: float = 0.05, maximum_train_size: float = 0.4, ):
-        self.minimum_train_timeframes_num = int(self.train_timeframes_num * minimum_train_size)
-        self.maximum_train_timeframes_num = int(self.train_timeframes_num * maximum_train_size)
+    def change_train_timeframes_num(self,
+                                    minimum_train_size: Union[int, float] = 0.05,
+                                    maximum_train_size: Union[int, float] = 0.4,
+                                    ):
+        if isinstance(minimum_train_size, float):
+            self.minimum_train_timeframes_num = int(self.train_timeframes_num * minimum_train_size)
+        else:
+            self.minimum_train_timeframes_num = minimum_train_size
 
-        self.train_minute_timeframes_series = pd.date_range(start=self.start_datetime,
-                                                            end=self.all_period_timeframes[self.train_timeframes_num],
-                                                            freq=convert_timeframe_to_freq('1m')).to_series()
+        if isinstance(maximum_train_size, float):
+            self.maximum_train_timeframes_num = int(self.train_timeframes_num * maximum_train_size)
+        else:
+            self.maximum_train_timeframes_num = maximum_train_size
 
-    def change_test_timeframes_num(self, minimum_test_size: float = 0.15, maximum_test_size: float = 0.7, ):
-        self.minimum_test_timeframes_num = int(self.test_timeframes_num * minimum_test_size)
-        self.maximum_test_timeframes_num = int(self.test_timeframes_num * maximum_test_size)
+        self.train_minute_timeframes_series = pd.date_range(
+            start=self.start_datetime,
+            end=self.all_period_timeframes[self.train_timeframes_num],
+            freq=convert_timeframe_to_freq('1m')
+        ).to_series()
 
-        self.test_minute_timeframes_series = pd.date_range(start=self.all_period_timeframes[self.train_timeframes_num],
-                                                           end=self.end_datetime,
-                                                           freq=convert_timeframe_to_freq('1m')).to_series()
+    def change_test_timeframes_num(self,
+                                   minimum_test_size: Union[int, float] = 0.15,
+                                   maximum_test_size: Union[int, float] = 0.7,
+                                   ):
+        if isinstance(minimum_test_size, float):
+            self.minimum_test_timeframes_num = int(self.test_timeframes_num * minimum_test_size)
+        else:
+            self.minimum_test_timeframes_num = minimum_test_size
+
+        if isinstance(maximum_test_size, float):
+            self.maximum_test_timeframes_num = int(self.test_timeframes_num * maximum_test_size)
+        else:
+            self.maximum_test_timeframes_num = maximum_test_size
+
+        self.test_minute_timeframes_series = pd.date_range(
+            start=self.all_period_timeframes[self.train_timeframes_num],
+            end=self.end_datetime,
+            freq=convert_timeframe_to_freq('1m')
+        ).to_series()
 
     def get_ohlcv_df(self, _start_datetime, _end_datetime, symbol_pair, market):
         _ohlcv_df = self.fetcher.resample_to_timeframe(
@@ -195,6 +224,40 @@ class ProcessorBase:
         avg_period_len = int((minimum_timeframes_num + maximum_timeframes_num) // 2)
         return avg_period_len
 
+    @staticmethod
+    def generate_episodes(dates_range: pd.Series, min_timeframes_per_episode, max_timeframes_per_episode,
+                          num_episodes) -> list:
+        total_timeframes = len(dates_range)
+
+        episodes = set()
+
+        remaining_episodes = num_episodes
+        current_end_index = total_timeframes - 1
+
+        while remaining_episodes > 0:
+
+            # Random length of current episode
+            episode_length = random.randint(min_timeframes_per_episode, max_timeframes_per_episode)
+
+            start_index = current_end_index - episode_length
+            if start_index < 0:
+                current_end_index = total_timeframes - 1
+                continue
+
+            # checking unique tuple
+            new_episode = (dates_range.index[start_index], dates_range.index[current_end_index])
+            if new_episode not in episodes:
+                episodes.add(new_episode)
+                remaining_episodes -= 1
+
+            # setting new end_index
+            current_end_index = start_index - 1
+            if current_end_index <= 0:
+                current_end_index = total_timeframes - int(
+                    random.randint(min_timeframes_per_episode, max_timeframes_per_episode) // random.randint(1, 8))
+
+        return sorted(list(episodes))  # Creating sorted list
+
     def _prepare_episodes_start_end_lst(self, num_episodes: int, period_type: str = 'train') -> List[tuple]:
 
         def generate_shifts(num_shifts: int) -> List[int]:
@@ -228,6 +291,7 @@ class ProcessorBase:
                                                  freq=convert_timeframe_to_freq(self.timeframe)), dtype=int)
 
         shifts = generate_shifts(Constants.binsizes[self.timeframe])
+        circular_shifts = cycle(shifts)
 
         if period_type == 'train':
             minute_timeframes = self.train_minute_timeframes_series
@@ -238,87 +302,162 @@ class ProcessorBase:
             minimum_timeframes_num = self.minimum_test_timeframes_num
             maximum_timeframes_num = self.maximum_test_timeframes_num
 
-        # shifts = min(max(1, int(num_episodes // Constants.binsizes[self.timeframe])),
-        #              Constants.binsizes[self.timeframe])
-
-        finished = False
-        ix = 0
-        selected_period = get_shifted_range(shifts[ix])
-
-        """ 
-        if q-ty of current_total_timeframes (all minute shifts) greater
-        than maximum_total_timeframes_needed (all num_episodes)
-            
-        """
-        current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
-        maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
-        if current_total_timeframes > maximum_total_timeframes_needed:
-            n_shifted_episodes = min(num_episodes, int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
-            # n_shifted_episodes = selected_period.shape[0] / maximum_timeframes_num
-            # shifts = shifts[:int(round_up(num_episodes / n_shifted_episodes, 0))]
-        else:
-            n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
-
         episodes_start_end_lst: list = []
-        """ one_shift_start_end_lst to reverse each shift """
-        one_shift_start_end_lst: list = []
-        while not finished:
-            selected_period_episodes_len = int(selected_period.shape[0] / n_shifted_episodes)
 
-            if selected_period_episodes_len < maximum_timeframes_num:
-                start_offset = maximum_timeframes_num - selected_period_episodes_len
+        for shift in circular_shifts:
+            selected_period = get_shifted_range(shift)
+
+            """ 
+            if q-ty of current_total_timeframes (all minute shifts) greater
+            than maximum_total_timeframes_needed (all num_episodes)
+    
+            """
+            current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
+            maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
+            if current_total_timeframes > maximum_total_timeframes_needed:
+                n_shifted_episodes = min(num_episodes,
+                                         int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
             else:
-                start_offset = 0
+                n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
 
-            msg = (
-                f"{self.__class__.__name__}: shift = +{shifts[ix]}: {selected_period_episodes_len} < {maximum_timeframes_num} "
-                f"-> start_offset = +{start_offset}")
-            logger.info(msg)
-
-            _end_datetime = selected_period.index[-1]
-
-            for episode_ix in range(n_shifted_episodes):
-                done = False
-                _start_datetime = None
-                while not done:
-                    timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
-                    timedelta_kwargs = get_timedelta_kwargs(
-                        f'{timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
-                        current_timeframe=self.timeframe)
-                    _start_datetime = _end_datetime - relativedelta(**timedelta_kwargs)
-                    if selected_period[:_start_datetime].shape[0] >= minimum_timeframes_num:
-                        if _start_datetime >= minute_timeframes[0]:
-                            done = True
-                    else:
-                        done = True
-                one_shift_start_end_lst.append((_start_datetime, _end_datetime))
-                if selected_period[:_start_datetime].shape[0] < minimum_timeframes_num:
-                    break
-
-                if start_offset:
-                    timedelta_kwargs = get_timedelta_kwargs(
-                        f'{start_offset * Constants.binsizes[self.timeframe]}m',
-                        current_timeframe=self.timeframe)
-                    _end_datetime = _start_datetime + relativedelta(**timedelta_kwargs)
-                else:
-                    _end_datetime = _start_datetime
-
-            one_shift_start_end_lst.reverse()
-            episodes_start_end_lst.extend(one_shift_start_end_lst)
-            one_shift_start_end_lst.clear()
-            unique_episodes_counts = len(list(set(episodes_start_end_lst)))
-            if unique_episodes_counts < num_episodes:
-                selected_period = get_shifted_range(ix)
-                ix += 1
-                if ix == len(shifts):
-                    ix = 0
-                    n_shifted_episodes = num_episodes - unique_episodes_counts
-                elif ix == len(shifts) - 1:
-                    n_shifted_episodes = num_episodes - unique_episodes_counts
-            else:
-                finished = True
+            episodes_start_end_lst += self.generate_episodes(selected_period,
+                                                             minimum_timeframes_num,
+                                                             maximum_timeframes_num,
+                                                             n_shifted_episodes)
+            if len(episodes_start_end_lst) >= num_episodes:
+                episodes_start_end_lst = episodes_start_end_lst[:num_episodes]
+                break
 
         return episodes_start_end_lst
+
+    # def _prepare_episodes_start_end_lst(self, num_episodes: int, period_type: str = 'train') -> List[tuple]:
+    #
+    #     def generate_shifts(num_shifts: int) -> List[int]:
+    #         def half_list(half: List[int]) -> List[int]:
+    #             result: list = []
+    #             if len(half) <= 2:
+    #                 half.reverse()
+    #                 result.extend(half)
+    #             else:
+    #                 mid = len(half) // 2
+    #                 if mid > 0:
+    #                     result.append(half[mid])
+    #                     result.extend(half_list(list(range(half[0], half[mid]))))
+    #                     result.extend(half_list(list(range(half[mid + 1], half[-1] + 1))))
+    #             return result
+    #
+    #         shifts_lst: list = [0]
+    #         mid = num_shifts // 2
+    #         shifts_lst.append(mid)
+    #         first_half = half_list(list(range(1, mid)))
+    #         second_half = half_list(list(range(mid + 1, num_shifts)))
+    #         max_len = min(len(first_half), len(second_half))
+    #         for a, b in zip(first_half, second_half):
+    #             shifts_lst.extend([a, b])
+    #         shifts_lst.extend(first_half[max_len:])
+    #         shifts_lst.extend(second_half[max_len:])
+    #         return shifts_lst
+    #
+    #     def get_shifted_range(shifted_minute_ix):
+    #         return pd.Series(index=pd.date_range(start=minute_timeframes[shifted_minute_ix], end=minute_timeframes[-1],
+    #                                              freq=convert_timeframe_to_freq(self.timeframe)), dtype=int)
+    #
+    #     shifts = generate_shifts(Constants.binsizes[self.timeframe])
+    #     circular_shifts = cycle(shifts)
+    #
+    #     if period_type == 'train':
+    #         minute_timeframes = self.train_minute_timeframes_series
+    #         minimum_timeframes_num = self.minimum_train_timeframes_num
+    #         maximum_timeframes_num = self.maximum_train_timeframes_num
+    #         average_timeframes_num = int(self.maximum_train_timeframes_num + self.minimum_train_timeframes_num) // 2
+    #     else:
+    #         minute_timeframes = self.test_minute_timeframes_series
+    #         minimum_timeframes_num = self.minimum_test_timeframes_num
+    #         maximum_timeframes_num = self.maximum_test_timeframes_num
+    #         average_timeframes_num = int(self.maximum_train_timeframes_num + self.minimum_train_timeframes_num) // 2
+    #
+    #         # shifts = min(max(1, int(num_episodes // Constants.binsizes[self.timeframe])),
+    #         #              Constants.binsizes[self.timeframe])
+    #
+    #     finished = False
+    #     ix = 0
+    #     selected_period = get_shifted_range(shifts[ix])
+    #
+    #     """
+    #     if q-ty of current_total_timeframes (all minute shifts) greater
+    #     than maximum_total_timeframes_needed (all num_episodes)
+    #
+    #     """
+    #     current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
+    #     maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
+    #     if current_total_timeframes > maximum_total_timeframes_needed:
+    #         n_shifted_episodes = min(num_episodes,
+    #                                  int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
+    #     # n_shifted_episodes = selected_period.shape[0] / maximum_timeframes_num
+    #     # shifts = shifts[:int(round_up(num_episodes / n_shifted_episodes, 0))]
+    #     else:
+    #         n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
+    #
+    #     episodes_start_end_lst: list = []
+    #     """ one_shift_start_end_lst to reverse each shift """
+    #     one_shift_start_end_lst: list = []
+    #     while not finished:
+    #         selected_period_episodes_len = int(selected_period.shape[0] / n_shifted_episodes)
+    #
+    #         if selected_period_episodes_len < maximum_timeframes_num:
+    #             start_offset = maximum_timeframes_num - selected_period_episodes_len
+    #         else:
+    #             start_offset = 0
+    #
+    #         msg = (
+    #             f"{self.__class__.__name__} #{self.idnum}: shift = +{shifts[ix]}: {selected_period_episodes_len} < {maximum_timeframes_num} "
+    #             f"-> start_offset = +{start_offset}")
+    #         logger.info(msg)
+    #
+    #         _end_datetime = selected_period.index[-1]
+    #
+    #         for episode_ix in range(n_shifted_episodes):
+    #             done = False
+    #             _start_datetime = None
+    #             while not done:
+    #                 timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
+    #                 timedelta_kwargs = get_timedelta_kwargs(
+    #                     f'{timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
+    #                     current_timeframe=self.timeframe)
+    #                 _start_datetime = _end_datetime - relativedelta(**timedelta_kwargs)
+    #                 if selected_period[:_start_datetime].shape[0] >= minimum_timeframes_num:
+    #                     if _start_datetime >= minute_timeframes[0]:
+    #                         done = True
+    #                 else:
+    #                     done = True
+    #             one_shift_start_end_lst.append((_start_datetime, _end_datetime))
+    #             if selected_period[:_start_datetime].shape[0] < minimum_timeframes_num:
+    #                 break
+    #
+    #             if start_offset:
+    #                 timedelta_kwargs = get_timedelta_kwargs(
+    #                     f'{start_offset * Constants.binsizes[self.timeframe]}m',
+    #                     current_timeframe=self.timeframe)
+    #                 _end_datetime = _start_datetime + relativedelta(**timedelta_kwargs)
+    #             else:
+    #                 _end_datetime = _start_datetime
+    #
+    #         one_shift_start_end_lst.reverse()
+    #         episodes_start_end_lst.extend(one_shift_start_end_lst)
+    #         one_shift_start_end_lst.clear()
+    #         unique_episodes_counts = len(list(set(episodes_start_end_lst)))
+    #         if unique_episodes_counts < num_episodes:
+    #             selected_period = get_shifted_range(ix)
+    #             ix += 1
+    #             if ix == len(shifts):
+    #                 ix = 0
+    #                 n_shifted_episodes = num_episodes - unique_episodes_counts
+    #             elif ix == len(shifts) - 1:
+    #                 n_shifted_episodes = num_episodes - unique_episodes_counts
+    #         else:
+    #             finished = True
+    #
+    #     return episodes_start_end_lst
 
     def prepare_n_episodes_lst(self, period_type='train', n_episodes: Union[str, int] = 'auto'):
         if period_type == 'train':
@@ -341,9 +480,21 @@ class ProcessorBase:
     def get_random_ohlcv_df(self):
         start_datetime, end_datetime = self._get_random_period()
         logger.debug(
-            f"{self.__class__.__name__}: Get OHLCV data with start_datetime - end_datetime': {start_datetime} - {end_datetime}")
+            f"{self.__class__.__name__} #{self.idnum}: Get OHLCV data with start_datetime - end_datetime: {start_datetime} - {end_datetime}")
         _ohlcv_df = self.get_ohlcv_df(start_datetime, end_datetime, symbol_pair=self.symbol_pair, market=self.market)
         return _ohlcv_df
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        ProcessorBase.count = mp_count
+        with ProcessorBase.count.get_lock():
+            ProcessorBase.count.value += 1
+        self.idnum = int(ProcessorBase.count.value)
+        self.fetcher = get_datafetcher()
 
     def __del__(self):
         with ProcessorBase.count.get_lock():
@@ -351,9 +502,16 @@ class ProcessorBase:
 
 
 class IndicatorProcessor(ProcessorBase):
-    def __init__(self, start_datetime, end_datetime, timeframe, discretization, symbol_pair='BTCUSDT', market='spot',
-                 minimum_train_size: float = 0.05, maximum_train_size: float = 0.4, minimum_test_size: float = 0.15,
-                 maximum_test_size: float = 0.7, test_size: float = 0.2, verbose: int = 0, seed=42,
+    def __init__(self, start_datetime, end_datetime, timeframe, discretization,
+                 symbol_pair='BTCUSDT',
+                 market='spot',
+                 minimum_train_size: Union[float, int] = 0.05,
+                 maximum_train_size: Union[float, int] = 0.4,
+                 minimum_test_size: Union[float, int] = 0.15,
+                 maximum_test_size: Union[float, int] = 0.7,
+                 test_size: float = 0.2,
+                 verbose: int = 0,
+                 seed=42,
                  indicators_sign=False):
         super().__init__(start_datetime, end_datetime, timeframe, discretization, symbol_pair, market,
                          minimum_train_size, maximum_train_size, minimum_test_size, maximum_test_size, test_size,
@@ -362,11 +520,11 @@ class IndicatorProcessor(ProcessorBase):
         self.indicators_sign = indicators_sign
         self.idnum = int(IndicatorProcessor.count.value)
 
-        logger.debug(f"{self.__class__.__name__} {self.idnum}: Initialize LoadDbIndicators...")
+        logger.debug(f"{self.__class__.__name__} #{self.idnum}: Initialize LoadDbIndicators...")
 
         self.loaded_indicators = LoadDbIndicators(self.start_datetime,
                                                   self.end_datetime,
-                                                  symbol_pairs=[symbol_pair, ],
+                                                  symbol_pairs=[self.symbol_pair, ],
                                                   market='spot',
                                                   timeframe=self.timeframe,
                                                   discretization=self.discretization,
@@ -381,10 +539,10 @@ class IndicatorProcessor(ProcessorBase):
         return _ohlcv_df, _indicators_df
 
     def get_indicators_df(self, _start_datetime, _end_datetime, index_type='target_time'):
-        logger.debug(f"{self.__class__.__name__}: Set new period': {_start_datetime} - {_end_datetime}")
+        logger.debug(f"{self.__class__.__name__} #{self.idnum}: Set new period': {_start_datetime} - {_end_datetime}")
         self.loaded_indicators.set_new_period(_start_datetime, _end_datetime, index_type)
         logger.debug(
-            f"\n{self.__class__.__name__}: Get indicator_df with start_datetime - end_datetime: {_start_datetime} - {_end_datetime}\n")
+            f"\n{self.__class__.__name__} #{self.idnum}: Get indicator_df with start_datetime - end_datetime: {_start_datetime} - {_end_datetime}\n")
         _indicators_df = self.loaded_indicators.get_data_df(index_type)
         if self.indicators_sign:
             for col_name in _indicators_df.columns:
@@ -395,30 +553,35 @@ class IndicatorProcessor(ProcessorBase):
     def check_cache(self, index_type):
         if not self.initialized_full_period:
             logger.debug(
-                f"{self.__class__.__name__}: Preload indicator data for full period, "
-                f"start_datetime - end_datetime': {self.start_datetime} - {self.end_datetime}\n")
+                f"{self.__class__.__name__} #{self.idnum}: Preload indicator data for full period, "
+                f"start_datetime - end_datetime: {self.start_datetime} - {self.end_datetime}\n")
             _ = self.get_indicators_df(self.start_datetime, self.end_datetime, index_type=index_type)
             self.initialized_full_period = True
 
     def get_ohlcv_and_indicators(self, start_datetime, end_datetime, index_type='target_time'):
+        self.check_cache(index_type)
         logger.debug(
-            f"\n{self.__class__.__name__}: Get OHLCV data with start_datetime - end_datetime: {start_datetime} - {end_datetime}")
+            f"\n{self.__class__.__name__} #{self.idnum}: Get OHLCV data with start_datetime - end_datetime: {start_datetime} - {end_datetime}")
         _ohlcv_df = self.get_ohlcv_df(start_datetime, end_datetime, symbol_pair=self.symbol_pair, market=self.market)
         logger.debug(
-            f"{self.__class__.__name__}: load indicator data with start_datetime - end_datetime: {start_datetime} - {end_datetime}\n")
+            f"{self.__class__.__name__} #{self.idnum}: load indicator data with start_datetime - end_datetime: {start_datetime} - {end_datetime}\n")
         _indicators_df = self.get_indicators_df(start_datetime, end_datetime, index_type=index_type)
 
         if _ohlcv_df.shape[0] != _indicators_df.shape[0]:
             logger.debug(
-                f"{self.__class__.__name__}: ohlcv_df.shape = {_ohlcv_df.shape}, indicators_df.shape = {_indicators_df.shape}")
+                f"{self.__class__.__name__} #{self.idnum}: ohlcv_df.shape = {_ohlcv_df.shape}, indicators_df.shape = {_indicators_df.shape}")
 
-            logger.debug(f"{self.__class__.__name__}: OHLCV.shape: \n{_ohlcv_df.shape}")
-            logger.debug(f"{self.__class__.__name__}: OHLCV data head: \n{_ohlcv_df.head(5).to_string()}\n")
-            logger.debug(f"{self.__class__.__name__}: OHLCV data tail: \n{_ohlcv_df.tail(5).to_string()}\n")
+            logger.debug(f"{self.__class__.__name__} #{self.idnum}: OHLCV.shape: \n{_ohlcv_df.shape}")
+            logger.debug(
+                f"{self.__class__.__name__} #{self.idnum}: OHLCV data head: \n{_ohlcv_df.head(5).to_string()}\n")
+            logger.debug(
+                f"{self.__class__.__name__} #{self.idnum}: OHLCV data tail: \n{_ohlcv_df.tail(5).to_string()}\n")
 
-            logger.debug(f"{self.__class__.__name__}: Indicators.shape: \n{_indicators_df.shape}")
-            logger.debug(f"{self.__class__.__name__}: Indicators data head: \n{_indicators_df.head(5).to_string()}\n")
-            logger.debug(f"{self.__class__.__name__}: Indicators data tail: \n{_indicators_df.tail(5).to_string()}\n")
+            logger.debug(f"{self.__class__.__name__} #{self.idnum}: Indicators.shape: \n{_indicators_df.shape}")
+            logger.debug(
+                f"{self.__class__.__name__} #{self.idnum}: Indicators data head: \n{_indicators_df.head(5).to_string()}\n")
+            logger.debug(
+                f"{self.__class__.__name__} #{self.idnum}: Indicators data tail: \n{_indicators_df.tail(5).to_string()}\n")
 
             sys.exit('Error: Check data_processor, length of data is not equal!')
 
@@ -429,7 +592,7 @@ class IndicatorProcessor(ProcessorBase):
     def get_random_ohlcv_and_indicators(self, index_type='target_time', period_type='train'):
         self.check_cache(index_type)
 
-        msg = f"{self.__class__.__name__}: {period_type.upper()} pool timeframes: "
+        msg = f"{self.__class__.__name__} #{self.idnum}: {period_type.upper()} pool timeframes: "
         if period_type == 'train':
             msg = (f"{msg} {self.train_timeframes_num}, "
                    f"Pool period: {self.train_minute_timeframes_series[0]} - {self.train_minute_timeframes_series[-1]}")
@@ -457,7 +620,7 @@ class IndicatorProcessor(ProcessorBase):
                                             n_episodes: Union[str, int] = 'auto'):
 
         episodes_lst: list = []
-        msg = f"{self.__class__.__name__}: {period_type.upper()} pool timeframes: "
+        msg = f"{self.__class__.__name__} #{self.idnum}: {period_type.upper()} pool timeframes: "
         if period_type == 'train':
             msg = (f"{msg} {self.train_timeframes_num}, "
                    f"Pool period: {self.train_minute_timeframes_series[0]} - {self.train_minute_timeframes_series[-1]}")
@@ -468,11 +631,31 @@ class IndicatorProcessor(ProcessorBase):
 
         start_end_episodes_lst = self.get_n_episodes_start_end_lst(index_type, period_type, n_episodes)
         for (start_datetime, end_datetime) in start_end_episodes_lst:
-            msg = f"{self.__class__.__name__}: period: {start_datetime} - {end_datetime}"
+            msg = f"{self.__class__.__name__} #{self.idnum}: period: {start_datetime} - {end_datetime}"
             logger.debug(msg)
             _ohlcv_df, _indicators_df = self.get_ohlcv_and_indicators(start_datetime, end_datetime, index_type)
             episodes_lst.append((_ohlcv_df, _indicators_df))
         return episodes_lst
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        ProcessorBase.count = mp_count
+        with ProcessorBase.count.get_lock():
+            ProcessorBase.count.value += 1
+        self.idnum = int(ProcessorBase.count.value)
+        self.fetcher = get_datafetcher()
+        self.initialized_full_period = False
+        self.loaded_indicators = LoadDbIndicators(self.start_datetime,
+                                                  self.end_datetime,
+                                                  symbol_pairs=[self.symbol_pair, ],
+                                                  market='spot',
+                                                  timeframe=self.timeframe,
+                                                  discretization=self.discretization,
+                                                  )
 
     def __del__(self):
         super().__del__()

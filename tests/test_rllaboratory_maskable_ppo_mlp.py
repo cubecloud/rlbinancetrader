@@ -2,14 +2,14 @@ import sys
 
 sys.path.insert(0, '/home/cubecloud/Python/projects/rlbinancetrader')
 import logging
-# import datetime
+import datetime
 # import gc
 import numpy as np
 from dbbinance.fetcher.datautils import get_timeframe_bins
 # from dateutil.relativedelta import relativedelta
 # from dbbinance.fetcher.datautils import get_timedelta_kwargs
 # from dbbinance.fetcher.datafetcher import ceil_time, floor_time
-# from dbbinance.fetcher.constants import Constants
+from dbbinance.fetcher.constants import Constants
 #
 # from stable_baselines3 import HerReplayBuffer
 # from stable_baselines3.her.goal_selection_strategy import GoalSelectionStrategy
@@ -27,23 +27,27 @@ from binanceenv.bienv import BinanceEnvCash
 from customnn.mlpextractor import MlpExtractorNN
 from rllab.rllaboratory import LabBase
 # from rllab.labcosheduller import CoSheduller
+
 from multiprocessing import freeze_support
+from multiprocessing import get_logger
+# import multiprocessing as mp
 import warnings
 
 # import torch
 
-__version__ = 0.121
+__version__ = 0.134
 
-logger = logging.getLogger()
+logger = get_logger()
+# logger = logging.getLogger()
 
 if __name__ == '__main__':
     freeze_support()
 
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     file_handler = logging.FileHandler('test_rllab_mask_ppo.log')
     file_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
@@ -60,23 +64,26 @@ if __name__ == '__main__':
     _gap_period = '5d'
 
     # _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
+    # _start_datetime = '2022-12-26 23:00:00'
+    # _start_datetime = '2023-12-31 23:00:00'
     _start_datetime = '2023-07-20 01:00:00'
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
-    _end_datetime = '2024-07-30 01:00:00'
-    # _end_datetime = '2024-11-01 01:00:00'
+    # _end_datetime = '2024-07-30 01:00:00'
+    # _end_datetime = '2024-11-20 01:00:00'
+    _end_datetime = '2024-12-10 01:00:00'
     # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
 
     agents_n_env = 3780
-    total_timesteps = 900_000_000
+    total_timesteps = 1_200_000_000
     # buffer_size = 1_500_000
-    learning_start = (3780 * 2 * 300)
+    learning_start = (3780 * 2 * 200)
     # batch_size = 660 * agents_n_env
-    lookback_window = '10h'
+    lookback_window = '8h'
     # lookback_window = '8h'
     seed = 42
 
@@ -86,14 +93,29 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.0267,
-                                 maximum_train_size=0.031,
-                                 minimum_test_size=0.168,
-                                 maximum_test_size=0.188,
+                                 minimum_train_size=400,
+                                 maximum_train_size=500,
+                                 minimum_test_size=400,
+                                 maximum_test_size=500,
                                  test_size=0.13,
-                                 verbose=0,
+                                 verbose=1,
                                  indicators_sign=True
                                  )
+
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=0.0267,
+    #                              maximum_train_size=0.031,
+    #                              minimum_test_size=0.168,
+    #                              maximum_test_size=0.188,
+    #                              test_size=0.13,
+    #                              verbose=0,
+    #                              indicators_sign=True
+    #                              )
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
                                pnl_stop=-0.9,
@@ -105,10 +127,10 @@ if __name__ == '__main__':
                                target_maximum_trade=500.,
                                target_scale_decay=200_000,
                                # observation_type='lookback_dict',
-                               # observation_type='assets_close_indicators',
+                               # observation_type='assets_close_i0.188ndicators',
                                observation_type='lookback_norm_assets_close_indicators',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=3780 * 2,  # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=15000,        # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -118,7 +140,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.92,
+                               gamma=0.922,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete',
@@ -143,14 +165,13 @@ if __name__ == '__main__':
         policy="MlpPolicy",
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
-        n_steps=300,
-        batch_size=31500,
+        n_steps=200,
+        batch_size=36000,
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
-        # clip_range_vf=0.03,
         clip_range_vf=0.2,
         learning_rate={'CoSheduller': dict(warmup=learning_start,
                                            learning_rate=4.5e-6,
@@ -159,7 +180,7 @@ if __name__ == '__main__':
                                            epsilon=1)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.92,
+        gamma=0.922,
         device='auto',
         seed=seed,
         verbose=1)
@@ -176,10 +197,10 @@ if __name__ == '__main__':
             env_wrapper='labsubproc',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
-            checkpoint_num=300,
+            checkpoint_num=200,
             n_eval_episodes=50,
             log_interval=1,
-            eval_freq=300,
+            eval_freq=200,
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,

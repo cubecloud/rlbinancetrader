@@ -3,19 +3,9 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Box
 from rllab.labtools import deserialize_kwargs
+from customnn.nnserializerdata import nn_serializer
 
-
-# Swish Function
-class Swish(nn.Module):
-    def forward(self, x):
-        return x * torch.sigmoid(x)
-
-
-nn_serializer: dict = {'ReLU': nn.ReLU,
-                       'LeakyReLU': nn.LeakyReLU,
-                       'Tanh': nn.Tanh,
-                       'Swish': Swish
-                       }
+__version__ = 0.003
 
 
 class MlpExtractorNN(BaseFeaturesExtractor):
@@ -29,6 +19,7 @@ class MlpExtractorNN(BaseFeaturesExtractor):
     def __init__(self, observation_space: Box, features_dim: int = 256, last_features_dim: int = 256,
                  activation_fn='LeakyReLU'):
         super().__init__(observation_space, features_dim)
+        print(f'Input features = {features_dim}')
         self._features_dim = last_features_dim
         self.activation_fn = deserialize_kwargs(activation_fn, lab_serializer=nn_serializer)
         self.mlp_extractor = nn.Sequential(

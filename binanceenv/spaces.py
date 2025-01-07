@@ -5,13 +5,9 @@ from numba import jit
 from typing import Tuple, Union, Dict
 from gymnasium import spaces
 from dbbinance.fetcher.datautils import minmax_normalization_1_1
+from binanceenv.actionspace import actions_dict, actions_4_dict
 
-__version__ = 0.009
-
-actions_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2}
-actions_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold"}
-actions_4_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2, "Close": 3}
-actions_4_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold", 3: 'Close'}
+__version__ = 0.011
 
 
 class IndicatorsSpace:

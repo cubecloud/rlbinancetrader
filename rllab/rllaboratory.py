@@ -19,7 +19,8 @@ from binanceenv import BinanceEnvCash, BinanceEnvBase
 from binanceenv.cache import CacheManager
 from binanceenv.cache import cache_manager_obj
 from binanceenv.cache import eval_cache_manager_obj
-from dbbinance.fetcher import MpCacheManager
+# from dbbinance.fetcher import MpCacheManager
+from dbbinance.fetcher import PERCacheManager
 
 from stable_baselines3.common.env_checker import check_env
 # from stable_baselines3.common.callbacks import EvalCallback
@@ -48,7 +49,7 @@ from rllab import LabSubprocVecEnv
 from rllab.labmaskevaluation import lab_mask_evaluate_policy
 from rllab.labtools import deserialize_kwargs, round_up, get_base_env
 from rllab.labserializer import lab_serializer
-
+from rllab.labfillcache import worker_fill_cache
 from datawizard.dataprocessor import IndicatorProcessor
 
 from sb3_contrib import MaskablePPO, TRPO
@@ -61,7 +62,8 @@ __version__ = 0.049
 
 TZ = timezone('Europe/Moscow')
 
-logger = logging.getLogger()
+# logger = logging.getLogger()
+logger = mp.get_logger()
 
 
 # ACTION_NOISE: dict = {'ornstein_uhlenbeck': OrnsteinUhlenbeckActionNoise, 'normal': NormalActionNoise}
@@ -227,8 +229,8 @@ class LabBase:
         self.cache_manager: CacheManager = cache_manager_obj
         self.eval_cache_manager: CacheManager = eval_cache_manager_obj
         self.data_processor_obj = None
-        self.mp_train_cache_server: Union[MpCacheManager, None] = None
-        self.mp_test_cache_server: Union[MpCacheManager, None] = None
+        self.mp_train_cache_server: Union[PERCacheManager, None] = None
+        self.mp_test_cache_server: Union[PERCacheManager, None] = None
         # self.init_agents()
 
     def update_agent_kwargs(self, agent_kwargs):
@@ -262,39 +264,41 @@ class LabBase:
     #     env = env_cls(**env_kwargs)
     #     return env
 
-    @staticmethod
-    def fill_cache(data_processor_obj: Union[IndicatorProcessor],
-                   cache_obj: Union[MpCacheManager],
-                   env_kwargs: dict,
-                   ep_start_end_lst: list):
-
-        def get_new_ohlcv_and_indicators(start_datetime,
-                                         end_datetime,
-                                         index_type: str = 'target_time'):
-
-            _ohlcv_df, _indicators_df = data_processor_obj.get_ohlcv_and_indicators(start_datetime=start_datetime,
-                                                                                    end_datetime=end_datetime,
-                                                                                    index_type=index_type)
-
-            if _ohlcv_df.shape[0] != _indicators_df.shape[0]:
-                msg = (f"{__name__}: ohlcv_df.shape = {_ohlcv_df.shape}, "
-                       f"indicators_df.shape = {_indicators_df.shape}")
-                logger.debug(msg)
-                sys.exit('Error: Check data_processor, length of data is not equal!')
-            return _ohlcv_df, _indicators_df
-
-        for (_start, _end) in ep_start_end_lst:
-            ohlcv_df, indicators_df = get_new_ohlcv_and_indicators(_start,
-                                                                   _end,
-                                                                   index_type=env_kwargs['index_type'])
-            cm_key = tuple((ohlcv_df.index[0], ohlcv_df.index[-1]))
-            cache_obj.update_cache(key=cm_key, value=(ohlcv_df, indicators_df))
-            # print(f'#{len(cache_obj.keys())} - {cm_key}')
+    # @staticmethod
+    # def fill_cache(data_processor_obj: Union[IndicatorProcessor],
+    #                cache_obj: Union[MpCacheManager],
+    #                env_kwargs: dict,
+    #                ep_start_end_lst: list):
+    #
+    #     def get_new_ohlcv_and_indicators(start_datetime,
+    #                                      end_datetime,
+    #                                      index_type: str = 'target_time'):
+    #
+    #         _ohlcv_df, _indicators_df = data_processor_obj.get_ohlcv_and_indicators(start_datetime=start_datetime,
+    #                                                                                 end_datetime=end_datetime,
+    #                                                                                 index_type=index_type)
+    #
+    #         if _ohlcv_df.shape[0] != _indicators_df.shape[0]:
+    #             msg = (f"{__name__}: ohlcv_df.shape = {_ohlcv_df.shape}, "
+    #                    f"indicators_df.shape = {_indicators_df.shape}")
+    #             logger.debug(msg)
+    #             sys.exit('Error: Check data_processor, length of data is not equal!')
+    #         return _ohlcv_df, _indicators_df
+    #
+    #     for (_start, _end) in ep_start_end_lst:
+    #         ohlcv_df, indicators_df = get_new_ohlcv_and_indicators(_start,
+    #                                                                _end,
+    #                                                                index_type=env_kwargs['index_type'])
+    #         if tuple((_start, _end)) != tuple((ohlcv_df.index[0], ohlcv_df.index[-1])):
+    #             raise f"Error: ({_start}, {_end} != ({ohlcv_df.index[0]}, {ohlcv_df.index[-1]})"
+    #         cm_key = tuple((ohlcv_df.index[0], ohlcv_df.index[-1]))
+    #         cache_obj.update_cache(key=cm_key, value=(ohlcv_df, indicators_df))
+    #         # print(f'#{len(cache_obj.keys())} - {cm_key}')
 
     def mp_fill_cache(self, env_kwargs: dict, n_envs: Union[str, int] = 'auto', seed: int = 42,
                       port: Union[int, None] = None, start_host: bool = True):
 
-        def pbar_updater(cache_obj: Union[MpCacheManager], ):
+        def pbar_updater(cache_obj: Union[PERCacheManager], ):
             pbar = tqdm(total=env_kwargs['stable_cache_data_n'])
             sl_time = 1.3
             while pbar.n < env_kwargs['stable_cache_data_n']:
@@ -308,18 +312,18 @@ class LabBase:
             if self.mp_train_cache_server is None:
                 if port is None:
                     port = 5005
-                self.mp_train_cache_server = MpCacheManager(max_memory_gb=3,
-                                                            start_host=start_host,
-                                                            port=port,
-                                                            unique_name='train')
+                self.mp_train_cache_server = PERCacheManager(max_memory_gb=6,
+                                                             start_host=start_host,
+                                                             port=port,
+                                                             unique_name='train')
             mp_cache_server = self.mp_train_cache_server
         else:
             if self.mp_test_cache_server is None:
                 if port is None:
                     port = 5006
-                self.mp_test_cache_server = MpCacheManager(start_host=start_host,
-                                                           port=port,
-                                                           unique_name=env_kwargs['use_period'])
+                self.mp_test_cache_server = PERCacheManager(start_host=start_host,
+                                                            port=port,
+                                                            unique_name=env_kwargs['use_period'])
             mp_cache_server = self.mp_test_cache_server
 
         """ Get the list of episodes start - end """
@@ -328,29 +332,26 @@ class LabBase:
         episodes_start_end_lst = dp_obj.get_n_episodes_start_end_lst(index_type=env_kwargs['index_type'],
                                                                      period_type=env_kwargs['use_period'],
                                                                      n_episodes=env_kwargs['stable_cache_data_n'])
-        logger.info(
-            f'{self.__class__.__name__}: start-end list contains: #{len(episodes_start_end_lst)}')
+
+        logger.info(f'{self.__class__.__name__}: start-end list contains: #{len(episodes_start_end_lst)}')
+
+        min_start = min(episodes_start_end_lst, key=lambda x: x[0])[0]
+        max_end = max(episodes_start_end_lst, key=lambda x: x[1])[1]
+
+        logger.info(f'{self.__class__.__name__}: min_start / max_end {min_start}/{max_end}')
 
         if n_envs == 'auto':
             n_envs = min(len(episodes_start_end_lst), mp.cpu_count() - 1 or 1)
 
-        env_start_end_lst: list = []
-
-        n_episodes_per_env = int(round_up(max(1., len(episodes_start_end_lst) / n_envs), 0))
-        indices = np.arange(0, len(episodes_start_end_lst) + 1, n_episodes_per_env)
-        for idx in indices:
-            ep_start_end = episodes_start_end_lst[idx: min(idx + n_episodes_per_env, len(episodes_start_end_lst) + 1)]
-            env_start_end_lst.append(ep_start_end)
+        env_start_end_lst = np.array_split(np.array(episodes_start_end_lst), n_envs)
         """ Get the list of episodes start - end """
 
         job_lst: list = []
         for ix, start_end_lst in zip(range(len(env_start_end_lst)), env_start_end_lst):
-            job_lst.append(mp.Process(target=LabBase.fill_cache,
-                                      args=(dp_obj,
-                                            mp_cache_server,
-                                            env_kwargs,
-                                            start_end_lst)))
-            job_lst[ix].start()
+            job_lst.append(mp.Process(target=worker_fill_cache,
+                                      args=(dp_obj, mp_cache_server, env_kwargs, start_end_lst),
+                                      name=f'fillcache_{ix}'))
+            job_lst[-1].start()
 
         job_lst.append(mp.Process(target=pbar_updater, args=(mp_cache_server,), name=f'pbar'))
         job_lst[-1].start()
@@ -373,12 +374,13 @@ class LabBase:
         else:
             port = check_port
 
-        if not MpCacheManager.is_server_running(port=port):
+        if not PERCacheManager.is_server_running(port=port):
             start_host = True
             mp_cache_server = self.mp_fill_cache(env_kwargs, port=port)
         else:
             start_host = False
-            mp_cache_server = MpCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
+            mp_cache_server = PERCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
+
         if env_wrapper == 'dummy':
             update_dict = {}
             if env_kwargs['use_period'] == 'train':
@@ -405,6 +407,7 @@ class LabBase:
 
         elif self.env_wrapper == 'subproc':
             update_dict = dict({'cache_obj': 'MpCacheManager'})
+
         elif self.env_wrapper == 'labsubproc':
             update_dict = dict({'cache_obj': 'MpCacheManager'})
         else:
@@ -850,18 +853,22 @@ class LabBase:
                                 'stable_cache_data_n': n_tests,
                                 'render_mode': render_mode})
 
+        # self.env_wrapper = 'dummy'
+
         if data_processor_kwargs is not None:
             eval_env_kwargs['data_processor_kwargs'].update({'seed': seed})
             eval_env_kwargs['data_processor_kwargs'].update(data_processor_kwargs)
             if use_period == 'check':
                 eval_env_kwargs.update({'use_period': 'check',
                                         'verbose': self.verbose,
-                                        'stable_cache_data_n':  n_tests,
+                                        'stable_cache_data_n': n_tests,
                                         })
                 """ Fill cache and add cache_obj to kwargs """
                 eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs, test_port=5007))
         else:
             eval_env_kwargs['data_processor_kwargs'].update({'seed': seed})
+
+        self.env_wrapper_cls = env_wrapper_dict.get(self.env_wrapper, DummyVecEnv)
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=1,

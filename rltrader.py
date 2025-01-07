@@ -13,7 +13,7 @@ from dbbinance.fetcher.datafetcher import floor_time
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3 import A2C
 
-from binanceenv.bienv import BinanceEnv
+# from binanceenv.bienv import BinanceEnvBase
 
 __version__ = 0.031
 

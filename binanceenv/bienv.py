@@ -1,4 +1,4 @@
-import multiprocessing
+# import multiprocessing
 import sys
 import math
 import copy
@@ -29,7 +29,8 @@ from dbbinance.fetcher.datautils import get_nearest_timeframe
 from dbbinance.fetcher.slocks import SThLock, SMpLock
 
 import multiprocessing as mp
-from dbbinance.fetcher import MpCacheManager
+# from dbbinance.fetcher import MpCacheManager
+from dbbinance.fetcher import PERCacheManager
 
 from collections import deque
 from datawizard.dataprocessor import IndicatorProcessor
@@ -40,11 +41,16 @@ from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
 from binanceenv.scalers import minmax_normalization
+from binanceenv.actionspace import actions_reversed_dict, actions_4_reversed_dict
+
+from rllab.rlbacktest import rlbacktest
+from rllab.rlstrategy import RLActionStrategy
+
 import matplotlib.pyplot as plt
 
-__version__ = 0.073
+__version__ = 0.078
 
-logger = logging.getLogger()
+logger = mp.get_logger()
 
 
 @jit(nopython=True)
@@ -100,7 +106,7 @@ class BinanceEnvBase(gymnasium.Env):
                  eps_end: float = 0.01,
                  eps_decay: float = 0.2,
                  gamma: float = 0.99,
-                 cache_obj: Union[CacheManager, None] = None,
+                 cache_obj: Union[CacheManager, PERCacheManager, None] = None,
                  render_mode=None,
                  index_type: str = 'target_time',
                  deterministic: bool = True,
@@ -178,7 +184,7 @@ class BinanceEnvBase(gymnasium.Env):
 
         timedelta = get_nearest_timeframe(
             self.lookback_timeframes * get_timeframe_bins(self.data_processor_kwargs['timeframe']) + get_timeframe_bins(
-                '2d'))
+                '7d'))
 
         self.__get_obs_func = None
         self._take_action_func = None
@@ -186,8 +192,10 @@ class BinanceEnvBase(gymnasium.Env):
         self.CM = None
         self.cache_obj = cache_obj
         self.data_processor_obj = None
+        self.current_key = None
         self.eval_reuse_prob = eval_reuse_prob
 
+        """ Init CacheManager and setting 1st ohlcv and indicators if cache already filled """
         self.set_CM(self.cache_obj)
 
         """ Add DateTimeWeight object """
@@ -239,9 +247,10 @@ class BinanceEnvBase(gymnasium.Env):
         self.render_path_filename = None
         self.render_mode = render_mode
 
-        self.render_df: pd.DataFrame = pd.DataFrame(index=self.ohlcv_df.index,
-                                                    data=0.,
-                                                    columns=['price', 'action', 'amount', 'pnl', 'total'])
+        self.render_df = pd.DataFrame(index=self.ohlcv_df.index,
+                                      data=0.,
+                                      columns=['open', 'high', 'low', 'close', 'volume', 'action', 'amount', 'pnl',
+                                               'total'])
         self.last_render_df: Union[pd.DataFrame, None] = None
         # if self.render_mode is not None:
         #     self.set_render_df()
@@ -255,10 +264,11 @@ class BinanceEnvBase(gymnasium.Env):
     def set_CM(self, cache_obj):
         def get_ohlcv_and_indicators():
             """ Creating the list of cache data from probs dict with 3 values """
-            self.key_list = list(self.CM.hits_probs().keys())[:3]
+            self.key_list = list(self.CM.hits_probs().keys())
             self.np_random.shuffle(self.key_list)
-            self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
-            self.key_list = self.key_list[1:]
+            self.current_key = self.key_list[0]
+            self.ohlcv_df, self.indicators_df = self.CM.get(self.current_key)
+            self.key_list = self.key_list[1:self.np_random.integers(3, min(len(self.key_list), 100))]
 
         if self.CM is None:
             if self.use_period == 'train':
@@ -267,9 +277,9 @@ class BinanceEnvBase(gymnasium.Env):
                     self.CM = cache_manager_obj
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': 5005, 'start_host': False, 'unique_name': 'train'}
-                    self.CM = MpCacheManager(**mp_cache_manager_kwargs)
-                    if len(self.CM):
-                        get_ohlcv_and_indicators()
+                    self.CM = PERCacheManager(**mp_cache_manager_kwargs)
+                if len(self.CM):
+                    get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_train
             elif self.use_period == 'test' or self.use_period == 'check':
                 if self.use_period == 'test':
@@ -283,9 +293,9 @@ class BinanceEnvBase(gymnasium.Env):
                     self.CM = eval_cache_manager_obj
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': port, 'start_host': False, 'unique_name': unique_name}
-                    self.CM = MpCacheManager(**mp_cache_manager_kwargs)
-                    if len(self.CM):
-                        get_ohlcv_and_indicators()
+                    self.CM = PERCacheManager(**mp_cache_manager_kwargs)
+                if len(self.CM):
+                    get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_test
                 self.reuse_data_prob = self.eval_reuse_prob
             else:
@@ -297,7 +307,8 @@ class BinanceEnvBase(gymnasium.Env):
 
     @total_timesteps_counter.setter
     def total_timesteps_counter(self, value):
-        mp_timesteps_counter.value = value
+        with mp_timesteps_counter.get_lock():
+            mp_timesteps_counter.value = value
 
     @property
     def total_episodes_counter(self):
@@ -811,7 +822,10 @@ class BinanceEnvBase(gymnasium.Env):
         return observation, self.reward_step, terminated, truncated, info
 
     def _render(self, timecount, price, action, amount, pnl, total):
-        self.render_df.iloc[timecount] = price, action, amount, pnl, total
+        assert price == self.ohlcv_df.iloc[timecount]['close'], f'Error: price not equal "close" at {timecount}'
+        self.render_df.iloc[timecount] = self.ohlcv_df.iloc[timecount]['open'], self.ohlcv_df.iloc[timecount][
+            'high'], self.ohlcv_df.iloc[timecount]['low'], self.ohlcv_df.iloc[timecount][
+            'close'], self.ohlcv_df.iloc[timecount]['volume'], action, amount, pnl, total
 
     def render(self):
         return self.render_df.iloc[self.timecount].values
@@ -840,22 +854,22 @@ class BinanceEnvBase(gymnasium.Env):
                 self._render(self.timecount, self.price, actions_4_dict['Hold'], 0, self.pnl, self.total_assets)
             self.timecount += 1
 
-    def calc_sharpe_ratio(self, risk_free_rate=0.02) -> float:
-        # risk_free_rate = 0.02  # Example risk-free rate
-        # std_deviation = self.render_df[:self.timecount + 1]['total'].std()
-        # print(std_deviation)
-        std_deviation = np.log1p(self.ohlcv_df.iloc[:self.timecount + 1]['close']).diff().std()
-        # std_deviation = self.ohlcv_df.iloc[:self.timecount + 1]['close'].pct_change(fill_method='ffill').std()
-        # return ((self.total_assets - self.previous_total_assets) * (
-        #         1 - risk_free_rate)) / std_deviation if std_deviation != 0 else 0
-        # returns_mean = self.render_df.iloc[:self.timecount + 1]['pnl'].mean()
-        # sharpe_ratio = returns_mean / std_deviation if std_deviation != 0 else 0
-        # returns = self.pnl - self.previous_pnl
-        sharpe_ratio = (self.pnl - self.previous_pnl) / std_deviation if std_deviation != 0 else 0
-        # print(self.timecount, f'{sharpe_ratio}', f'{returns_mean}', f'{std_deviation}')
-        # if self.verbose > 1:
-        #     logger.info(f'{self.timecount}, sr: {sharpe_ratio}, ret: {returns}, std: {std_deviation}')
-        return sharpe_ratio
+    # def calc_sharpe_ratio(self, risk_free_rate=0.02) -> float:
+    #     # risk_free_rate = 0.02  # Example risk-free rate
+    #     # std_deviation = self.render_df[:self.timecount + 1]['total'].std()
+    #     # print(std_deviation)
+    #     std_deviation = np.log1p(self.ohlcv_df.iloc[:self.timecount + 1]['close']).diff().std()
+    #     # std_deviation = self.ohlcv_df.iloc[:self.timecount + 1]['close'].pct_change(fill_method='ffill').std()
+    #     # return ((self.total_assets - self.previous_total_assets) * (
+    #     #         1 - risk_free_rate)) / std_deviation if std_deviation != 0 else 0
+    #     # returns_mean = self.render_df.iloc[:self.timecount + 1]['pnl'].mean()
+    #     # sharpe_ratio = returns_mean / std_deviation if std_deviation != 0 else 0
+    #     # returns = self.pnl - self.previous_pnl
+    #     sharpe_ratio = (self.pnl - self.previous_pnl) / std_deviation if std_deviation != 0 else 0
+    #     # print(self.timecount, f'{sharpe_ratio}', f'{returns_mean}', f'{std_deviation}')
+    #     # if self.verbose > 1:
+    #     #     logger.info(f'{self.timecount}, sr: {sharpe_ratio}, ret: {returns}, std: {std_deviation}')
+    #     return sharpe_ratio
 
     def get_last_render_df(self):
         return self.last_render_df
@@ -877,8 +891,12 @@ class BinanceEnvBase(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         self.set_CM(cache_obj=self.cache_obj)
+        if self.use_period == 'train' and self.timecount > self.lookback_timeframes:
+            self.CM.update_score(self.current_key, self.previous_pnl + 1)
+
         if self.render_mode is not None:
             self.last_render_df = self.render_df.copy(deep=True)
+
         if 'ret' in self.observation_type:
             self.total_timesteps_counter += (self.timecount - self.lookback_timeframes - self.timeframes_24h)
         else:
@@ -903,17 +921,22 @@ class BinanceEnvBase(gymnasium.Env):
             if self.reuse_data_prob > self.np_random.random():
                 if not self.key_list:
                     """ Creating the list of cache data from probs dict """
-                    self.key_list = list(self.CM.hits_probs().keys())
-                    """ 
-                    if cache filled and reuse prob > rnd and key_list empty,
-                    keep old data from cache * 0.01 (remove top 99%) on this learning cycle
-                    and have a short key_list to have 'actual' probs from global cache 
-                    """
                     if self.use_period == 'train':
-                        to_keep_ix = int(len(self.key_list) * 0.01) + 2
+                        self.key_list = list(self.CM.score_probs().keys())
+                        """ 
+                        if cache filled and reuse prob > rnd and key_list empty,
+                        keep old data from cache * 0.01 (remove top 99%) on this learning cycle
+                        and have a short key_list to have 'actual' probs from global cache 
+                        and add 4% low hits from lower 20% hits with random order
+                        """
+                        low_score_ix = int(max(len(self.key_list) * 0.001, 1))
                         """ Creating list of keys to use data from cache """
-                        self.key_list = self.key_list[:to_keep_ix]
-
+                        hits_key_list = list(self.CM.hits_probs().keys())
+                        self.key_list = self.key_list[:low_score_ix]
+                        to_keep_ix = int(len(hits_key_list) * 0.01) * self.np_random.integers(1, 3)
+                        self.key_list += hits_key_list[:to_keep_ix]
+                    else:
+                        self.key_list = list(self.CM.hits_probs().keys())
                 if self.use_period == 'train':
                     self.np_random.shuffle(self.key_list)
                     """ random start index for data from cache """
@@ -921,12 +944,9 @@ class BinanceEnvBase(gymnasium.Env):
                 else:
                     rnd_start = 0
                 """ Get 1st key to get data from cache """
-                self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
+                self.current_key = self.key_list[0]
+                self.ohlcv_df, self.indicators_df = self.CM.get(self.current_key)
                 self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
-                if self.use_period == 'train':
-                    # Scaling OHLC with 50% probability
-                    if 0.5 > self.np_random.uniform():
-                        self._scale_ohlc()
                 self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
                 self.key_list = self.key_list[1:]
             else:
@@ -936,10 +956,13 @@ class BinanceEnvBase(gymnasium.Env):
 
         size, cost, price = .0, .0, .0
         if self.use_period == 'train':
-            if self.np_random.random() < 0.11:
-                size = min(self.np_random.random() / 2, (self.initial_cash / self.price) / 2)
-                cost = self.price * size
-                price = self.price
+            # Scaling OHLC with epsilon probability (more total_timesteps > probability)
+            if self.first_epsilon > self.np_random.random():
+                self._scale_ohlc()
+            # if self.np_random.random() < 0.11:
+            size = min(self.np_random.random() / 2, (self.initial_cash / self.price) / 2)
+            cost = self.price * size
+            price = self.price
 
         self.asset.reset((size, cost, price))
 
@@ -948,7 +971,8 @@ class BinanceEnvBase(gymnasium.Env):
 
         if self.render_mode is not None:
             self.render_df = pd.DataFrame(index=self.ohlcv_df.index, data=0.,
-                                          columns=['price', 'action', 'amount', 'pnl', 'total'])
+                                          columns=['open', 'high', 'low', 'close', 'volume', 'action', 'amount', 'pnl',
+                                                   'total'])
 
         self.order_closed = False
         self.episode_reward = .0
@@ -998,6 +1022,9 @@ class BinanceEnvBase(gymnasium.Env):
     def set_render_output(self, path_filename: str):
         self.render_path_filename = path_filename
 
+    # def render_all(self, df: pd.DataFrame, show_amount=True):
+    #     rlbacktest(df, RLActionStrategy, self.target.cash, self.asset.orders.commission, self.render_path_filename)
+
     def render_all(self, df: pd.DataFrame, show_amount=True):
         fig, ax1 = plt.subplots(figsize=(30, 17))
         scale_factor = 20
@@ -1016,7 +1043,7 @@ class BinanceEnvBase(gymnasium.Env):
         # df.plot(y="total", ax=ax, use_index=True, style='--', color='lightgrey')
         # df.plot(y="price", ax=ax, use_index=True, secondary_y=True, color='black')
 
-        line1, = ax1.plot(df.index, df['price'], c='cyan', label='Price ("Close")')
+        line1, = ax1.plot(df.index, df['close'], c='cyan', label='Price ("Close")')
         line2, = ax2.plot(df.index, df['total'], c='grey', label='Total assets', alpha=0.5)
         # line3, = ax3.plot(df.index, df['pnl'], c='green', label='PNL', alpha=0.5)
         # labels_handles = [line1, line2,]
@@ -1025,26 +1052,26 @@ class BinanceEnvBase(gymnasium.Env):
         close_kwargs = dict(alpha=0.6, label='Close(all)')
         for idx in df.index.tolist():
             if (df.loc[idx]['action'] == actions_4_dict['Buy']) & (df.loc[idx]['amount'] > 0):
-                marker_buy, = ax1.plot(idx, df.loc[idx]['price'] - 5 * scale_factor, 'g^', **buy_kwargs)
+                marker_buy, = ax1.plot(idx, df.loc[idx]['close'] - 5 * scale_factor, 'g^', **buy_kwargs)
                 if buy_kwargs.get('label') is not None:
                     del buy_kwargs['label']
                 if show_amount:
-                    ax1.text(idx, df.loc[idx]['price'] - 10 * scale_factor, f"{df.loc[idx]['amount']:.3f}", c='green',
+                    ax1.text(idx, df.loc[idx]['close'] - 10 * scale_factor, f"{df.loc[idx]['amount']:.3f}", c='green',
                              fontsize=7, horizontalalignment='center', verticalalignment='center')
 
             elif (df.loc[idx]['action'] == actions_4_dict['Sell']) & (df.loc[idx]['amount'] > 0):
-                marker_sell, = ax1.plot(idx, df.loc[idx]['price'] + 5 * scale_factor, 'rv', **sell_kwargs)
+                marker_sell, = ax1.plot(idx, df.loc[idx]['close'] + 5 * scale_factor, 'rv', **sell_kwargs)
                 if sell_kwargs.get('label') is not None:
                     del sell_kwargs['label']
                 if show_amount:
-                    ax1.text(idx, df.loc[idx]['price'] + 10 * scale_factor, f"{df.loc[idx]['amount']:.3f}", c='red',
+                    ax1.text(idx, df.loc[idx]['close'] + 10 * scale_factor, f"{df.loc[idx]['amount']:.3f}", c='red',
                              fontsize=7, horizontalalignment='center', verticalalignment='center')
             elif (df.loc[idx]['action'] == actions_4_dict['Close']) & (df.loc[idx]['amount'] > 0):
-                marker_close, = ax1.plot(idx, df.loc[idx]['price'] + 5 * scale_factor, 'mv', **close_kwargs)
+                marker_close, = ax1.plot(idx, df.loc[idx]['close'] + 5 * scale_factor, 'mv', **close_kwargs)
                 if close_kwargs.get('label') is not None:
                     del close_kwargs['label']
                 if show_amount:
-                    ax1.text(idx, df.loc[idx]['price'] + 10 * scale_factor, f"{df.loc[idx]['amount']:.3f}", c='magenta',
+                    ax1.text(idx, df.loc[idx]['close'] + 10 * scale_factor, f"{df.loc[idx]['amount']:.3f}", c='magenta',
                              fontsize=7, horizontalalignment='center', verticalalignment='center')
 
         handles, labels = ax1.get_legend_handles_labels()
@@ -1161,7 +1188,7 @@ class BinanceEnvCash(BinanceEnvBase):
             [(self.cash / self.price) >= self.min_coin_trade and self.timecount < self.stop_buy_timecount and not (
                     self.timecount >= self.ohlcv_df.shape[0] - 1),
              self.asset.balance.size >= self.min_coin_trade,
-             self.timecount < self.ohlcv_df.shape[0] - 1 or self.order_closed],
+             (self.timecount < self.ohlcv_df.shape[0] - 1) or self.order_closed],
             dtype=bool)
 
     def _action_msg(self, action, size, amount, action_commission, order_cash, order_profit, old_target_balance,

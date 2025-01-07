@@ -5,12 +5,12 @@ from dbbinance.fetcher.constants import Constants
 from rllab.rllaboratory import LabBase
 from binanceenv.bienv import BinanceEnvCash
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
-from multiprocessing import freeze_support
+from multiprocessing import freeze_support, get_logger
 import warnings
 
-__version__ = 0.0029
+__version__ = 0.0036
 
-logger = logging.getLogger()
+logger = get_logger()
 
 if __name__ == '__main__':
     freeze_support()
@@ -19,7 +19,7 @@ if __name__ == '__main__':
 
     file_handler = logging.FileHandler('test_rllab_ppo.log')
     file_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
@@ -32,48 +32,83 @@ if __name__ == '__main__':
 
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0912-140611/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1612-220439/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1612-220439/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2512-004141/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2912-004826/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3012-164947/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3112-205905/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0201-015059/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename='SAC_BinanceEnvCash_7000000_chkp_2700000_steps', verbose=1)
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1)
+    # _start_datetime = '2022-12-31 23:00:00'
     _start_datetime = '2023-07-20 01:00:00'
-    _end_datetime = '2024-11-20 01:00:00'
+    _end_datetime = '2024-07-30 01:00:00'
+    # _end_datetime = '2024-11-20 01:00:00'
+    # _end_datetime = '2024-12-10 01:00:00'
     _timeframe = '15m'
     _discretization = '15m'
     total_timesteps = 1_200_000_000
 
     agents_n_env = 3780
-    learning_start = (3780 * 300 * 3)
+    learning_start = (3780 * 200 * 2)
 
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=0.0267,
+    #                              maximum_train_size=0.031,
+    #                              minimum_test_size=0.168,
+    #                              maximum_test_size=0.188,
+    #                              test_size=0.11,
+    #                              verbose=0,
+    #                              indicators_sign=True
+    #                              )
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=450,
+    #                              maximum_train_size=996,
+    #                              minimum_test_size=932,
+    #                              maximum_test_size=996,
+    #                              test_size=0.13,
+    #                              verbose=1,
+    #                              indicators_sign=True
+    #                              )
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
                                  timeframe=_timeframe,
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=0.0267,
-                                 maximum_train_size=0.031,
-                                 minimum_test_size=0.168,
-                                 maximum_test_size=0.188,
-                                 test_size=0.11,
-                                 verbose=0,
+                                 minimum_train_size=400,
+                                 maximum_train_size=500,
+                                 minimum_test_size=400,
+                                 maximum_test_size=500,
+                                 test_size=0.13,
+                                 verbose=1,
                                  indicators_sign=True
                                  )
-
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
         rllab.loaded_learn(
-            # filename=901_530_000,
-            filename='best_model',
+            filename=151_956_000,
+            # filename='best_model',
             reset_num_timesteps=True,
             total_timesteps=total_timesteps,
             env_kwargs_update={
                 'data_processor_kwargs': data_processor_kwargs,
-                'stable_cache_data_n': 3780 * 2,
+                'stable_cache_data_n': 15000,
                 'reuse_data_prob': 1.0,
                 'verbose': 0,
                 'render_mode': 'human',
@@ -81,7 +116,7 @@ if __name__ == '__main__':
             },
 
             agent_kwargs_update={
-                'n_steps': 300,
+                'n_steps': 200,
                 'batch_size': 31500,
                 'n_epochs': 10,
                 'stats_window_size': 25,
@@ -93,11 +128,12 @@ if __name__ == '__main__':
                                                       total_epochs=total_timesteps,
                                                       epsilon=1)
                                   },
-                'seed': 42,
+                'seed': 442,
             },
             env_wrapper='labsubproc',
+            env_wrapper_kwargs_update={'use_threads': True},
             n_envs=agents_n_env,
-            eval_freq=300,
+            eval_freq=200,
             verbose=0,
         )
 

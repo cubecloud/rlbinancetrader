@@ -1,5 +1,11 @@
+
+__version__ = 0.001
+
+actions_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2}
+actions_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold"}
 actions_4_dict: dict = {"Buy": 0, "Sell": 1, "Hold": 2, "Close": 3}
 actions_4_reversed_dict: dict = {0: "Buy", 1: "Sell", 2: "Hold", 3: 'Close'}
+
 
 actions_8_dict: dict = {"Buy": 0,           # Buy market order
                         "Sell": 1,          # Sell market order
