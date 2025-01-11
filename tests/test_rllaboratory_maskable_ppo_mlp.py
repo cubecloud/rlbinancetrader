@@ -1,5 +1,4 @@
 import sys
-
 sys.path.insert(0, '/home/cubecloud/Python/projects/rlbinancetrader')
 import logging
 import datetime
@@ -66,13 +65,15 @@ if __name__ == '__main__':
     # _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
     # _start_datetime = '2022-12-26 23:00:00'
     # _start_datetime = '2023-12-31 23:00:00'
-    _start_datetime = '2023-07-20 01:00:00'
+    _start_datetime = '2023-03-20 01:00:00'
+    # _start_datetime = '2023-07-20 01:00:00'
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
     # _end_datetime = '2024-07-30 01:00:00'
+    _end_datetime = '2024-09-30 01:00:00'
     # _end_datetime = '2024-11-20 01:00:00'
-    _end_datetime = '2024-12-10 01:00:00'
+    # _end_datetime = '2024-12-10 01:00:00'
     # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
@@ -85,7 +86,7 @@ if __name__ == '__main__':
     # batch_size = 660 * agents_n_env
     lookback_window = '8h'
     # lookback_window = '8h'
-    seed = 42
+    seed = 42      # start with 443 -> bad
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -93,11 +94,11 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=400,
-                                 maximum_train_size=500,
-                                 minimum_test_size=400,
-                                 maximum_test_size=500,
-                                 test_size=0.13,
+                                 minimum_train_size=550,
+                                 maximum_train_size=650,
+                                 minimum_test_size=550,
+                                 maximum_test_size=650,
+                                 test_size=0.1,
                                  verbose=1,
                                  indicators_sign=True
                                  )
@@ -130,7 +131,7 @@ if __name__ == '__main__':
                                # observation_type='assets_close_i0.188ndicators',
                                observation_type='lookback_norm_assets_close_indicators',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=15000,        # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=15120,        # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -140,7 +141,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.922,
+                               gamma=0.921,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete',
@@ -166,7 +167,7 @@ if __name__ == '__main__':
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=200,
-        batch_size=36000,
+        batch_size=31500,
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.01,
@@ -180,7 +181,7 @@ if __name__ == '__main__':
                                            epsilon=1)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.922,
+        gamma=0.921,
         device='auto',
         seed=seed,
         verbose=1)

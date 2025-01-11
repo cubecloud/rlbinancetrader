@@ -19,7 +19,7 @@ from binanceenv import BinanceEnvCash, BinanceEnvBase
 from binanceenv.cache import CacheManager
 from binanceenv.cache import cache_manager_obj
 from binanceenv.cache import eval_cache_manager_obj
-# from dbbinance.fetcher import MpCacheManager
+from dbbinance.fetcher import MpCacheManager
 from dbbinance.fetcher import PERCacheManager
 
 from stable_baselines3.common.env_checker import check_env
@@ -229,8 +229,8 @@ class LabBase:
         self.cache_manager: CacheManager = cache_manager_obj
         self.eval_cache_manager: CacheManager = eval_cache_manager_obj
         self.data_processor_obj = None
-        self.mp_train_cache_server: Union[PERCacheManager, None] = None
-        self.mp_test_cache_server: Union[PERCacheManager, None] = None
+        self.mp_train_cache_server: Union[MpCacheManager, PERCacheManager, None] = None
+        self.mp_test_cache_server: Union[MpCacheManager, PERCacheManager, None] = None
         # self.init_agents()
 
     def update_agent_kwargs(self, agent_kwargs):
@@ -298,7 +298,7 @@ class LabBase:
     def mp_fill_cache(self, env_kwargs: dict, n_envs: Union[str, int] = 'auto', seed: int = 42,
                       port: Union[int, None] = None, start_host: bool = True):
 
-        def pbar_updater(cache_obj: Union[PERCacheManager], ):
+        def pbar_updater(cache_obj: Union[MpCacheManager, PERCacheManager], ):
             pbar = tqdm(total=env_kwargs['stable_cache_data_n'])
             sl_time = 1.3
             while pbar.n < env_kwargs['stable_cache_data_n']:
@@ -312,18 +312,18 @@ class LabBase:
             if self.mp_train_cache_server is None:
                 if port is None:
                     port = 5005
-                self.mp_train_cache_server = PERCacheManager(max_memory_gb=6,
-                                                             start_host=start_host,
-                                                             port=port,
-                                                             unique_name='train')
+                self.mp_train_cache_server = MpCacheManager(max_memory_gb=6,
+                                                            start_host=start_host,
+                                                            port=port,
+                                                            unique_name='train')
             mp_cache_server = self.mp_train_cache_server
         else:
             if self.mp_test_cache_server is None:
                 if port is None:
                     port = 5006
-                self.mp_test_cache_server = PERCacheManager(start_host=start_host,
-                                                            port=port,
-                                                            unique_name=env_kwargs['use_period'])
+                self.mp_test_cache_server = MpCacheManager(start_host=start_host,
+                                                           port=port,
+                                                           unique_name=env_kwargs['use_period'])
             mp_cache_server = self.mp_test_cache_server
 
         """ Get the list of episodes start - end """
@@ -374,12 +374,12 @@ class LabBase:
         else:
             port = check_port
 
-        if not PERCacheManager.is_server_running(port=port):
+        if not MpCacheManager.is_server_running(port=port):
             start_host = True
             mp_cache_server = self.mp_fill_cache(env_kwargs, port=port)
         else:
             start_host = False
-            mp_cache_server = PERCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
+            mp_cache_server = MpCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
 
         if env_wrapper == 'dummy':
             update_dict = {}

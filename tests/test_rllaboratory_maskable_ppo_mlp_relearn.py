@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(0, '/home/cubecloud/Python/projects/rlbinancetrader')
+
 import logging
 import datetime
 import numpy as np
@@ -8,7 +11,7 @@ from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 from multiprocessing import freeze_support, get_logger
 import warnings
 
-__version__ = 0.0036
+__version__ = 0.0037
 
 logger = get_logger()
 
@@ -17,7 +20,7 @@ if __name__ == '__main__':
 
     logger.setLevel(logging.DEBUG)
 
-    file_handler = logging.FileHandler('test_rllab_ppo.log')
+    file_handler = logging.FileHandler('test_rllab_mask_ppo_relearn.log')
     file_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
@@ -37,7 +40,10 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2912-004826/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3012-164947/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3112-205905/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0201-015059/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0201-015059/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0801-194931/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -45,31 +51,37 @@ if __name__ == '__main__':
     """ Sell action reward """
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=10, verbose=1)
     # _start_datetime = '2022-12-31 23:00:00'
+    # _start_datetime = '2023-01-20 01:00:00'
     _start_datetime = '2023-07-20 01:00:00'
     _end_datetime = '2024-07-30 01:00:00'
+    # _end_datetime = '2024-09-30 01:00:00'
     # _end_datetime = '2024-11-20 01:00:00'
+
     # _end_datetime = '2024-12-10 01:00:00'
+
+    # _end_datetime = '2024-12-10 01:00:00'
+
     _timeframe = '15m'
     _discretization = '15m'
     total_timesteps = 1_200_000_000
 
     agents_n_env = 3780
-    learning_start = (3780 * 200 * 2)
+    learning_start = (3780 * 300 * 3)
 
-    # data_processor_kwargs = dict(start_datetime=_start_datetime,
-    #                              end_datetime=_end_datetime,
-    #                              timeframe=_timeframe,
-    #                              discretization=_discretization,
-    #                              symbol_pair='BTCUSDT',
-    #                              market='spot',
-    #                              minimum_train_size=0.0267,
-    #                              maximum_train_size=0.031,
-    #                              minimum_test_size=0.168,
-    #                              maximum_test_size=0.188,
-    #                              test_size=0.11,
-    #                              verbose=0,
-    #                              indicators_sign=True
-    #                              )
+    data_processor_kwargs = dict(start_datetime=_start_datetime,
+                                 end_datetime=_end_datetime,
+                                 timeframe=_timeframe,
+                                 discretization=_discretization,
+                                 symbol_pair='BTCUSDT',
+                                 market='spot',
+                                 minimum_train_size=0.0267,
+                                 maximum_train_size=0.031,
+                                 minimum_test_size=0.168,
+                                 maximum_test_size=0.188,
+                                 test_size=0.13,
+                                 verbose=0,
+                                 indicators_sign=True
+                                 )
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
     #                              timeframe=_timeframe,
@@ -84,56 +96,56 @@ if __name__ == '__main__':
     #                              verbose=1,
     #                              indicators_sign=True
     #                              )
-    data_processor_kwargs = dict(start_datetime=_start_datetime,
-                                 end_datetime=_end_datetime,
-                                 timeframe=_timeframe,
-                                 discretization=_discretization,
-                                 symbol_pair='BTCUSDT',
-                                 market='spot',
-                                 minimum_train_size=400,
-                                 maximum_train_size=500,
-                                 minimum_test_size=400,
-                                 maximum_test_size=500,
-                                 test_size=0.13,
-                                 verbose=1,
-                                 indicators_sign=True
-                                 )
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=550,
+    #                              maximum_train_size=650,
+    #                              minimum_test_size=550,
+    #                              maximum_test_size=650,
+    #                              test_size=0.1,
+    #                              verbose=1,
+    #                              indicators_sign=True
+    #                              )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
         rllab.loaded_learn(
-            filename=151_956_000,
-            # filename='best_model',
+            # filename=101_304_000,
+            filename='best_model',
             reset_num_timesteps=True,
             total_timesteps=total_timesteps,
             env_kwargs_update={
                 'data_processor_kwargs': data_processor_kwargs,
-                'stable_cache_data_n': 15000,
+                'stable_cache_data_n': 7560,
                 'reuse_data_prob': 1.0,
                 'verbose': 0,
                 'render_mode': 'human',
-                'gamma': 0.922,
+                'gamma': 0.92,
             },
 
             agent_kwargs_update={
-                'n_steps': 200,
+                'n_steps': 300,
                 'batch_size': 31500,
                 'n_epochs': 10,
                 'stats_window_size': 25,
-                'ent_coef': 0.01,
-                'gamma': 0.922,
+                'ent_coef': 0.1,
+                'gamma': 0.92,
                 'learning_rate': {'CoSheduller': dict(warmup=learning_start,
                                                       learning_rate=4.5e-6,
                                                       min_learning_rate=3.5e-6,
                                                       total_epochs=total_timesteps,
                                                       epsilon=1)
                                   },
-                'seed': 442,
+                'seed': 543,
             },
             env_wrapper='labsubproc',
-            env_wrapper_kwargs_update={'use_threads': True},
+            env_wrapper_kwargs_update={'use_threads': False},
             n_envs=agents_n_env,
-            eval_freq=200,
+            eval_freq=300,
             verbose=0,
         )
 

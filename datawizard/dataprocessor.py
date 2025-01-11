@@ -224,39 +224,111 @@ class ProcessorBase:
         avg_period_len = int((minimum_timeframes_num + maximum_timeframes_num) // 2)
         return avg_period_len
 
-    @staticmethod
-    def generate_episodes(dates_range: pd.Series, min_timeframes_per_episode, max_timeframes_per_episode,
-                          num_episodes) -> list:
-        total_timeframes = len(dates_range)
-
-        episodes = set()
-
-        remaining_episodes = num_episodes
-        current_end_index = total_timeframes - 1
-
-        while remaining_episodes > 0:
-
-            # Random length of current episode
-            episode_length = random.randint(min_timeframes_per_episode, max_timeframes_per_episode)
-
-            start_index = current_end_index - episode_length
-            if start_index < 0:
-                current_end_index = total_timeframes - 1
-                continue
-
-            # checking unique tuple
-            new_episode = (dates_range.index[start_index], dates_range.index[current_end_index])
-            if new_episode not in episodes:
-                episodes.add(new_episode)
-                remaining_episodes -= 1
-
-            # setting new end_index
-            current_end_index = start_index - 1
-            if current_end_index <= 0:
-                current_end_index = total_timeframes - int(
-                    random.randint(min_timeframes_per_episode, max_timeframes_per_episode) // random.randint(1, 8))
-
-        return sorted(list(episodes))  # Creating sorted list
+    # @staticmethod
+    # def generate_episodes(dates_range: pd.Series, min_timeframes_per_episode, max_timeframes_per_episode,
+    #                       num_episodes) -> list:
+    #     total_timeframes = len(dates_range)
+    #
+    #     episodes = set()
+    #
+    #     remaining_episodes = num_episodes
+    #     current_end_index = total_timeframes - 1
+    #
+    #     while remaining_episodes > 0:
+    #
+    #         # Random length of current episode
+    #         episode_length = random.randint(min_timeframes_per_episode, max_timeframes_per_episode)
+    #
+    #         start_index = current_end_index - episode_length
+    #         if start_index < 0:
+    #             current_end_index = total_timeframes - int(episode_length // random.randint(2, 10))
+    #             continue
+    #
+    #         # checking unique tuple
+    #         new_episode = (dates_range.index[start_index], dates_range.index[current_end_index])
+    #         if new_episode not in episodes:
+    #             episodes.add(new_episode)
+    #             remaining_episodes -= 1
+    #
+    #         # setting new end_index
+    #         current_end_index = start_index - 1
+    #         if current_end_index <= 0:
+    #             current_end_index = total_timeframes - int(
+    #                 random.randint(min_timeframes_per_episode, max_timeframes_per_episode) // random.randint(2, 10))
+    #
+    #     return sorted(list(episodes))  # Creating sorted list
+    #
+    # def _prepare_episodes_start_end_lst(self, num_episodes: int, period_type: str = 'train') -> List[tuple]:
+    #
+    #     def generate_shifts(num_shifts: int) -> List[int]:
+    #         def half_list(half: List[int]) -> List[int]:
+    #             result: list = []
+    #             if len(half) <= 2:
+    #                 half.reverse()
+    #                 result.extend(half)
+    #             else:
+    #                 mid = len(half) // 2
+    #                 if mid > 0:
+    #                     result.append(half[mid])
+    #                     result.extend(half_list(list(range(half[0], half[mid]))))
+    #                     result.extend(half_list(list(range(half[mid + 1], half[-1] + 1))))
+    #             return result
+    #
+    #         shifts_lst: list = [0]
+    #         mid = num_shifts // 2
+    #         shifts_lst.append(mid)
+    #         first_half = half_list(list(range(1, mid)))
+    #         second_half = half_list(list(range(mid + 1, num_shifts)))
+    #         max_len = min(len(first_half), len(second_half))
+    #         for a, b in zip(first_half, second_half):
+    #             shifts_lst.extend([a, b])
+    #         shifts_lst.extend(first_half[max_len:])
+    #         shifts_lst.extend(second_half[max_len:])
+    #         return shifts_lst
+    #
+    #     def get_shifted_range(shifted_minute_ix):
+    #         return pd.Series(index=pd.date_range(start=minute_timeframes[shifted_minute_ix], end=minute_timeframes[-1],
+    #                                              freq=convert_timeframe_to_freq(self.timeframe)), dtype=int)
+    #
+    #     shifts = generate_shifts(Constants.binsizes[self.timeframe])
+    #     circular_shifts = cycle(shifts)
+    #
+    #     if period_type == 'train':
+    #         minute_timeframes = self.train_minute_timeframes_series
+    #         minimum_timeframes_num = self.minimum_train_timeframes_num
+    #         maximum_timeframes_num = self.maximum_train_timeframes_num
+    #     else:
+    #         minute_timeframes = self.test_minute_timeframes_series
+    #         minimum_timeframes_num = self.minimum_test_timeframes_num
+    #         maximum_timeframes_num = self.maximum_test_timeframes_num
+    #
+    #     episodes_start_end_lst: list = []
+    #
+    #     for shift in circular_shifts:
+    #         selected_period = get_shifted_range(shift)
+    #
+    #         """
+    #         if q-ty of current_total_timeframes (all minute shifts) greater
+    #         than maximum_total_timeframes_needed (all num_episodes)
+    #
+    #         """
+    #         current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
+    #         maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
+    #         if current_total_timeframes > maximum_total_timeframes_needed:
+    #             n_shifted_episodes = min(num_episodes,
+    #                                      int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
+    #         else:
+    #             n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
+    #
+    #         episodes_start_end_lst += self.generate_episodes(selected_period,
+    #                                                          minimum_timeframes_num,
+    #                                                          maximum_timeframes_num,
+    #                                                          n_shifted_episodes)
+    #         if len(episodes_start_end_lst) >= num_episodes:
+    #             episodes_start_end_lst = episodes_start_end_lst[:num_episodes]
+    #             break
+    #
+    #     return episodes_start_end_lst
 
     def _prepare_episodes_start_end_lst(self, num_episodes: int, period_type: str = 'train') -> List[tuple]:
 
@@ -302,162 +374,87 @@ class ProcessorBase:
             minimum_timeframes_num = self.minimum_test_timeframes_num
             maximum_timeframes_num = self.maximum_test_timeframes_num
 
+            # shifts = min(max(1, int(num_episodes // Constants.binsizes[self.timeframe])),
+            #              Constants.binsizes[self.timeframe])
+
+        finished = False
+        ix = 0
+        selected_period = get_shifted_range(shifts[ix])
+
+        """
+        if q-ty of current_total_timeframes (all minute shifts) greater
+        than maximum_total_timeframes_needed (all num_episodes)
+
+        """
+        current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
+        maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
+        if current_total_timeframes > maximum_total_timeframes_needed:
+            n_shifted_episodes = min(num_episodes,
+                                     int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
+        # n_shifted_episodes = selected_period.shape[0] / maximum_timeframes_num
+        # shifts = shifts[:int(round_up(num_episodes / n_shifted_episodes, 0))]
+        else:
+            n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
+
         episodes_start_end_lst: list = []
+        """ one_shift_start_end_lst to reverse each shift """
+        one_shift_start_end_lst: list = []
+        while not finished:
+            selected_period_episodes_len = int(selected_period.shape[0] / n_shifted_episodes)
 
-        for shift in circular_shifts:
-            selected_period = get_shifted_range(shift)
-
-            """ 
-            if q-ty of current_total_timeframes (all minute shifts) greater
-            than maximum_total_timeframes_needed (all num_episodes)
-    
-            """
-            current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
-            maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
-            if current_total_timeframes > maximum_total_timeframes_needed:
-                n_shifted_episodes = min(num_episodes,
-                                         int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
+            if selected_period_episodes_len < maximum_timeframes_num:
+                start_offset = maximum_timeframes_num - selected_period_episodes_len
             else:
-                n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
+                start_offset = 0
 
-            episodes_start_end_lst += self.generate_episodes(selected_period,
-                                                             minimum_timeframes_num,
-                                                             maximum_timeframes_num,
-                                                             n_shifted_episodes)
-            if len(episodes_start_end_lst) >= num_episodes:
-                episodes_start_end_lst = episodes_start_end_lst[:num_episodes]
-                break
+            msg = (
+                f"{self.__class__.__name__} #{self.idnum}: shift = +{shifts[ix]}: {selected_period_episodes_len} < {maximum_timeframes_num} "
+                f"-> start_offset = +{start_offset}")
+            logger.info(msg)
+
+            _end_datetime = selected_period.index[-1]
+
+            for episode_ix in range(n_shifted_episodes):
+                done = False
+                _start_datetime = None
+                while not done:
+                    timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
+                    timedelta_kwargs = get_timedelta_kwargs(
+                        f'{timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
+                        current_timeframe=self.timeframe)
+                    _start_datetime = _end_datetime - relativedelta(**timedelta_kwargs)
+                    if selected_period[:_start_datetime].shape[0] >= minimum_timeframes_num:
+                        if _start_datetime >= minute_timeframes[0]:
+                            done = True
+                    else:
+                        done = True
+                one_shift_start_end_lst.append((_start_datetime, _end_datetime))
+                if selected_period[:_start_datetime].shape[0] < minimum_timeframes_num:
+                    break
+
+                if start_offset:
+                    timedelta_kwargs = get_timedelta_kwargs(
+                        f'{start_offset * Constants.binsizes[self.timeframe]}m',
+                        current_timeframe=self.timeframe)
+                    _end_datetime = _start_datetime + relativedelta(**timedelta_kwargs)
+                else:
+                    _end_datetime = _start_datetime
+
+            episodes_start_end_lst += sorted(one_shift_start_end_lst)
+            one_shift_start_end_lst.clear()
+            unique_episodes_counts = len(list(set(episodes_start_end_lst)))
+            if unique_episodes_counts < num_episodes:
+                selected_period = get_shifted_range(ix)
+                ix += 1
+                if ix == len(shifts):
+                    ix = 0
+                    n_shifted_episodes = num_episodes - unique_episodes_counts
+                elif ix == len(shifts) - 1:
+                    n_shifted_episodes = num_episodes - unique_episodes_counts
+            else:
+                finished = True
 
         return episodes_start_end_lst
-
-    # def _prepare_episodes_start_end_lst(self, num_episodes: int, period_type: str = 'train') -> List[tuple]:
-    #
-    #     def generate_shifts(num_shifts: int) -> List[int]:
-    #         def half_list(half: List[int]) -> List[int]:
-    #             result: list = []
-    #             if len(half) <= 2:
-    #                 half.reverse()
-    #                 result.extend(half)
-    #             else:
-    #                 mid = len(half) // 2
-    #                 if mid > 0:
-    #                     result.append(half[mid])
-    #                     result.extend(half_list(list(range(half[0], half[mid]))))
-    #                     result.extend(half_list(list(range(half[mid + 1], half[-1] + 1))))
-    #             return result
-    #
-    #         shifts_lst: list = [0]
-    #         mid = num_shifts // 2
-    #         shifts_lst.append(mid)
-    #         first_half = half_list(list(range(1, mid)))
-    #         second_half = half_list(list(range(mid + 1, num_shifts)))
-    #         max_len = min(len(first_half), len(second_half))
-    #         for a, b in zip(first_half, second_half):
-    #             shifts_lst.extend([a, b])
-    #         shifts_lst.extend(first_half[max_len:])
-    #         shifts_lst.extend(second_half[max_len:])
-    #         return shifts_lst
-    #
-    #     def get_shifted_range(shifted_minute_ix):
-    #         return pd.Series(index=pd.date_range(start=minute_timeframes[shifted_minute_ix], end=minute_timeframes[-1],
-    #                                              freq=convert_timeframe_to_freq(self.timeframe)), dtype=int)
-    #
-    #     shifts = generate_shifts(Constants.binsizes[self.timeframe])
-    #     circular_shifts = cycle(shifts)
-    #
-    #     if period_type == 'train':
-    #         minute_timeframes = self.train_minute_timeframes_series
-    #         minimum_timeframes_num = self.minimum_train_timeframes_num
-    #         maximum_timeframes_num = self.maximum_train_timeframes_num
-    #         average_timeframes_num = int(self.maximum_train_timeframes_num + self.minimum_train_timeframes_num) // 2
-    #     else:
-    #         minute_timeframes = self.test_minute_timeframes_series
-    #         minimum_timeframes_num = self.minimum_test_timeframes_num
-    #         maximum_timeframes_num = self.maximum_test_timeframes_num
-    #         average_timeframes_num = int(self.maximum_train_timeframes_num + self.minimum_train_timeframes_num) // 2
-    #
-    #         # shifts = min(max(1, int(num_episodes // Constants.binsizes[self.timeframe])),
-    #         #              Constants.binsizes[self.timeframe])
-    #
-    #     finished = False
-    #     ix = 0
-    #     selected_period = get_shifted_range(shifts[ix])
-    #
-    #     """
-    #     if q-ty of current_total_timeframes (all minute shifts) greater
-    #     than maximum_total_timeframes_needed (all num_episodes)
-    #
-    #     """
-    #     current_total_timeframes = selected_period.shape[0] * Constants.binsizes[self.timeframe]
-    #     maximum_total_timeframes_needed = maximum_timeframes_num * num_episodes
-    #     if current_total_timeframes > maximum_total_timeframes_needed:
-    #         n_shifted_episodes = min(num_episodes,
-    #                                  int(round_up(selected_period.shape[0] / maximum_timeframes_num, 0)))
-    #     # n_shifted_episodes = selected_period.shape[0] / maximum_timeframes_num
-    #     # shifts = shifts[:int(round_up(num_episodes / n_shifted_episodes, 0))]
-    #     else:
-    #         n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
-    #
-    #     episodes_start_end_lst: list = []
-    #     """ one_shift_start_end_lst to reverse each shift """
-    #     one_shift_start_end_lst: list = []
-    #     while not finished:
-    #         selected_period_episodes_len = int(selected_period.shape[0] / n_shifted_episodes)
-    #
-    #         if selected_period_episodes_len < maximum_timeframes_num:
-    #             start_offset = maximum_timeframes_num - selected_period_episodes_len
-    #         else:
-    #             start_offset = 0
-    #
-    #         msg = (
-    #             f"{self.__class__.__name__} #{self.idnum}: shift = +{shifts[ix]}: {selected_period_episodes_len} < {maximum_timeframes_num} "
-    #             f"-> start_offset = +{start_offset}")
-    #         logger.info(msg)
-    #
-    #         _end_datetime = selected_period.index[-1]
-    #
-    #         for episode_ix in range(n_shifted_episodes):
-    #             done = False
-    #             _start_datetime = None
-    #             while not done:
-    #                 timedelta_timeframes = random.randint(minimum_timeframes_num, maximum_timeframes_num)
-    #                 timedelta_kwargs = get_timedelta_kwargs(
-    #                     f'{timedelta_timeframes * Constants.binsizes[self.timeframe]}m',
-    #                     current_timeframe=self.timeframe)
-    #                 _start_datetime = _end_datetime - relativedelta(**timedelta_kwargs)
-    #                 if selected_period[:_start_datetime].shape[0] >= minimum_timeframes_num:
-    #                     if _start_datetime >= minute_timeframes[0]:
-    #                         done = True
-    #                 else:
-    #                     done = True
-    #             one_shift_start_end_lst.append((_start_datetime, _end_datetime))
-    #             if selected_period[:_start_datetime].shape[0] < minimum_timeframes_num:
-    #                 break
-    #
-    #             if start_offset:
-    #                 timedelta_kwargs = get_timedelta_kwargs(
-    #                     f'{start_offset * Constants.binsizes[self.timeframe]}m',
-    #                     current_timeframe=self.timeframe)
-    #                 _end_datetime = _start_datetime + relativedelta(**timedelta_kwargs)
-    #             else:
-    #                 _end_datetime = _start_datetime
-    #
-    #         one_shift_start_end_lst.reverse()
-    #         episodes_start_end_lst.extend(one_shift_start_end_lst)
-    #         one_shift_start_end_lst.clear()
-    #         unique_episodes_counts = len(list(set(episodes_start_end_lst)))
-    #         if unique_episodes_counts < num_episodes:
-    #             selected_period = get_shifted_range(ix)
-    #             ix += 1
-    #             if ix == len(shifts):
-    #                 ix = 0
-    #                 n_shifted_episodes = num_episodes - unique_episodes_counts
-    #             elif ix == len(shifts) - 1:
-    #                 n_shifted_episodes = num_episodes - unique_episodes_counts
-    #         else:
-    #             finished = True
-    #
-    #     return episodes_start_end_lst
 
     def prepare_n_episodes_lst(self, period_type='train', n_episodes: Union[str, int] = 'auto'):
         if period_type == 'train':

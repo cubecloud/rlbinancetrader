@@ -90,7 +90,7 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0812-012052/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0912-140611/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1112-020256/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
-    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'    # -< original
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1612-220439/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1912-124618/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2312-172848/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
@@ -99,17 +99,19 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3012-164947/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0201-015059/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0301-115724/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0501-081315/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0501-081315/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0901-155926/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename=750_000, n_tests=15, verbose=1)
     """ Sell action reward """
-    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='test')
-    rllab.backtesting_agent(filename=102_060_000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
                             use_period='test')
-    # rllab.backtesting_agent(filename=136_080_000, render_mode='human', n_tests=50, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=99_792_000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    #                         use_period='test')
+    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=50, verbose=1, seed=443,
     #                         use_period='check',
     #                         data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

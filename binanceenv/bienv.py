@@ -29,7 +29,7 @@ from dbbinance.fetcher.datautils import get_nearest_timeframe
 from dbbinance.fetcher.slocks import SThLock, SMpLock
 
 import multiprocessing as mp
-# from dbbinance.fetcher import MpCacheManager
+from dbbinance.fetcher import MpCacheManager
 from dbbinance.fetcher import PERCacheManager
 
 from collections import deque
@@ -106,7 +106,7 @@ class BinanceEnvBase(gymnasium.Env):
                  eps_end: float = 0.01,
                  eps_decay: float = 0.2,
                  gamma: float = 0.99,
-                 cache_obj: Union[CacheManager, PERCacheManager, None] = None,
+                 cache_obj: Union[CacheManager, MpCacheManager, PERCacheManager, None] = None,
                  render_mode=None,
                  index_type: str = 'target_time',
                  deterministic: bool = True,
@@ -192,7 +192,6 @@ class BinanceEnvBase(gymnasium.Env):
         self.CM = None
         self.cache_obj = cache_obj
         self.data_processor_obj = None
-        self.current_key = None
         self.eval_reuse_prob = eval_reuse_prob
 
         """ Init CacheManager and setting 1st ohlcv and indicators if cache already filled """
@@ -266,8 +265,7 @@ class BinanceEnvBase(gymnasium.Env):
             """ Creating the list of cache data from probs dict with 3 values """
             self.key_list = list(self.CM.hits_probs().keys())
             self.np_random.shuffle(self.key_list)
-            self.current_key = self.key_list[0]
-            self.ohlcv_df, self.indicators_df = self.CM.get(self.current_key)
+            self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
             self.key_list = self.key_list[1:self.np_random.integers(3, min(len(self.key_list), 100))]
 
         if self.CM is None:
@@ -277,7 +275,7 @@ class BinanceEnvBase(gymnasium.Env):
                     self.CM = cache_manager_obj
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': 5005, 'start_host': False, 'unique_name': 'train'}
-                    self.CM = PERCacheManager(**mp_cache_manager_kwargs)
+                    self.CM = MpCacheManager(**mp_cache_manager_kwargs)
                 if len(self.CM):
                     get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_train
@@ -293,7 +291,7 @@ class BinanceEnvBase(gymnasium.Env):
                     self.CM = eval_cache_manager_obj
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': port, 'start_host': False, 'unique_name': unique_name}
-                    self.CM = PERCacheManager(**mp_cache_manager_kwargs)
+                    self.CM = MpCacheManager(**mp_cache_manager_kwargs)
                 if len(self.CM):
                     get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_test
@@ -891,12 +889,8 @@ class BinanceEnvBase(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         self.set_CM(cache_obj=self.cache_obj)
-        if self.use_period == 'train' and self.timecount > self.lookback_timeframes:
-            self.CM.update_score(self.current_key, self.previous_pnl + 1)
-
         if self.render_mode is not None:
             self.last_render_df = self.render_df.copy(deep=True)
-
         if 'ret' in self.observation_type:
             self.total_timesteps_counter += (self.timecount - self.lookback_timeframes - self.timeframes_24h)
         else:
@@ -921,38 +915,35 @@ class BinanceEnvBase(gymnasium.Env):
             if self.reuse_data_prob > self.np_random.random():
                 if not self.key_list:
                     """ Creating the list of cache data from probs dict """
+                    self.key_list = list(self.CM.hits_probs().keys())
+                    """ 
+                    if cache filled and reuse prob > rnd and key_list empty,
+                    keep old data from cache * 0.01 (remove top 99%) on this learning cycle
+                    and have a short key_list to have 'actual' probs from global cache 
+                    """
                     if self.use_period == 'train':
-                        self.key_list = list(self.CM.score_probs().keys())
-                        """ 
-                        if cache filled and reuse prob > rnd and key_list empty,
-                        keep old data from cache * 0.01 (remove top 99%) on this learning cycle
-                        and have a short key_list to have 'actual' probs from global cache 
-                        and add 4% low hits from lower 20% hits with random order
-                        """
-                        low_score_ix = int(max(len(self.key_list) * 0.001, 1))
+                        to_keep_ix = int(len(self.key_list) * 0.01) + 2
                         """ Creating list of keys to use data from cache """
-                        hits_key_list = list(self.CM.hits_probs().keys())
-                        self.key_list = self.key_list[:low_score_ix]
-                        to_keep_ix = int(len(hits_key_list) * 0.01) * self.np_random.integers(1, 3)
-                        self.key_list += hits_key_list[:to_keep_ix]
-                    else:
-                        self.key_list = list(self.CM.hits_probs().keys())
+                        self.key_list = self.key_list[:to_keep_ix]
+
                 if self.use_period == 'train':
                     self.np_random.shuffle(self.key_list)
-                    """ random start index for data from cache """
-                    rnd_start = self.np_random.integers(self.timeframes_24h)
-                else:
-                    rnd_start = 0
                 """ Get 1st key to get data from cache """
-                self.current_key = self.key_list[0]
-                self.ohlcv_df, self.indicators_df = self.CM.get(self.current_key)
-                self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
-                self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
+                self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
                 self.key_list = self.key_list[1:]
             else:
                 self.get_new_ohlcv_and_indicators()
         else:
             self.get_new_ohlcv_and_indicators()
+
+        if self.use_period == 'train':
+            """ random start index for data from cache """
+            rnd_start = self.np_random.integers(self.timeframes_24h)
+        else:
+            rnd_start = 0
+
+        self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
+        self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
 
         size, cost, price = .0, .0, .0
         if self.use_period == 'train':
@@ -1188,7 +1179,7 @@ class BinanceEnvCash(BinanceEnvBase):
             [(self.cash / self.price) >= self.min_coin_trade and self.timecount < self.stop_buy_timecount and not (
                     self.timecount >= self.ohlcv_df.shape[0] - 1),
              self.asset.balance.size >= self.min_coin_trade,
-             (self.timecount < self.ohlcv_df.shape[0] - 1) or self.order_closed],
+             self.timecount < self.ohlcv_df.shape[0] - 1 or self.order_closed],
             dtype=bool)
 
     def _action_msg(self, action, size, amount, action_commission, order_cash, order_profit, old_target_balance,
