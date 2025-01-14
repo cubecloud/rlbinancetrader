@@ -101,7 +101,8 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0301-115724/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0501-081315/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0901-155926/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1401-040250/MaskablePPO_BinanceEnvCash_1800000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -111,7 +112,7 @@ if __name__ == '__main__':
                             use_period='test')
     # rllab.backtesting_agent(filename=99_792_000, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
-    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=50, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=318_654_000, render_mode='human', n_tests=50, verbose=1, seed=443,
     #                         use_period='check',
     #                         data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

@@ -298,10 +298,10 @@ class LabBase:
     def mp_fill_cache(self, env_kwargs: dict, n_envs: Union[str, int] = 'auto', seed: int = 42,
                       port: Union[int, None] = None, start_host: bool = True):
 
-        def pbar_updater(cache_obj: Union[MpCacheManager, PERCacheManager], ):
-            pbar = tqdm(total=env_kwargs['stable_cache_data_n'])
+        def pbar_updater(cache_obj: Union[MpCacheManager, PERCacheManager], n: int):
+            pbar = tqdm(total=n)
             sl_time = 1.3
-            while pbar.n < env_kwargs['stable_cache_data_n']:
+            while pbar.n < n:
                 pbar.set_description(f"{env_kwargs['use_period'].upper()} DataFrames loaded")
                 time.sleep(sl_time)
                 pbar.n = len(cache_obj.keys())
@@ -353,7 +353,8 @@ class LabBase:
                                       name=f'fillcache_{ix}'))
             job_lst[-1].start()
 
-        job_lst.append(mp.Process(target=pbar_updater, args=(mp_cache_server,), name=f'pbar'))
+        job_lst.append(mp.Process(target=pbar_updater, args=(mp_cache_server, len(episodes_start_end_lst)),
+                                  name=f'pbar'))
         job_lst[-1].start()
         for job in job_lst:
             job.join()

@@ -29,9 +29,10 @@ import concurrent.futures
 
 __version__ = 0.022
 
+logger = mp.get_logger()
+
 
 class EnvWrapper(gym.Env):
-
     def __init__(self, envs: dict):
         self.envs = envs
         # checking objects idnum (check seed)
@@ -151,7 +152,7 @@ class ThreadedEnvWrapper(gym.Env):
         futures = []
         for env_idx in indices:
             futures.append(self.executor.submit(lambda env_idx=env_idx: (
-            env_idx, (self.envs[env_idx].observation_space, self.envs[env_idx].action_space))))
+                env_idx, (self.envs[env_idx].observation_space, self.envs[env_idx].action_space))))
         results = [future.result() for future in futures]
         return dict(results)
 
@@ -248,6 +249,7 @@ def _worker(remote: mp.connection.Connection, parent_remote: mp.connection.Conne
             else:
                 raise NotImplementedError(f"`{cmd}` is not implemented in the worker")
         except EOFError:
+            logger.error(f"{__name__}: EOFError - {EOFError}")
             break
 
 
@@ -348,11 +350,12 @@ class LabSubprocVecEnv(VecEnv):
         """
         Getting the observation and action spaces from process 
         with idx [0] and from environment with idx [0] 
+        with q-ty of retries 200 -> if environments have very slow initialization 
         """
         count = 0
+        data = {}
+        indices = self._get_indices([0])
         while True:
-            data = {}
-            indices = self._get_indices([0])
             self.remotes[0].send(("get_spaces", indices))
             try:
                 result = self.remotes[0].recv()
@@ -360,6 +363,7 @@ class LabSubprocVecEnv(VecEnv):
                 time.sleep(0.1)
                 count += 1
                 if count > 200:
+                    logger.error(f'{self.__class__.__name__}: Error with get_spaces retries = {count}, {e}')
                     raise Exception(e)
             else:
                 data.update(result)
@@ -414,6 +418,7 @@ class LabSubprocVecEnv(VecEnv):
     def close(self) -> None:
         if self.closed:
             return
+
         if self.waiting:
             for pr_idx in range(len(self.env_indices_per_process)):
                 """ Just rcv() and discard the data """

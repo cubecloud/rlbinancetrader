@@ -42,7 +42,8 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-3112-205905/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0201-015059/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0801-194931/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
 
 
     rllab = LabBase.load_agent(json_cfg)
@@ -53,8 +54,9 @@ if __name__ == '__main__':
     # _start_datetime = '2022-12-31 23:00:00'
     # _start_datetime = '2023-01-20 01:00:00'
     _start_datetime = '2023-07-20 01:00:00'
+    # _start_datetime = '2023-08-20 01:00:00'
     _end_datetime = '2024-07-30 01:00:00'
-    # _end_datetime = '2024-09-30 01:00:00'
+    # _end_datetime = '2024-08-30 01:00:00'
     # _end_datetime = '2024-11-20 01:00:00'
 
     # _end_datetime = '2024-12-10 01:00:00'
@@ -63,10 +65,12 @@ if __name__ == '__main__':
 
     _timeframe = '15m'
     _discretization = '15m'
-    total_timesteps = 1_200_000_000
+    total_timesteps = 1_800_000_000
 
-    agents_n_env = 3780
-    learning_start = (3780 * 300 * 3)
+    # agents_n_env = 3780
+    # learning_start = (3780 * 300 * 3)
+    agents_n_env = 6000
+    learning_start = (6000 * 300 * 1)
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -77,7 +81,7 @@ if __name__ == '__main__':
                                  minimum_train_size=0.0267,
                                  maximum_train_size=0.031,
                                  minimum_test_size=0.168,
-                                 maximum_test_size=0.188,
+                                 maximum_test_size=0.185,
                                  test_size=0.13,
                                  verbose=0,
                                  indicators_sign=True
@@ -120,7 +124,7 @@ if __name__ == '__main__':
             total_timesteps=total_timesteps,
             env_kwargs_update={
                 'data_processor_kwargs': data_processor_kwargs,
-                'stable_cache_data_n': 7560,
+                'stable_cache_data_n': 11940,
                 'reuse_data_prob': 1.0,
                 'verbose': 0,
                 'render_mode': 'human',
