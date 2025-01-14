@@ -130,7 +130,8 @@ def prepare_episodes_start_end_lst(num_episodes: int,
     """ 
     Logic:
     If num_episodes = 0 -> using 'auto' and calculate optimal _offset_ 
-    If num_episodes != 0 -> using _offset_ from calculations of n_shifted_episodes
+    If num_episodes != 0 and _offset_ == None -> using _offset_ from calculations of n_shifted_episodes
+    If num_episodes != 0 and _offset_ is not None -> using _offset_ from args
     """
     maximum_total_timeframes_needed = max_timeframes_per_episode * num_episodes
 
