@@ -478,6 +478,15 @@ class LabBase:
                                     vec_env_cls=self.env_wrapper_cls,
                                     )
 
+        # """
+        # Can't use other LabSuProcVecEnv and SubProcVecEnv cos need to get an unwrapped env,
+        # this is is not currently possible with multiprocessing
+        # ! to improve this we need to create code for using 1 or few env with multiprocessing to
+        # create virtual unwrapped env
+        # """
+        # eval_env_wrapper = 'dummy'
+        # eval_env_wrapper_cls = env_wrapper_dict.get(eval_env_wrapper, DummyVecEnv)
+
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=2,
                                    seed=self.seed,
@@ -674,6 +683,15 @@ class LabBase:
                                     env_kwargs=train_env_kwargs,
                                     vec_env_cls=self.env_wrapper_cls)
 
+        # """
+        # Can't use other LabSuProcVecEnv and SubProcVecEnv cos need to get an unwrapped env,
+        # this is is not currently possible with multiprocessing
+        # ! to improve this we need to create code for using 1 or few env with multiprocessing to
+        # create virtual unwrapped env
+        # """
+        # eval_env_wrapper = 'dummy'
+        # eval_env_wrapper_cls = env_wrapper_dict.get(eval_env_wrapper, DummyVecEnv)
+
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=2,
                                    seed=env.get_seed(),
@@ -854,7 +872,13 @@ class LabBase:
                                 'stable_cache_data_n': n_tests,
                                 'render_mode': render_mode})
 
-        # self.env_wrapper = 'dummy'
+        """
+        Can't use other LabSuProcVecEnv and SubProcVecEnv cos need to get an unwrapped env,
+        this is is not currently possible with multiprocessing 
+        ! to improve this we need to create code for using 1 or few env with multiprocessing to 
+        create virtual unwrapped env 
+        """
+        self.env_wrapper = 'dummy'
 
         if data_processor_kwargs is not None:
             eval_env_kwargs['data_processor_kwargs'].update({'seed': seed})
@@ -875,7 +899,7 @@ class LabBase:
                                    n_envs=1,
                                    seed=seed,
                                    env_kwargs=eval_env_kwargs,
-                                   vec_env_cls=DummyVecEnv)
+                                   vec_env_cls=self.env_wrapper_cls)
 
         eval_env_kwargs.update(self.get_cache_obj_dict(self.env_wrapper, eval_env_kwargs))
 
@@ -901,11 +925,11 @@ class LabBase:
 
         env = agent_obj.get_env()
         unwrapped_env = get_base_env(env, self.env_classes_lst[ix])
-
+        observations = env.reset()
         for ix in range(n_tests):
-            unwrapped_env.set_render_output(f'{path_filename}_{ix}')
+            logger.info(f"{self.__class__.__name__}: test #{ix:02d}")
+            unwrapped_env.set_render_output(f'{path_filename}_{ix:02d}')
             episode_rewards = .0
-            observations = env.reset()
             states = None
             episode_starts = np.ones((1,), dtype=bool)
             while True:

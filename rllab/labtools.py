@@ -10,8 +10,10 @@ from stable_baselines3.common.monitor import Monitor
 
 __version__ = 0.0017
 
+from rllab import LabSubprocVecEnv
 
-def get_base_env(wrapped_env: Union[DummyVecEnv, SubprocVecEnv], env_class):
+
+def get_base_env(wrapped_env: Union[Monitor, DummyVecEnv, SubprocVecEnv, LabSubprocVecEnv], env_class):
     """
     Find source environment class
     Args:
@@ -20,8 +22,8 @@ def get_base_env(wrapped_env: Union[DummyVecEnv, SubprocVecEnv], env_class):
     """
 
     env_tmp = wrapped_env
-    while isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, Monitor, VecEnv)):
-        if isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, VecEnv)):
+    while isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, LabSubprocVecEnv, Monitor, VecEnv)):
+        if isinstance(env_tmp, (DummyVecEnv, SubprocVecEnv, LabSubprocVecEnv, VecEnv)):
             env_tmp = env_tmp.envs[0]
         elif isinstance(env_tmp, Monitor):
             env_tmp = env_tmp.env

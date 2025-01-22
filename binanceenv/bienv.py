@@ -48,7 +48,7 @@ from rllab.rlstrategy import RLActionStrategy
 
 import matplotlib.pyplot as plt
 
-__version__ = 0.078
+__version__ = 0.079
 
 logger = mp.get_logger()
 
@@ -115,6 +115,7 @@ class BinanceEnvBase(gymnasium.Env):
                  #  mlp_rlock: Union[Any, None] = None
                  ):
 
+        self.verbose = verbose
         self.reward_scaler = reward_scaler
         self.use_multiprocessing = use_multiprocessing
         # if (self.use_multiprocessing and mlp_rlock is None) or (not self.use_multiprocessing and mlp_rlock is not None):
@@ -124,8 +125,10 @@ class BinanceEnvBase(gymnasium.Env):
             BinanceEnvBase.count.value += 1
 
         self.idnum = int(BinanceEnvBase.count.value)
-        self.observation_type = observation_type
+        if self.verbose:
+            logger.info(f"{self.__class__.__name__} #{self.idnum} - id_counter #{BinanceEnvBase.count.value}")
 
+        self.observation_type = observation_type
         self.data_processor_kwargs = data_processor_kwargs
         self.data_processor_kwargs.update({'seed': self.data_processor_kwargs.get('seed', seed) + self.idnum})
 
@@ -178,7 +181,7 @@ class BinanceEnvBase(gymnasium.Env):
                            initial_balance=(0., 0., 0.),
                            scale_decay=10)
 
-        self.verbose = verbose
+
 
         self.ohlcv_df, self.indicators_df = None, None
 
@@ -264,8 +267,8 @@ class BinanceEnvBase(gymnasium.Env):
         def get_ohlcv_and_indicators():
             """ Creating the list of cache data from probs dict with 3 values """
             self.key_list = list(self.CM.hits_probs().keys())
-            self.np_random.shuffle(self.key_list)
             self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
+            self.np_random.shuffle(self.key_list)
             self.key_list = self.key_list[1:self.np_random.integers(3, min(len(self.key_list), 100))]
 
         if self.CM is None:
@@ -276,7 +279,7 @@ class BinanceEnvBase(gymnasium.Env):
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': 5005, 'start_host': False, 'unique_name': 'train'}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
-                if len(self.CM):
+                if len(self.CM) > 3:
                     get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_train
             elif self.use_period == 'test' or self.use_period == 'check':
@@ -292,7 +295,7 @@ class BinanceEnvBase(gymnasium.Env):
                 elif cache_obj == 'MpCacheManager':
                     mp_cache_manager_kwargs = {'port': port, 'start_host': False, 'unique_name': unique_name}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
-                if len(self.CM):
+                if len(self.CM) > 3:
                     get_ohlcv_and_indicators()
                 self._take_action_func = self._take_action_test
                 self.reuse_data_prob = self.eval_reuse_prob
@@ -571,8 +574,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.obs_lookback.append(self._get_assets_close_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
         obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
-        obs[:, 2] = obs[:, 3] * obs[:, 1]
-        obs[:, 4] = obs[:, 4] * obs[:, 1]
+        obs[:, 2] = obs[:, 3] * obs[:, 1]   # balance.cost = balance.price * balance.size
+        obs[:, 4] = obs[:, 4] * obs[:, 1]   # scaled_cost (current_cost) = price (current_price) * balance.size
         return obs.flatten()
 
     def _get_assets_close_indicators_action_obs(self) -> np.ndarray:
@@ -875,6 +878,7 @@ class BinanceEnvBase(gymnasium.Env):
     def get_new_ohlcv_and_indicators(self):
         if self.data_processor_obj is None:
             self.data_processor_obj = IndicatorProcessor(**self.data_processor_kwargs)
+
         self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_random_ohlcv_and_indicators(
             index_type=self.index_type, period_type=self.use_period)
 
@@ -885,7 +889,10 @@ class BinanceEnvBase(gymnasium.Env):
             sys.exit('Error: Check data_processor, length of data is not equal!')
 
         cm_key = tuple((self.ohlcv_df.index[0], self.ohlcv_df.index[-1]))
-        self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
+        if cm_key not in list(self.CM.cache.keys()):
+            self.CM.update_cache(key=cm_key, value=(self.ohlcv_df, self.indicators_df))
+        else:
+            self.get_new_ohlcv_and_indicators()
 
     def reset(self, seed=None, options=None):
         self.set_CM(cache_obj=self.cache_obj)
@@ -1096,6 +1103,8 @@ class BinanceEnvBase(gymnasium.Env):
         with BinanceEnvBase.count.get_lock():
             BinanceEnvBase.count.value += 1
         self.idnum = int(BinanceEnvBase.count.value)
+        if self.verbose:
+            logger.info(f"{self.__class__.__name__} #{self.idnum} - id_counter #{BinanceEnvBase.count.value}")
         self.seed = self.get_seed(self.seed + self.idnum)
         self.set_CM(self.cache_obj)
 

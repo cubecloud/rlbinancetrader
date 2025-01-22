@@ -129,31 +129,37 @@ def prepare_episodes_start_end_lst(num_episodes: int,
     current_total_timeframes = selected_period.shape[0] * len(shifts)  # ~ total timeframes in all shifts
     """ 
     Logic:
-    If num_episodes = 0 -> using 'auto' and calculate optimal _offset_ 
-    If num_episodes != 0 and _offset_ == None -> using _offset_ from calculations of n_shifted_episodes
-    If num_episodes != 0 and _offset_ is not None -> using _offset_ from args
+    if num_episodes != 0:
+        if offset is None:
+            use _offset_ from calculations of n_shifted_episodes
+        else: # offset is not None
+            use _offset_ from args
+    else: # num_episodes == 0 -> using 'auto'
+        calculate optimal _offset_ 
+    
     """
-    maximum_total_timeframes_needed = max_timeframes_per_episode * num_episodes
+    if num_episodes != 0:
+        maximum_total_timeframes_needed = max_timeframes_per_episode * num_episodes
+        if offset is None:
+            if current_total_timeframes > maximum_total_timeframes_needed:
+                n_shifted_episodes = min(num_episodes,
+                                         int(round_up(selected_period.shape[0] / max_timeframes_per_episode, 0)))
+            else:
+                n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
 
-    if offset is not None:
-        if current_total_timeframes > maximum_total_timeframes_needed:
-            n_shifted_episodes = min(num_episodes,
-                                     int(round_up(selected_period.shape[0] / max_timeframes_per_episode, 0)))
+            selected_period_episode_len = int(selected_period.shape[0] / n_shifted_episodes)
+            if selected_period_episode_len < max_timeframes_per_episode:
+                start_offset = -selected_period_episode_len
+            else:
+                start_offset = 0
         else:
             n_shifted_episodes = int(round_up(num_episodes / len(shifts), 0))
+            selected_period_episode_len = int(selected_period.shape[0] / n_shifted_episodes)
+            start_offset = -offset
     else:
         n_shifted_episodes = 0
-
-    if n_shifted_episodes != 0:
-        selected_period_episode_len = int(selected_period.shape[0] / n_shifted_episodes)
-        if selected_period_episode_len < max_timeframes_per_episode:
-            start_offset = -selected_period_episode_len
-        else:
-            start_offset = 0
-    else:
         selected_period_episode_len = None
         start_offset = -calculate_optimal_offset(timeframe)
-        num_episodes = 0
 
     episodes_start_end_lst: List[Tuple] = []
 

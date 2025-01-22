@@ -1,4 +1,5 @@
 import sys
+
 sys.path.insert(0, '/home/cubecloud/Python/projects/rlbinancetrader')
 import logging
 import datetime
@@ -19,6 +20,7 @@ from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 from sb3_contrib import MaskablePPO
 from sb3_contrib import RecurrentPPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from sb3_contrib.common.vec_env import AsyncEval
 # from torch.nn import Tanh, Softmax, LeakyReLU, ReLU
 # from binanceenv.bienv import BinanceEnvBase
 from binanceenv.bienv import BinanceEnvCash
@@ -65,28 +67,31 @@ if __name__ == '__main__':
     # _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
     # _start_datetime = '2022-12-26 23:00:00'
     # _start_datetime = '2023-12-31 23:00:00'
-    _start_datetime = '2023-03-20 01:00:00'
+
     # _start_datetime = '2023-07-20 01:00:00'
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
     # _end_datetime = '2024-07-30 01:00:00'
-    _end_datetime = '2024-09-30 01:00:00'
+
     # _end_datetime = '2024-11-20 01:00:00'
     # _end_datetime = '2024-12-10 01:00:00'
     # _timedelta_kwargs = get_timedelta_kwargs(_gap_period, current_timeframe=_timeframe)
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
+    _start_datetime = '2023-03-20 01:00:00'
+    _end_datetime = '2024-10-30 01:00:00'
 
-    agents_n_env = 3780
-    total_timesteps = 1_200_000_000
-    # buffer_size = 1_500_000
-    learning_start = (3780 * 2 * 200)
-    # batch_size = 660 * agents_n_env
-    lookback_window = '8h'
-    # lookback_window = '8h'
-    seed = 42      # start with 443 -> bad
+    agents_n_env = 5000
+    n_steps = 300
+    warmup_steps = 15
+
+    total_timesteps = 1_500_000_000
+
+    learning_start = (agents_n_env * n_steps * 3)
+    lookback_window = '10h'
+    seed = 42  # start with 443 -> bad
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -94,11 +99,11 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=550,
-                                 maximum_train_size=650,
-                                 minimum_test_size=550,
-                                 maximum_test_size=650,
-                                 test_size=0.1,
+                                 minimum_train_size=940,
+                                 maximum_train_size=990,
+                                 minimum_test_size=940,
+                                 maximum_test_size=990,
+                                 test_size=0.13,
                                  verbose=1,
                                  indicators_sign=True
                                  )
@@ -112,7 +117,7 @@ if __name__ == '__main__':
     #                              minimum_train_size=0.0267,
     #                              maximum_train_size=0.031,
     #                              minimum_test_size=0.168,
-    #                              maximum_test_size=0.188,
+    #                              maximum_test_size=0.185,
     #                              test_size=0.13,
     #                              verbose=0,
     #                              indicators_sign=True
@@ -128,10 +133,10 @@ if __name__ == '__main__':
                                target_maximum_trade=500.,
                                target_scale_decay=200_000,
                                # observation_type='lookback_dict',
-                               # observation_type='assets_close_i0.188ndicators',
+                               # observation_type='assets_close_indicators',
                                observation_type='lookback_norm_assets_close_indicators',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=15120,        # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=10000,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -141,7 +146,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.921,
+                               gamma=0.92,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete',
@@ -166,22 +171,23 @@ if __name__ == '__main__':
         policy="MlpPolicy",
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
-        n_steps=200,
-        batch_size=31500,
+        n_steps=n_steps,
+        batch_size=50000,
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
         clip_range_vf=0.2,
-        learning_rate={'CoSheduller': dict(warmup=learning_start,
+        learning_rate={'CoSheduller': dict(warmup=agents_n_env * n_steps * warmup_steps,
+                                           stable_warmup=True,
                                            learning_rate=4.5e-6,
-                                           min_learning_rate=3.5e-6,
+                                           min_learning_rate=2.5e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.921,
+        gamma=0.92,
         device='auto',
         seed=seed,
         verbose=1)
@@ -198,10 +204,10 @@ if __name__ == '__main__':
             env_wrapper='labsubproc',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
-            checkpoint_num=200,
-            n_eval_episodes=50,
+            checkpoint_num=n_steps,
+            n_eval_episodes=100,
             log_interval=1,
-            eval_freq=200,
+            eval_freq=n_steps,
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,

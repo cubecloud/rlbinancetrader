@@ -25,22 +25,37 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    _start_datetime = '2023-07-20 01:00:00'
-    _end_datetime = '2024-07-30 01:00:00'
+    # _start_datetime = '2023-07-20 01:00:00'
+    # _start_datetime = '2024-05-20 01:00:00'
+    # _end_datetime = '2024-06-11 04:00:00'
+    # _start_datetime = '2024-06-11 04:01:00'
+    # _end_datetime = '2024-07-30 01:00:00'
 
-    # _start_datetime = '2023-08-20 01:00:00'
-    # _end_datetime = '2024-08-30 01:00:00'
+    # _start_datetime = '2023-03-20 01:00:00'
+    # _start_datetime = '2023-07-20 01:00:00'
+    # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
+
+    # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
+    # '2023-03-20 01:00:00 - 2024-08-14 08:15:00'
+    _start_datetime = '2023-03-20 01:00:00'
+    _end_datetime = '2024-08-14 08:15:00'
+
+    # _start_datetime = '2024-08-14 08:30:00'
+    # _end_datetime = '2024-10-30 01:00:00'
+
+    # _start_datetime = '2023-03-20 01:00:00'
+    # _end_datetime = '2024-07-30 01:00:00'
 
     dates_range = pd.Series(
         index=pd.date_range(start=check_convert_to_datetime(_start_datetime), end=check_convert_to_datetime(_end_datetime),
                             freq=convert_timeframe_to_freq('1m')), dtype=int)
 
-    episodes_start_end_lst = prepare_episodes_start_end_lst(0,
+    episodes_start_end_lst = prepare_episodes_start_end_lst(12000,
                                                             dates_range,
                                                             min_timeframes_per_episode=940,
                                                             max_timeframes_per_episode=990,
                                                             timeframe='15m',
-                                                            offset=0)
+                                                            offset=None)
     print(len(episodes_start_end_lst))
 
     min_start = min(episodes_start_end_lst, key=lambda x: x[0])[0]

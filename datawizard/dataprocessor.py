@@ -74,10 +74,12 @@ class ProcessorBase:
 
         if self.verbose > 0:
             msg = (f"{self.__class__.__name__} #{self.idnum}: TRAIN pool timeframes: {self.train_timeframes_num}, "
-                   f"Pool period: {self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num - 1]}")
+                   f"Pool period: "
+                   f"{self.all_period_timeframes[0]} - {self.all_period_timeframes[self.train_timeframes_num]}")
             logger.info(msg)
             msg = (f"{self.__class__.__name__} #{self.idnum}: TEST pool timeframes: {self.test_timeframes_num}, "
-                   f"Pool period: {self.all_period_timeframes[self.train_timeframes_num]} - {self.all_period_timeframes[-1]}")
+                   f"Pool period: "
+                   f"{self.all_period_timeframes[self.train_timeframes_num + 1]} - {self.all_period_timeframes[-1]}")
             logger.info(msg)
         else:
             msg = f"{self.__class__.__name__} #{self.idnum}: Initialized..."
@@ -155,7 +157,7 @@ class ProcessorBase:
             self.maximum_test_timeframes_num = maximum_test_size
 
         self.test_minute_timeframes_series = pd.date_range(
-            start=self.all_period_timeframes[self.train_timeframes_num],
+            start=self.all_period_timeframes[self.train_timeframes_num + 1],
             end=self.end_datetime,
             freq=convert_timeframe_to_freq('1m')
         ).to_series()
@@ -215,15 +217,15 @@ class ProcessorBase:
             logger.info(msg)
         return random_start_datetime, random_end_datetime
 
-    def _get_avg_period_len(self, period_type):
-        if period_type == 'train':
-            minimum_timeframes_num = self.minimum_train_timeframes_num
-            maximum_timeframes_num = self.maximum_train_timeframes_num
-        else:
-            minimum_timeframes_num = self.minimum_test_timeframes_num
-            maximum_timeframes_num = self.maximum_test_timeframes_num
-        avg_period_len = int((minimum_timeframes_num + maximum_timeframes_num) // 2)
-        return avg_period_len
+    # def _get_avg_period_len(self, period_type):
+    #     if period_type == 'train':
+    #         minimum_timeframes_num = self.minimum_train_timeframes_num
+    #         maximum_timeframes_num = self.maximum_train_timeframes_num
+    #     else:
+    #         minimum_timeframes_num = self.minimum_test_timeframes_num
+    #         maximum_timeframes_num = self.maximum_test_timeframes_num
+    #     avg_period_len = int((minimum_timeframes_num + maximum_timeframes_num) // 2)
+    #     return avg_period_len
 
     # @staticmethod
     # def generate_episodes(dates_range: pd.Series, min_timeframes_per_episode, max_timeframes_per_episode,
@@ -462,10 +464,15 @@ class ProcessorBase:
             offset = None
         else:
             num_episodes = n_episodes
-            offset = None
+            offset = None   # auto offset calculations
 
         if period_type == 'train':
-            return prepare_episodes_start_end_lst(0,
+            logger.info(
+                f"{self.__class__.__name__} #{self.idnum}: Train period start-end: "
+                f"{self.train_minute_timeframes_series[0]} - {self.train_minute_timeframes_series[-1]}, "
+                f"n_episodes = {n_episodes}")
+
+            return prepare_episodes_start_end_lst(n_episodes,
                                                   self.train_minute_timeframes_series,
                                                   min_timeframes_per_episode=self.minimum_train_timeframes_num,
                                                   max_timeframes_per_episode=self.maximum_train_timeframes_num,
@@ -473,6 +480,10 @@ class ProcessorBase:
                                                   offset=offset
                                                   )
         else:
+            logger.info(
+                f"{self.__class__.__name__} #{self.idnum}: Test period start-end: "
+                f"{self.test_minute_timeframes_series[0]} - {self.test_minute_timeframes_series[-1]}, "
+                f"n_episodes = {n_episodes}")
             return prepare_episodes_start_end_lst(num_episodes,
                                                   self.test_minute_timeframes_series,
                                                   min_timeframes_per_episode=self.minimum_test_timeframes_num,
@@ -484,7 +495,8 @@ class ProcessorBase:
     def get_random_ohlcv_df(self):
         start_datetime, end_datetime = self._get_random_period()
         logger.debug(
-            f"{self.__class__.__name__} #{self.idnum}: Get OHLCV data with start_datetime - end_datetime: {start_datetime} - {end_datetime}")
+            f"{self.__class__.__name__} #{self.idnum}: "
+            f"Get OHLCV data with start_datetime - end_datetime: {start_datetime} - {end_datetime}")
         _ohlcv_df = self.get_ohlcv_df(start_datetime, end_datetime, symbol_pair=self.symbol_pair, market=self.market)
         return _ohlcv_df
 
@@ -546,7 +558,8 @@ class IndicatorProcessor(ProcessorBase):
         logger.debug(f"{self.__class__.__name__} #{self.idnum}: Set new period': {_start_datetime} - {_end_datetime}")
         self.loaded_indicators.set_new_period(_start_datetime, _end_datetime, index_type)
         logger.debug(
-            f"\n{self.__class__.__name__} #{self.idnum}: Get indicator_df with start_datetime - end_datetime: {_start_datetime} - {_end_datetime}\n")
+            f"\n{self.__class__.__name__} #{self.idnum}: "
+            f"Get indicator_df with start_datetime - end_datetime: {_start_datetime} - {_end_datetime}\n")
         _indicators_df = self.loaded_indicators.get_data_df(index_type)
         if self.indicators_sign:
             for col_name in _indicators_df.columns:
