@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     agents_n_env = 5000
     n_steps = 300
-    warmup_timesteps = (agents_n_env * n_steps) * 300 * 3
+    warmup_timesteps = (agents_n_env * n_steps) * 300
 
     # learning_start = (agents_n_env * n_steps * 3)
 
@@ -150,8 +150,8 @@ if __name__ == '__main__':
                 'learning_rate': {'CoSheduller': dict(warmup=warmup_timesteps,
                                                       stable_warmup=True,
                                                       floor_learning_rate=1e-7,
-                                                      min_learning_rate=1e-6,
-                                                      learning_rate=2.5e-6,
+                                                      min_learning_rate=2.5e-6,
+                                                      learning_rate=4.5e-6,
                                                       total_epochs=total_timesteps,
                                                       epsilon=1,
                                                       pre_warmup_coef=0.3333)
@@ -163,7 +163,7 @@ if __name__ == '__main__':
             n_envs=agents_n_env,
             n_eval_episodes=50,
             eval_freq=n_steps,
-            verbose=0,
+            verbose=1,
         )
 
     # rllab.backtesting_agent(filename=18_600_000, render_mode='human', n_tests=10, verbose=1)

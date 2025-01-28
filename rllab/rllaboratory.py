@@ -350,7 +350,9 @@ class LabBase:
         for ix, start_end_lst in zip(range(len(env_start_end_lst)), env_start_end_lst):
             job_lst.append(mp.Process(target=worker_fill_cache,
                                       args=(dp_obj, mp_cache_server, env_kwargs, start_end_lst),
-                                      name=f'fillcache_{ix}'))
+                                      name=f'fillcache_{ix}'
+                                      )
+                           )
             job_lst[-1].start()
 
         job_lst.append(mp.Process(target=pbar_updater, args=(mp_cache_server, len(episodes_start_end_lst)),
@@ -635,7 +637,7 @@ class LabBase:
             self.use_masking = True
             eval_callback_kwargs.update({'use_masking': True, 'warn': False})
 
-        checkpoint_callback = CheckpointCallback(save_freq=self.eval_freq,
+        checkpoint_callback = CheckpointCallback(save_freq=self.checkpoint_num,
                                                  save_path=agent_cfg.DIRS["training"],
                                                  name_prefix=f'{agent_cfg.FILENAME}_chkp',
                                                  )
@@ -885,7 +887,7 @@ class LabBase:
             eval_env_kwargs['data_processor_kwargs'].update(data_processor_kwargs)
             if use_period == 'check':
                 eval_env_kwargs.update({'use_period': 'check',
-                                        'verbose': self.verbose,
+                                        'verbose': verbose,
                                         'stable_cache_data_n': n_tests,
                                         })
                 """ Fill cache and add cache_obj to kwargs """

@@ -80,16 +80,19 @@ if __name__ == '__main__':
     # _end_datetime = floor_time(datetime.datetime.utcnow(), '1m')
     #
     # _end_datetime = _end_datetime - relativedelta(**_timedelta_kwargs)
-    _start_datetime = '2023-03-20 01:00:00'
-    _end_datetime = '2024-10-30 01:00:00'
+    _start_datetime = '2024-04-15 01:00:00'
+    _end_datetime = '2025-01-15 01:00:00'
+    # '2024-06-30 04:35:00/2024-08-29 09:43:00'
+    # '2024-06-12 03:21:00/2024-07-30 01:00:00'
 
-    agents_n_env = 5000
+    total_timesteps = 3_000_000_000
+
+    agents_n_env = 3780
     n_steps = 300
-    warmup_steps = 15
+    warmup_timesteps = (agents_n_env * n_steps) * 100
+    # index_type='target_time'
+    index_type = 'prediction_time'
 
-    total_timesteps = 1_500_000_000
-
-    learning_start = (agents_n_env * n_steps * 3)
     lookback_window = '10h'
     seed = 42  # start with 443 -> bad
 
@@ -103,7 +106,7 @@ if __name__ == '__main__':
                                  maximum_train_size=990,
                                  minimum_test_size=940,
                                  maximum_test_size=990,
-                                 test_size=0.13,
+                                 test_size=0.1,
                                  verbose=1,
                                  indicators_sign=True
                                  )
@@ -136,7 +139,7 @@ if __name__ == '__main__':
                                # observation_type='assets_close_indicators',
                                observation_type='lookback_norm_assets_close_indicators',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=10000,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=3780 * 2,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -150,8 +153,8 @@ if __name__ == '__main__':
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete',
-                               index_type='target_time',
-                               # index_type='prediction_time',
+                               # index_type='target_time',
+                               index_type=index_type,
                                render_mode='human',
                                reward_scaler=10
                                )
@@ -172,19 +175,21 @@ if __name__ == '__main__':
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=n_steps,
-        batch_size=50000,
+        batch_size=31500,
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
         clip_range_vf=0.2,
-        learning_rate={'CoSheduller': dict(warmup=agents_n_env * n_steps * warmup_steps,
-                                           stable_warmup=True,
+        learning_rate={'CoSheduller': dict(warmup=warmup_timesteps,
+                                           stable_warmup=False,
+                                           floor_learning_rate=1e-7,
+                                           min_learning_rate=2e-6,
                                            learning_rate=4.5e-6,
-                                           min_learning_rate=2.5e-6,
                                            total_epochs=total_timesteps,
-                                           epsilon=1)
+                                           epsilon=1,
+                                           pre_warmup_coef=0.1)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
         gamma=0.92,
@@ -204,10 +209,10 @@ if __name__ == '__main__':
             env_wrapper='labsubproc',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
-            checkpoint_num=n_steps,
-            n_eval_episodes=100,
+            checkpoint_num=n_steps*3,
+            n_eval_episodes=50,
             log_interval=1,
-            eval_freq=n_steps,
+            eval_freq=n_steps*3,
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,

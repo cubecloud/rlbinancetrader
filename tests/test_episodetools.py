@@ -37,9 +37,11 @@ if __name__ == '__main__':
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
     # '2023-03-20 01:00:00 - 2024-08-14 08:15:00'
-    _start_datetime = '2023-03-20 01:00:00'
-    _end_datetime = '2024-08-14 08:15:00'
+    # _start_datetime = '2023-03-20 01:00:00'
+    # _end_datetime = '2024-08-14 08:15:00'
 
+    _start_datetime = '2023-12-01 01:00:00'
+    _end_datetime = '2024-12-10 01:00:00'
     # _start_datetime = '2024-08-14 08:30:00'
     # _end_datetime = '2024-10-30 01:00:00'
 
@@ -50,7 +52,7 @@ if __name__ == '__main__':
         index=pd.date_range(start=check_convert_to_datetime(_start_datetime), end=check_convert_to_datetime(_end_datetime),
                             freq=convert_timeframe_to_freq('1m')), dtype=int)
 
-    episodes_start_end_lst = prepare_episodes_start_end_lst(12000,
+    episodes_start_end_lst = prepare_episodes_start_end_lst(7680,
                                                             dates_range,
                                                             min_timeframes_per_episode=940,
                                                             max_timeframes_per_episode=990,

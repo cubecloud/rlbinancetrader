@@ -87,7 +87,7 @@ class BinanceEnvBase(gymnasium.Env):
                  target_scale_decay: int = 1_000_000,
                  coin_balance: float = 0.,
                  pnl_stop: float = -0.5,
-                 verbose: int = 0,
+                 verbose: int = 1,
                  log_interval: int = 500,
                  observation_type: str = 'indicators',
                  action_type: str = 'discrete',
@@ -123,10 +123,10 @@ class BinanceEnvBase(gymnasium.Env):
 
         with BinanceEnvBase.count.get_lock():
             BinanceEnvBase.count.value += 1
+            self.idnum = BinanceEnvBase.count.value
 
-        self.idnum = int(BinanceEnvBase.count.value)
         if self.verbose:
-            logger.info(f"{self.__class__.__name__} #{self.idnum} - id_counter #{BinanceEnvBase.count.value}")
+            logger.info(f"{self.__class__.__name__} init #{self.idnum} - id_counter #{BinanceEnvBase.count.value}")
 
         self.observation_type = observation_type
         self.data_processor_kwargs = data_processor_kwargs
@@ -180,8 +180,6 @@ class BinanceEnvBase(gymnasium.Env):
                            target_obj=self.target,
                            initial_balance=(0., 0., 0.),
                            scale_decay=10)
-
-
 
         self.ohlcv_df, self.indicators_df = None, None
 
@@ -1099,12 +1097,10 @@ class BinanceEnvBase(gymnasium.Env):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        BinanceEnvBase.count = mp_count
+        # BinanceEnvBase.count = mp_count
         with BinanceEnvBase.count.get_lock():
             BinanceEnvBase.count.value += 1
-        self.idnum = int(BinanceEnvBase.count.value)
-        if self.verbose:
-            logger.info(f"{self.__class__.__name__} #{self.idnum} - id_counter #{BinanceEnvBase.count.value}")
+            self.idnum = BinanceEnvBase.count.value
         self.seed = self.get_seed(self.seed + self.idnum)
         self.set_CM(self.cache_obj)
 
