@@ -1,3 +1,4 @@
+import sys
 import random
 import numpy as np
 import numba
@@ -5,9 +6,36 @@ from numba import jit
 from typing import Tuple, Union, Dict
 from gymnasium import spaces
 from dbbinance.fetcher.datautils import minmax_normalization_1_1
-from binanceenv.actionspace import actions_dict, actions_4_dict
+from binanceenv.actionspace import (actions_dict,
+                                    actions_4_dict,
+                                    actions_4_reversed_dict,
+                                    actions_4_spot_dict,
+                                    actions_4_spot_reversed_dict)
 
-__version__ = 0.011
+__version__ = 0.016
+
+
+def get_action_space_obj(action_type='discrete'):
+    if action_type == 'discrete':
+        action_space_obj = DiscreteActionSpace(n_action=3)
+    elif action_type == 'discrete_4':
+        action_space_obj = DiscreteActionSpaceSpot(n_action=4)
+    elif action_type == 'box':
+        action_space_obj = BoxActionSpace(n_action=3)
+    elif action_type == 'box_4':
+        action_space_obj = BoxActionSpace(n_action=4)
+    elif action_type == 'box1_1_3':
+        action_space_obj = BoxExtActionSpace(n_action=3)
+    elif action_type == 'box1_1_4':
+        action_space_obj = BoxExtActionSpace(n_action=4)
+    elif action_type == 'binbox':
+        action_space_obj = BinBoxActionSpace(n_action=3, low=-1, high=1)
+    elif action_type == 'sell_buy_hold_amount':
+        action_space_obj = SellBuyHoldAmount()
+    else:
+        sys.exit(f'Error: Unknown action type {action_type}!')
+
+    return action_space_obj
 
 
 class IndicatorsSpace:
@@ -67,6 +95,24 @@ class LookbackAssetsCloseIndicatorsSpace:
         self.__observation_space = spaces.Box(low=low,
                                               high=high,
                                               shape=((ind_num + assets_data + 1) * lookback,),
+                                              dtype=np.float32,
+                                              seed=42)
+        self.name = 'lookback_assets_close_indicators'
+
+    @property
+    def observation_space(self):
+        return self.__observation_space
+
+    @observation_space.setter
+    def observation_space(self, value):
+        self.__observation_space = value
+
+
+class LookbackAssetsCloseIndicatorsSpaceCNN:
+    def __init__(self, ind_num, assets_data, lookback, low=0.0, high=1.0):
+        self.__observation_space = spaces.Box(low=low,
+                                              high=high,
+                                              shape=(lookback, assets_data + ind_num),
                                               dtype=np.float32,
                                               seed=42)
         self.name = 'lookback_assets_close_indicators'
@@ -142,12 +188,20 @@ class DiscreteActionSpace:
         self.n_action = n_action
         self.__action_space = spaces.Discrete(n_action, seed=42)  # {0, 1, 2}
         self.name = 'discrete'
+        self.actions_keys = np.array(list(actions_4_reversed_dict.keys()), dtype=int)
+
+    def _check_masked(self, action, masked_actions):
+        if action in self.actions_keys[masked_actions]:
+            return action
+
+        for act in range(self.n_action - 1, -1, -1):
+            if masked_actions[act]:
+                return act
 
     def convert2action(self, action: Union[np.ndarray, list], masked_actions=None):
         amount = 1.
         if masked_actions is not None:
-            if action not in list(range(self.n_action))[masked_actions]:
-                action = actions_4_dict['Hold']
+            action = self._check_masked(action, masked_actions)
         return action, amount
 
     @property
@@ -157,6 +211,21 @@ class DiscreteActionSpace:
     @action_space.setter
     def action_space(self, value):
         self.__action_space = value
+
+
+class DiscreteActionSpaceSpot(DiscreteActionSpace):
+    def __init__(self, n_action):
+        super().__init__(n_action)
+        self.name = 'discrete_spot'
+        self.actions_keys = np.array(list(actions_4_spot_reversed_dict.keys()), dtype=int)
+
+    def _check_masked(self, action, masked_actions):
+        if action in self.actions_keys[masked_actions]:
+            return action
+        # return last possible action if action not correct
+        for act in range(self.n_action - 1, -1, -1):
+            if masked_actions[act]:
+                return act
 
 
 class BoxActionSpace:

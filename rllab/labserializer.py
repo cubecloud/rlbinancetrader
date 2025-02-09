@@ -3,7 +3,8 @@ from typing import Union, Callable, ClassVar
 import numpy as np
 from rllab.labcosheduller import CoSheduller
 from torch.nn import ReLU, LeakyReLU, Tanh
-from customnn.mlpextractor import MlpExtractorNN
+from customnn import MlpExtractorNN
+from customnn import SeparatedCNNFeatureExtractor
 from customnn.multiextractor import MultiExtractorNN
 from customnn.lstmextractor import LSTMExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
@@ -15,12 +16,14 @@ from binanceenv import BinanceEnvCash
 # from binanceenv import BinanceEnvPPO
 from rllab.labtools import deserialize_kwargs
 from dbbinance.fetcher import MpCacheManager
-__version__ = 0.013
+
+__version__ = 0.015
 
 #   underscore at the end of class name -> call object itself to get method
 lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'HerReplayBuffer': HerReplayBuffer,
                         'MlpExtractorNN': MlpExtractorNN,
+                        'SeparatedCNNFeatureExtractor': SeparatedCNNFeatureExtractor,
                         'LSTMExtractorNN': LSTMExtractorNN,
                         'MultiExtractorNN': MultiExtractorNN,
                         'ReLU': ReLU,

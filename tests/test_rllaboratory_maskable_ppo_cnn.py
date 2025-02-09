@@ -37,7 +37,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.135
+__version__ = 0.140
 
 logger = get_logger()
 # logger = logging.getLogger()
@@ -47,7 +47,7 @@ if __name__ == '__main__':
 
     logger.setLevel(logging.INFO)
 
-    file_handler = logging.FileHandler('test_rllab_mask_ppo.log')
+    file_handler = logging.FileHandler('test_rllab_mask_ppo_cnn.log')
     file_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
@@ -88,15 +88,31 @@ if __name__ == '__main__':
 
     total_timesteps = 3_000_000_000
 
-    agents_n_env = int(3780)
-    n_steps = 300
+    agents_n_env = int(450)
+    # agents_n_env = 1
+    n_steps = 900
     warmup_timesteps = (agents_n_env * n_steps) * 100
+
     index_type = 'target_time'
     # index_type = 'prediction_time'
 
     lookback_window = '10h'
     seed = 42  # start with 443 -> bad
 
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=340,
+    #                              maximum_train_size=365,
+    #                              minimum_test_size=320,
+    #                              maximum_test_size=380,
+    #                              test_size=0.1,
+    #                              verbose=1,
+    #                              indicators_sign=True
+    #                              )
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
                                  timeframe=_timeframe,
@@ -104,14 +120,13 @@ if __name__ == '__main__':
                                  symbol_pair='BTCUSDT',
                                  market='spot',
                                  minimum_train_size=940,
-                                 maximum_train_size=990,
-                                 minimum_test_size=940,
-                                 maximum_test_size=990,
+                                 maximum_train_size=965,
+                                 minimum_test_size=920,
+                                 maximum_test_size=980,
                                  test_size=0.1,
                                  verbose=1,
                                  indicators_sign=True
                                  )
-
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
     #                              timeframe=_timeframe,
@@ -150,14 +165,14 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.92,
+                               gamma=0.956,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete_4',
                                # index_type='target_time',
                                index_type=index_type,
                                render_mode='human',
-                               reward_scaler=100
+                               reward_scaler=10
                                )
 
     # features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 14 * 1.78)
@@ -173,9 +188,9 @@ if __name__ == '__main__':
 
     ppo_policy_kwargs = dict(
         features_extractor_class='SeparatedCNNFeatureExtractor',
-        features_extractor_kwargs=dict(features_dim=256, ),
+        features_extractor_kwargs=dict(features_dim=256),
         share_features_extractor=True,
-        net_arch=[256, dict(pi=[64], vf=[64])],
+        net_arch=[256, 64],
     )
 
     ppo_kwargs = dict(
@@ -183,7 +198,7 @@ if __name__ == '__main__':
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=n_steps,
-        batch_size=int(agents_n_env * n_steps // 10),
+        batch_size=int(agents_n_env * n_steps // 5),
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.03,
@@ -197,10 +212,10 @@ if __name__ == '__main__':
                                            learning_rate=4.5e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
-                                           pre_warmup_coef=0.1)
+                                           pre_warmup_coef=0.03)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.95,
+        gamma=0.956,
         device='auto',
         seed=seed,
         verbose=1)
@@ -215,6 +230,7 @@ if __name__ == '__main__':
             agents_kwargs=[ppo_kwargs],
             agents_n_env=[agents_n_env],
             env_wrapper='labsubproc',
+            # env_wrapper='dummy',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
             checkpoint_num=n_steps * 3,

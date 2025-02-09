@@ -255,8 +255,8 @@ def _worker(remote: mp.connection.Connection, parent_remote: mp.connection.Conne
 
 class LabSubprocVecEnv(VecEnv):
     """
-    Creates a multiprocess vectorized wrapper for multiple environments, distributing each environment to its own
-    process, allowing significant speed up when the environment is computationally complex.
+    Creates a multiprocess vectorized wrapper for multiple environments, distributing environments _list_
+    to process, allowing significant speed up when the environment is computationally complex.
 
     For performance reasons, if your environment is not IO bound, the number of environments should not exceed the
     number of logical cores on your CPU.
@@ -300,7 +300,7 @@ class LabSubprocVecEnv(VecEnv):
                 # Append the indices for this process to the list
                 env_lst = list(range(start_idx, end_idx))
                 if env_lst:
-                    indices.append(list(range(start_idx, end_idx)))
+                    indices.append(env_lst)
                 else:
                     break
                 # Update the start index

@@ -1,16 +1,19 @@
 import sys
 import copy
 import math
+import numpy as np
+import pandas as pd
+
 from dbbinance.fetcher.datautils import get_timeframe_bins
 from dbbinance.fetcher.datautils import get_nearest_timeframe
 
-from typing import Callable, Union, Dict
+from typing import Callable, Union, Dict, Tuple
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv
 from stable_baselines3.common.monitor import Monitor
 
-__version__ = 0.0017
-
 from rllab import LabSubprocVecEnv
+
+__version__ = 0.0017
 
 
 def get_base_env(wrapped_env: Union[Monitor, DummyVecEnv, SubprocVecEnv, LabSubprocVecEnv], env_class):
@@ -46,13 +49,53 @@ def get_lookback_timeframes(lookback_window: Union[str, int, None], timeframe) -
     return lookback_timeframes
 
 
+def detect_timeframe(index: pd.DatetimeIndex) -> Tuple[str, int]:
+    if len(index) < 2:
+        raise ValueError("Error: Length of index < 2")
+
+    delta_minutes = int(index.to_series().diff().dt.total_seconds().dropna()[0] / 60)
+    timeframe = get_nearest_timeframe(delta_minutes)
+    return timeframe, delta_minutes
+
+
+def detect_timeframe_and_periods_per_year(index: pd.DatetimeIndex) -> Tuple[str, int]:
+    """
+    Detect timeframe and annualization factor from DatetimeIndex using its frequency.
+    Returns (timeframe_label, periods_per_year)
+
+    Args:
+        index: Pandas DatetimeIndex with frequency information
+
+    Returns:
+        Tuple of (timeframe_label, periods_per_year)
+        Example: ("15m", 365*24*4) for 15-minute data
+    """
+    if len(index) < 2:
+        raise ValueError("Error: Length of index < 2")
+
+    delta_minutes = index.to_series().diff().dt.total_seconds().dropna()[0] / 60
+    timeframe = get_nearest_timeframe(delta_minutes)
+    periods_per_year = int(365 * 24 * 60 / delta_minutes)
+    return timeframe, periods_per_year
+
+
+# def calculate_sharpe_ratio(returns: pd.Series, periods_per_year: int) -> float:
+#     """
+#     Calculate annualized Sharpe Ratio for crypto markets.
+#     periods_per_year: Number of periods in a year from detect_timeframe()
+#     """
+#     if len(returns) < 2 or returns.std() == 0:
+#         return 0.0
+#
+#     return (returns.mean() / returns.std()) * (periods_per_year ** 0.5)
+
+
 def round_up(n, decimals=0):
     multiplier = 10 ** decimals
     return math.ceil(n * multiplier) / multiplier
 
 
-def deserialize_kwargs(_agent_kwargs: Union[dict, str],
-                       lab_serializer=None) -> Union[dict, Callable]:
+def deserialize_kwargs(_agent_kwargs: Union[dict, str], lab_serializer=None) -> Union[dict, Callable]:
     """
 
     Args:

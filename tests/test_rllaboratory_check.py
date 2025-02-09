@@ -105,7 +105,7 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1401-040250/MaskablePPO_BinanceEnvCash_1800000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1501-010030/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1701-200906/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2801-085431/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0702-102640/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -113,7 +113,7 @@ if __name__ == '__main__':
     """ Sell action reward """
     rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
                             use_period='test')
-    # rllab.backtesting_agent(filename=288036000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=70470000, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='check',

@@ -347,7 +347,7 @@ class LabBase:
         """ Get the list of episodes start - end """
 
         job_lst: list = []
-        for ix, start_end_lst in zip(range(len(env_start_end_lst)), env_start_end_lst):
+        for ix, start_end_lst in enumerate(env_start_end_lst):
             job_lst.append(mp.Process(target=worker_fill_cache,
                                       args=(dp_obj, mp_cache_server, env_kwargs, start_end_lst),
                                       name=f'fillcache_{ix}'
@@ -681,7 +681,7 @@ class LabBase:
 
         train_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                     n_envs=self.agents_n_env[ix],
-                                    seed=env.get_seed(),
+                                    seed=env.get_seed(env.seed + env.idnum),
                                     env_kwargs=train_env_kwargs,
                                     vec_env_cls=self.env_wrapper_cls)
 
@@ -696,7 +696,7 @@ class LabBase:
 
         eval_vec_env_kwargs = dict(env_id=self.env_classes_lst[ix],
                                    n_envs=2,
-                                   seed=env.get_seed(),
+                                   seed=env.get_seed(env.seed + env.idnum),
                                    env_kwargs=eval_env_kwargs,
                                    vec_env_cls=self.env_wrapper_cls)
 

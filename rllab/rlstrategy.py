@@ -1,5 +1,5 @@
 from backtesting import Strategy
-from binanceenv.actionspace import actions_4_reversed_dict
+from binanceenv.actionspace import actions_4_reversed_dict, actions_4_spot_reversed_dict
 
 __version__ = 0.004
 
@@ -38,5 +38,19 @@ class RLStrategyBase(Strategy):
         # self.data.Pnl[-1] = pnl
 
 
-class RLActionStrategy(RLStrategyBase):
-    pass
+class RLSpotStrategy(RLStrategyBase):
+
+    def next(self):
+        action_code = self.data.Action[-1]
+        action_text = actions_4_spot_reversed_dict[action_code]
+        amount = self.data.Amount[-1]
+
+        if action_text == 'Buy':
+            self.buy()
+        elif action_text == 'Sell':
+            self.position.close()
+        elif action_text == 'Close':
+            self.position.close()
+        else:
+            pass
+
