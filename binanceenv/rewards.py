@@ -8,8 +8,9 @@ __version__ = 0.009
 
 
 class RewardsBase(ABC):
-    def __init__(self, asset: Asset):
+    def __init__(self, asset: Asset, loss_threshold: float = 0.0089):
         self.__asset = asset
+        self.loss_threshold = loss_threshold
         self.__trades: TradesBook = asset.trades
         self.ohlcv_df: Optional[pd.DataFrame] = None
 
@@ -76,14 +77,44 @@ class RewardsBase(ABC):
         size = max(min_trade, max_trade)
         return size
 
+    @staticmethod
+    def trade_loss_drawdown_weight(prices: pd.Series, loss_threshold: float = 0.089) -> float:
+        """Calculates the maximum drawdown relative to the highest achieved price.
+
+        Args:
+            prices (pd.Series): Series of prices for analysis.
+            loss_threshold (float): Loss threshold at which we switch to calculating losses from the entry price.
+
+        Returns:
+            float: weight
+        """
+        max_drawdown = 0.0
+        max_loss = 0.0
+        entry_price = prices.iloc[0]
+        high_price = entry_price
+
+        for price in prices:
+            if price > high_price:
+                high_price = price
+
+            current_loss = (price - entry_price) / entry_price
+            drawdown = (high_price - price) / high_price
+            if drawdown > max_drawdown and drawdown > -loss_threshold:
+                max_drawdown = drawdown
+
+            if current_loss < max_loss and current_loss < -loss_threshold:
+                max_loss = current_loss
+
+        return max_loss if max_drawdown < max_loss else max_drawdown
+
     def trade_score(self):
         """
         Calculate the score for a single trade based on risk-adjusted metrics.
         The score is always non-zero and provides meaningful feedback for every trade.
         """
         # Return default score for partially closed trades
-        if self.__trades.last_trade.status == 'partly':
-            return 1.0  # Default score for partially closed trades
+        # if self.__trades.last_trade.status == 'partly':
+        #     return 1.0  # Default score for partially closed trades
 
         # Extract trade data
         trade = self.__trades.last_trade
@@ -92,12 +123,15 @@ class RewardsBase(ABC):
         exit_price = trade.exit_price
         last_price = self.ohlcv_df['close'].loc[end_time]
 
+        """ Get the trade prices and calculate score based on drawdown from entry_price """
+        trade_prices = self.ohlcv_df['close'].loc[start_time:end_time].copy()
+        weight = self.trade_loss_drawdown_weight(trade_prices, loss_threshold=0.05)
+
         # Verify price consistency with tolerance for floating point errors
         if not np.isclose(exit_price, last_price, atol=1e-6):
             raise ValueError(f"Exit price {exit_price} does not match last price {last_price}")
 
         # Calculate price extremes and drawdown
-        trade_prices = self.ohlcv_df['close'].loc[start_time:end_time].copy()
         high_price = trade_prices.max()
         low_price = trade_prices.min()
         max_drawdown_pct = ((high_price - low_price) / high_price) * 100  # Percentage drawdown
@@ -146,6 +180,10 @@ class RewardsBase(ABC):
 
         # Calculate the reward by scaling the PnL with the trade score
         # reward = pnl * score
+        # if pnl >= 0:
+        #     pnl = pnl * (1 - weight)
+        # else:
+        #     pnl = pnl * (1 + weight)
         reward = pnl * score
 
         return reward
@@ -171,7 +209,7 @@ class RewardsBase(ABC):
         else:
             size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
             reward = ((self.ohlcv_df.iloc[timecount - 1]['close'] - self.ohlcv_df.iloc[timecount]['close']) * size) / (
-                        self.__asset.initial_total_in_cash)
+                self.__asset.initial_total_in_cash)
 
         self.__wait_reward.append(reward)
         return reward

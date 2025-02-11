@@ -6,7 +6,7 @@ import random
 import logging
 import time
 from binascii import Error
-from datetime import datetime
+import datetime
 
 import gymnasium
 import numpy as np
@@ -40,6 +40,7 @@ from datawizard.weightdatetime import DateTimeWeight
 from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
+from binanceenv.orderbook import Bal
 from binanceenv.scalers import minmax_normalization
 from binanceenv.actionspace import (actions_reversed_dict,
                                     actions_4_reversed_dict,
@@ -185,7 +186,7 @@ class BinanceEnvBase(gymnasium.Env):
                            commission=.001,  # 0.1000%
                            minimum_trade=0.00001,
                            target_obj=self.target,
-                           initial_balance=(0., 0., 0.),
+                           initial_balance=(0., 0., 0., datetime.datetime.utcnow()),
                            scale_decay=10)
 
         self.ohlcv_df, self.indicators_df = None, None
@@ -394,6 +395,21 @@ class BinanceEnvBase(gymnasium.Env):
             # filling deque stack
             self._warmup_func = self.lookback_warmup
 
+        elif observation_type == 'lookback_norm_assets_close_action_indicators_hybrid':
+            if self.data_processor_kwargs.get('indicators_sign', False):
+                low = -1.0
+            else:
+                low = 0.0
+            space_obj = LookbackAssetsCloseActionIndicatorsSpaceCNN(low=low,
+                                                                    high=1.0,
+                                                                    assets_data=6,
+                                                                    actions=self.action_space_obj.n_action,
+                                                                    ind_num=self.indicators_df.shape[1],
+                                                                    lookback=self.lookback_timeframes)
+            self._get_obs_func = self._get_lookback_norm_assets_close_action_indicators_hybrid_obs
+            # filling deque stack
+            self._warmup_func = self.lookback_warmup
+
         elif observation_type == 'lookback_assets_close_indicators_action':
             if self.data_processor_kwargs.get('indicators_sign', False):
                 low = -1.0
@@ -522,7 +538,7 @@ class BinanceEnvBase(gymnasium.Env):
         return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
 
     def _get_lookback_norm_assets_close_indicators_obs(self) -> np.ndarray:
-        self.obs_lookback.append(self._get_assets_close_indicators_obs())
+        self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
         obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
         obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
@@ -530,7 +546,27 @@ class BinanceEnvBase(gymnasium.Env):
         return obs.flatten()
 
     def _get_lookback_norm_assets_close_indicators_conv1d_obs(self) -> np.ndarray:
-        self.obs_lookback.append(self._get_assets_close_indicators_obs())
+        self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
+        obs = np.array(self.obs_lookback).astype(np.float32)
+        obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
+        obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
+        obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
+        return obs
+
+    def _get_norm_assets_close_action_indicators_obs(self) -> np.ndarray:
+        obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
+                              [self.asset.balance.scaled_arr[0],  # balance.size
+                               self.asset.balance.cost,  # balance.cost
+                               self.asset.balance.price],  # balance.price
+                              [self.price,  # balance.scaled_cost * self.price
+                               self.price]],
+                             dtype=np.float32)
+        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float32)
+        one_hot_action[self.actions_lst[-1]] = 1.0
+        return np.concatenate([obs, one_hot_action, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
+
+    def _get_lookback_norm_assets_close_action_indicators_hybrid_obs(self) -> np.ndarray:
+        self.obs_lookback.append(self._get_norm_assets_close_action_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
         obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
         obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
@@ -921,7 +957,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
         self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
 
-        size, cost, price = .0, .0, .0
+        size, cost, price, initial_datetime = Bal(.0, .0, .0, self.current_datetime)
         if self.use_period == 'train':
             # Scaling OHLC with epsilon probability (more total_timesteps > probability)
             if self.first_epsilon > self.np_random.random():
@@ -931,7 +967,7 @@ class BinanceEnvBase(gymnasium.Env):
             cost = self.price * size
             price = self.price
 
-        self.asset.reset((size, cost, price))
+        self.asset.reset((size, cost, price, initial_datetime))
         self.rewards_obj.reset(self.ohlcv_df)
 
         self.initial_total_assets = self.initial_cash + (
@@ -1162,7 +1198,7 @@ class BinanceEnvCash(BinanceEnvBase):
              self.asset.balance.size >= self.min_coin_trade,
              (
                  self.asset.orders.last_order.OrderType == 'buy' if self.asset.orders.last_order is not None else False) and (
-                         self.timecount <= self.stop_buy_timecount),
+                     self.timecount <= self.stop_buy_timecount),
              self.asset.orders.last_order.OrderType == 'sell' if self.asset.orders.last_order is not None else True],
             dtype=bool)
 

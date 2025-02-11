@@ -115,7 +115,25 @@ class LookbackAssetsCloseIndicatorsSpaceCNN:
                                               shape=(lookback, assets_data + ind_num),
                                               dtype=np.float32,
                                               seed=42)
-        self.name = 'lookback_assets_close_indicators'
+        self.name = 'lookback_assets_close_indicators_cnn'
+
+    @property
+    def observation_space(self):
+        return self.__observation_space
+
+    @observation_space.setter
+    def observation_space(self, value):
+        self.__observation_space = value
+
+
+class LookbackAssetsCloseActionIndicatorsSpaceCNN:
+    def __init__(self, ind_num, assets_data, lookback, actions, low=0.0, high=1.0):
+        self.__observation_space = spaces.Box(low=low,
+                                              high=high,
+                                              shape=(lookback, assets_data + actions + ind_num),
+                                              dtype=np.float32,
+                                              seed=42)
+        self.name = 'lookback_assets_close_action_indicators'
 
     @property
     def observation_space(self):

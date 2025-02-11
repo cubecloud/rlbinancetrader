@@ -1,0 +1,136 @@
+import torch
+import torch.nn as nn
+import math
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from gymnasium.spaces import Box
+
+__version__ = 0.015  # Version with positional encoding and tailored activations
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, max_len: int = 1000):
+        super().__init__()
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Tensor, shape [batch_size, seq_len, d_model]
+        """
+        return x + self.pe[:x.size(1)]
+
+
+class SeparatedCNNFeatureExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space: Box, features_dim: int = 256, assets_features=6, actions_features=4):
+        assert len(observation_space.shape) == 2, "Observation space must be 2D (lookback, features)"
+
+        # Input dimensions
+        self.asset_features = assets_features  # Update based on your environment
+        self.action_features = actions_features  # Changed to 4 as requested
+        self.indicator_features = observation_space.shape[-1] - self.asset_features - self.action_features
+        self.lookback = observation_space.shape[0]
+
+        super().__init__(observation_space, features_dim)
+        print(f'Feature breakdown - Assets: {self.asset_features}, '
+              f'Actions: {self.action_features}, Indicators: {self.indicator_features}')
+
+        # Asset feature processor
+        self.asset_net = nn.Sequential(
+            nn.Conv1d(self.asset_features, 32, kernel_size=3, padding=1),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(1)
+        )
+
+        # Action feature processor (handles one-hot encoded actions)
+        self.action_net = nn.Sequential(
+            nn.Conv1d(self.action_features, 16, kernel_size=3, padding=1),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.AdaptiveAvgPool1d(1)
+        )
+
+        # Indicator processor with transformer and positional encoding
+        self.pos_encoder = PositionalEncoding(self.indicator_features, self.lookback)
+        self.indicator_transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=self.indicator_features,
+                nhead=4,
+                dim_feedforward=256,
+                dropout=0.1,
+                activation='gelu'
+            ),
+            num_layers=2
+        )
+
+        # Temporal CNN tailored for [-1, 1] data
+        self.indicator_temporal = nn.Sequential(
+            nn.Conv1d(self.indicator_features, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.Tanh(),  # Matches input range [-1, 1]
+            nn.MaxPool1d(2),  # Preserves extreme values
+            nn.Conv1d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.Tanh(),
+            nn.AdaptiveAvgPool1d(1)  # Global average pooling
+        )
+
+        # Calculate output dimensions for all branches
+        with torch.no_grad():
+            # Asset branch
+            dummy_asset = torch.randn(1, self.asset_features, self.lookback)
+            asset_out = self.asset_net(dummy_asset).flatten(1)
+
+            # Action branch
+            dummy_action = torch.randn(1, self.action_features, self.lookback)
+            action_out = self.action_net(dummy_action).flatten(1)
+
+            # Indicator branch
+            dummy_ind = torch.randn(1, self.lookback, self.indicator_features)
+            dummy_ind = self.pos_encoder(dummy_ind)
+            trans_out = self.indicator_transformer(dummy_ind).permute(0, 2, 1)
+            ind_out = self.indicator_temporal(trans_out).flatten(1)
+
+            total_features = asset_out.size(1) + action_out.size(1) + ind_out.size(1)
+            print(f"Combined feature size: {total_features}")
+
+        # Final layers
+        self.final_layer = nn.Sequential(
+            nn.Linear(total_features, features_dim),
+            nn.LayerNorm(features_dim),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Linear(features_dim, features_dim)
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        # Split and permute inputs
+        observations = observations.permute(0, 2, 1)  # (batch, features, lookback)
+        asset_input = observations[:, :self.asset_features, :]
+        action_input = observations[:, self.asset_features:self.asset_features + self.action_features, :]
+        indicator_input = observations[:, self.asset_features + self.action_features:, :]
+
+        # Process assets
+        asset_features = self.asset_net(asset_input).flatten(1)
+
+        # Process actions
+        action_features = self.action_net(action_input).flatten(1)
+
+        # Process indicators
+        indicator_input = indicator_input.permute(0, 2, 1)  # (batch, lookback, features)
+        indicator_input = self.pos_encoder(indicator_input)
+        transformed = self.indicator_transformer(indicator_input).permute(0, 2, 1)
+        indicator_features = self.indicator_temporal(transformed).flatten(1)
+
+        # Combine all features
+        combined = torch.cat([asset_features, action_features, indicator_features], dim=1)
+        return self.final_layer(combined)

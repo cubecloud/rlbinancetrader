@@ -5,18 +5,15 @@ import numpy as np
 from typing import List, Union, Tuple, Optional
 from collections import namedtuple
 
-import numba
-from numba import jit
-
 Order = namedtuple('Order', 'OrderType size price order_commission order_cash order_datetime')
-Bal = namedtuple('Bal', 'size cost price')
-# BBalance = namedtuple('Balance', 'size cost price')
+Bal = namedtuple('Bal', 'size cost price initial_datetime')
 
 version = 0.021
 
 
 class TargetCash:
-    def __init__(self, symbol: str = 'USDT',
+    def __init__(self,
+                 symbol: str = 'USDT',
                  initial_cash: float = 100_000.,
                  minimum_trade: float = 5.,
                  maximum_trade: float = 100.,
@@ -68,16 +65,17 @@ class TargetCash:
 class Balance:
     def __init__(self, target_obj: TargetCash,
                  scaler_method,
-                 initial_balance: tuple = (0., 0., 0.), ):
-        self.initial_balance = initial_balance
-        self.size, self.cost, self.price = self.initial_balance
+                 initial_balance: Bal
+                 ):
+        self.initial_balance: Bal = initial_balance
+        self.size, self.cost, self.price, self.last_datetime = copy.deepcopy(initial_balance)
         self.target = target_obj
         self.scaler = scaler_method
         self.scaled_arr = self.calc_scaled_arr()
 
-    def reset(self, initial_balance: tuple = (0., 0., 0.)):
+    def reset(self, initial_balance: tuple):
         self.initial_balance = initial_balance
-        self.size, self.cost, self.price = self.initial_balance
+        self.size, self.cost, self.price, self.last_datetime = copy.deepcopy(initial_balance)
         self.scaled_arr = self.calc_scaled_arr()
 
     def calc_scaled_arr(self):
@@ -98,7 +96,7 @@ class Asset:
                  commission: float,
                  minimum_trade: float,
                  symbol='BTC',
-                 initial_balance: tuple = (0., 0., 0.),
+                 initial_balance: tuple = (0., 0., 0., datetime.datetime.utcnow()),
                  scale_decay: int = 10,
                  ):
         self.symbol = symbol
@@ -106,14 +104,10 @@ class Asset:
         self.initial_balance = Bal(*initial_balance)
         self.scale_decay = scale_decay
         self.scaler = self.simple_scaler
-        self.balance = Balance(target_obj=target_obj, scaler_method=self.scaler, initial_balance=initial_balance, )
+        self.balance = Balance(target_obj=target_obj, scaler_method=self.scaler, initial_balance=self.initial_balance)
+        self.commission = commission
         self.minimum_trade = minimum_trade
-        self.orders = OrdersBook(symbol=self.symbol,
-                                 commission=commission,
-                                 minimum_trade=minimum_trade,
-                                 target_obj=self.target,
-                                 balance_obj=self.balance)
-
+        self.orders = OrdersBook(asset_obj=self)
         self.trades = self.orders.trades
         self.initial_total_in_cash = self.target.initial_cash + (self.initial_balance.size * self.initial_balance.price)
 
@@ -123,7 +117,7 @@ class Asset:
     def set_scaler(self, ref):
         self.scaler = ref
 
-    def reset(self, initial_balance: tuple = (0., 0., 0.)):
+    def reset(self, initial_balance: tuple = (0., 0., 0., datetime.datetime.utcnow())):
         self.target.reset()
         self.initial_balance = Bal(*initial_balance)
         self.balance.reset(initial_balance)
@@ -136,16 +130,17 @@ class Asset:
 
 
 class OrdersBook:
-    def __init__(self, symbol, commission, minimum_trade, target_obj: TargetCash, balance_obj: Balance):
-        self.target = target_obj
-        self.symbol = symbol
-        self.commission = commission
-        self.minimum_trade = minimum_trade
+    def __init__(self, asset_obj: Asset):
+        self.asset: Asset = asset_obj
+        self.target = self.asset.target
+        self.symbol = self.asset.symbol
+        self.commission = self.asset.commission
+        self.minimum_trade = self.asset.minimum_trade
+        self.balance = self.asset.balance
         self.book: List[Order,] = []
-        self.balance = balance_obj
         self.last_index = 0
-        self.trades = TradesBook()
         self.__last_order: Optional[Order] = None
+        self.trades = TradesBook(asset_obj=asset_obj)
 
     def buy(self, size, price, order_datetime):
         size_price = price * size
@@ -196,12 +191,14 @@ class OrdersBook:
                         self.balance.price = self.balance.cost / self.balance.size
                     else:
                         self.balance.price = 0
+                    self.balance.last_datetime = self.book[ix].order_datetime
                 elif self.book[ix].OrderType == 'sell':
                     """  balance.cost minus order_cash for 'Sell' order """
                     self.balance.size -= self.book[ix].size
                     if not self.balance.size:
                         self.balance.price = 0.
                     self.balance.cost = (self.balance.size * self.balance.price)
+                    self.balance.last_datetime = self.book[ix].order_datetime
                 last_index = ix
             self.last_index = last_index + 1
             self.balance.scaled_arr = self.balance.calc_scaled_arr()
@@ -278,13 +275,16 @@ class Trade:
             self.pnl = self.profit / (cash_per_unit * self.size)
             # Set the status to 'closed'
             self.status = 'closed'
-        else:
-            # If there is no open_order, use only the close_order values
-            self.total_commission = self.orders.close_order.order_commission
-            self.profit = self.orders.close_order.order_cash
-            self.price_diff = 1e-7
-            self.pnl = 1e-7
-            self.status = 'partly'
+
+
+        # else:
+        #     # If there is no open_order, use only the close_order values
+        #     self.total_commission = self.orders.close_order.order_commission
+        #     self.profit = self.orders.close_order.order_cash
+        #     self.price_diff = 1e-7
+        #     self.pnl = 1e-7
+        #     self.status = 'partly'
+
 
     def __str__(self):
         msg = (f'Trade: orders={self.orders},\n'
@@ -293,7 +293,8 @@ class Trade:
 
 
 class TradesBook:
-    def __init__(self):
+    def __init__(self, asset_obj: Asset):
+        self.asset = asset_obj
         self.book: List[Trade] = []
         self.__last_trade: Optional[Trade] = None
 
@@ -308,7 +309,25 @@ class TradesBook:
         self.book[-1].open_trade(open_order)
 
     def close_trade(self, close_order) -> None:
-        if not self.book or self.book[-1].closed:
+        if not self.book:
+            """ 
+            add open_order data with initial values, 
+            if we have initial asset data for this symbol
+            """
+            size = self.asset.initial_balance.size
+            price = self.asset.initial_balance.price
+            initial_datetime = self.asset.initial_balance.initial_datetime
+            size_price = price * size
+            order_commission = size_price * self.asset.commission  # just add commission cos already paid before
+            order_cash = - size_price
+            self.asset.orders.book.insert(0, Order('Buy', size, price, order_commission, order_cash, initial_datetime))
+            self.asset.orders.__last_order = self.asset.orders.book[-1]
+            self.asset.trades.open_trade(self.asset.orders.book[0])
+            """
+            do not recalc balance cos we get data from initial balance
+            """
+            # self.asset.orders.recalc_balance()
+        elif self.book[-1].closed:
             self.new_trade()
         self.book[-1].close_trade(close_order)
 
@@ -351,9 +370,6 @@ if __name__ == '__main__':
     check_commission = 0.
 
     ix = 0
-    print(f'Initial cash: {_target_obj.initial_cash}')
-    asset = Asset(symbol='BTC', commission=.001, minimum_trade=0.00001, target_obj=_target_obj,
-                  initial_balance=(0.5, 20020, 40000))
 
 
     def show_order(action, size, price, order_datetime):
@@ -374,7 +390,11 @@ if __name__ == '__main__':
         ix += 1
 
 
-    show_order('sell', 0.5, 30000, datetime.datetime.utcnow())
+    print(f'Initial cash: {_target_obj.initial_cash}')
+    asset = Asset(symbol='BTC', commission=.001, minimum_trade=0.00001, target_obj=_target_obj,
+                  initial_balance=Bal(0.5, 20020, 40000, datetime.datetime.utcnow()))
+
+    show_order('sell', 0.5, 40000, datetime.datetime.utcnow())
     show_order('buy', 0.5, 30000, datetime.datetime.utcnow())
     show_order('sell', 0.5, 30000, datetime.datetime.utcnow())
     show_order('buy', 0.5, 60000, datetime.datetime.utcnow())

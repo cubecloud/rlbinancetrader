@@ -113,8 +113,8 @@ if __name__ == '__main__':
     """ Sell action reward """
     rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
                             use_period='test')
-    # rllab.backtesting_agent(filename=70470000, render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='test')
+    # rllab.backtesting_agent(filename=448335000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    #                         use_period='train')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='check',
     #                         data_processor_kwargs=data_processor_kwargs)
