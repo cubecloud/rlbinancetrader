@@ -540,26 +540,24 @@ class BinanceEnvBase(gymnasium.Env):
     def _get_lookback_norm_assets_close_indicators_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
-        obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
-        obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
-        obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
+        # obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
+        # obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
+        # obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
         return obs.flatten()
 
     def _get_lookback_norm_assets_close_indicators_conv1d_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
-        obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
-        obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
-        obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
+        # obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
+        # obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
+        # obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
         return obs
 
     def _get_norm_assets_close_action_indicators_obs(self) -> np.ndarray:
+        scaled_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
-                              [self.asset.balance.scaled_arr[0],  # balance.size
-                               self.asset.balance.cost,  # balance.cost
-                               self.asset.balance.price],  # balance.price
-                              [self.price,  # balance.scaled_cost * self.price
-                               self.price]],
+                              self.asset.balance.scaled_arr,
+                              [self.asset.balance.scaled_arr[0] * scaled_price, scaled_price]],
                              dtype=np.float32)
         one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float32)
         one_hot_action[self.actions_lst[-1]] = 1.0
@@ -568,9 +566,6 @@ class BinanceEnvBase(gymnasium.Env):
     def _get_lookback_norm_assets_close_action_indicators_hybrid_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_action_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
-        obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
-        obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
-        obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
         return obs
 
     def _get_assets_close_indicators_action_obs(self) -> np.ndarray:
@@ -1306,7 +1301,7 @@ class BinanceEnvCash(BinanceEnvBase):
         self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
         self.reward_step += self.rewards_obj.wait_action_reward(self.timecount,
                                                                 momentum_threshold=0.87,
-                                                                perc_threshold=0.005)
+                                                                perc_threshold=0.0087)
 
     def _take_action(self, action, amount) -> tuple:
         old_target_balance = float(self.cash)
@@ -1381,21 +1376,12 @@ class BinanceEnvCash(BinanceEnvBase):
 
         if terminated or truncated:
             self.dones = True
-            self.reward_step += self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
-
-        # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-        # # self.reward_step = (self.gamma_return * 0.6 ** (self.timeframes_24h / self.timecount)) * self.reward_scaler
-        # self.reward_step = (self.gamma_return * self.dt_weight_obj.calc_weight(
-        #     self.previous_datetime)) * self.reward_scaler
+            # self.reward_step += self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
 
         self.reward_step = self.reward_step * self.reward_scaler * self.dt_weight_obj.calc_weight(
             self.previous_datetime)
 
         self.render_df['reward'][self.timecount - 1] = self.reward_step
-        # if self.gamma_return_reset:
-        #     self.gamma_return = 0.
-        #     self.gamma_return_reset = False
-        # self.reward_step = self.reward_step/(self.timecount/self.ohlcv_df.shape[0])
         self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
@@ -1425,6 +1411,7 @@ class BinanceEnvCash(BinanceEnvBase):
         self._warmup()
 
     def reset(self, seed=None, options=None):
+
         self.total_episodes_counter += 1 if self.use_period == 'train' else 0
         observation, info = super().reset(seed, options)
         self.size_lst = []

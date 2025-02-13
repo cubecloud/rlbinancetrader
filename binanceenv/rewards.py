@@ -7,24 +7,37 @@ import pandas as pd
 __version__ = 0.009
 
 
+class WaitPeriod:
+    def __init__(self):
+        self.entry_datetime = None
+        self.exit_datetime = None
+        self.entry_price = None
+        self.exit_price = None
+        self.wait_reward: List[float] = []
+        self.size: float = 0.0
+
+    def reset(self):
+        self.entry_datetime = None
+        self.exit_datetime = None
+        self.entry_price = None
+        self.exit_price = None
+        self.size: float = 0.0
+        self.wait_reward.clear()
+
+
 class RewardsBase(ABC):
-    def __init__(self, asset: Asset, loss_threshold: float = 0.0089):
+    def __init__(self, asset: Asset,
+                 loss_threshold: float = 0.0089,
+                 profit_threshold: float = 0.011):
         self.__asset = asset
         self.loss_threshold = loss_threshold
+        self.profit_threshold = profit_threshold
         self.__trades: TradesBook = asset.trades
         self.ohlcv_df: Optional[pd.DataFrame] = None
 
-        self.__wait_reward: List[float] = []
-        """ 
-        Various weights for calculations 
-        """
-        # Trade score weights
-        self.risk_weight = 0.02
-        self.sharpe_ratio_weight = 0.3
-        self.drawdown_weight = 0.3
-
         # Local initialization of TALib, for multiprocessing
         self.talib = None
+        self.current_wait_period = WaitPeriod()
 
     def _init_lib(self):
         # Called only once per instance, in the child process
@@ -59,10 +72,11 @@ class RewardsBase(ABC):
         return score * 0.01
 
     def final_reward(self, buy_and_hold_pnl):
-        pnl_score = self.pnl_score(buy_and_hold_pnl)
-        win_rate_score = self.win_rate_score()
-        _final_reward = win_rate_score + pnl_score
-        return _final_reward
+        # pnl_score = self.pnl_score(buy_and_hold_pnl)
+        # win_rate_score = self.win_rate_score()
+        # _final_reward = win_rate_score + pnl_score
+        pass
+        # return _final_reward
 
     def size(self, price, cash) -> float:
         """
@@ -77,123 +91,168 @@ class RewardsBase(ABC):
         size = max(min_trade, max_trade)
         return size
 
-    @staticmethod
-    def trade_loss_drawdown_weight(prices: pd.Series, loss_threshold: float = 0.089) -> float:
+    def trade_loss_drawdown_weight(self, prices: pd.Series) -> float:
         """Calculates the maximum drawdown relative to the highest achieved price.
 
         Args:
             prices (pd.Series): Series of prices for analysis.
-            loss_threshold (float): Loss threshold at which we switch to calculating losses from the entry price.
 
         Returns:
             float: weight
         """
-        max_drawdown = 0.0
-        max_loss = 0.0
-        entry_price = prices.iloc[0]
-        high_price = entry_price
+        max_price = prices.max()
+        drawdown = (max_price - prices.min()) / max_price
+        return max(0.0, drawdown - self.loss_threshold)  # ensure non-negative weight
 
-        for price in prices:
-            if price > high_price:
-                high_price = price
+    def trade_profit_max_weight(self, prices: pd.Series) -> float:
+        """Calculates the maximum profit relative to the lowest achieved price.
 
-            current_loss = (price - entry_price) / entry_price
-            drawdown = (high_price - price) / high_price
-            if drawdown > max_drawdown and drawdown > -loss_threshold:
-                max_drawdown = drawdown
+        Args:
+            prices (pd.Series): Series of prices for analysis.
 
-            if current_loss < max_loss and current_loss < -loss_threshold:
-                max_loss = current_loss
-
-        return max_loss if max_drawdown < max_loss else max_drawdown
-
-    def trade_score(self):
+        Returns:
+            float: weight
         """
-        Calculate the score for a single trade based on risk-adjusted metrics.
-        The score is always non-zero and provides meaningful feedback for every trade.
+        min_price = prices.min()
+        max_profit = (prices.max() - min_price) / min_price
+        return max(0, max_profit - self.profit_threshold)  # Ensure non-negative weight
+
+    def wait_potential_loss(self, prices: pd.Series) -> float:
+        """Calculates the potential maximum loss relative to the highest achieved price.
+
+        Args:
+            prices (pd.Series): Series of prices for analysis.
+
+        Returns:
+            float: weight
+         """
+        max_price = prices.max()
+        potential_loss = (max_price - prices[-1]) / max_price  # Potential loss considering current price as highest
+        return max(0, potential_loss - self.loss_threshold)  # Ensure non-negative weight
+
+    # @staticmethod
+    # def trade_loss_drawdown_weight(prices: pd.Series, loss_threshold: float = 0.089) -> float:
+    #     """Calculates the maximum drawdown relative to the highest achieved price.
+    #
+    #     Args:
+    #         prices (pd.Series): Series of prices for analysis.
+    #         loss_threshold (float): Loss threshold at which we switch to calculating losses from the entry price.
+    #
+    #     Returns:
+    #         float: weight
+    #     """
+    #     max_drawdown = 0.0
+    #     max_loss = 0.0
+    #     entry_price = prices.iloc[0]
+    #     high_price = entry_price
+    #
+    #     for price in prices:
+    #         if price > high_price:
+    #             high_price = price
+    #
+    #         current_loss = (price - entry_price) / entry_price
+    #         drawdown = (high_price - price) / high_price
+    #         if drawdown > max_drawdown and drawdown > -loss_threshold:
+    #             max_drawdown = drawdown
+    #
+    #         if current_loss < max_loss and current_loss < -loss_threshold:
+    #             max_loss = current_loss
+    #
+    #     return max_loss if max_drawdown < max_loss else max_drawdown
+
+    def trade_period_weight(self):
         """
-        # Return default score for partially closed trades
-        # if self.__trades.last_trade.status == 'partly':
-        #     return 1.0  # Default score for partially closed trades
+        Calculate the weight for a single trade based on drawdown metrics.
+        The weight is always non-zero and provides meaningful feedback for every trade
+        """
 
         # Extract trade data
         trade = self.__trades.last_trade
-        start_time = trade.entry_datetime
-        end_time = trade.exit_datetime
-        exit_price = trade.exit_price
-        last_price = self.ohlcv_df['close'].loc[end_time]
+        entry_datetime = trade.entry_datetime
+        exit_datetime = trade.exit_datetime
 
         """ Get the trade prices and calculate score based on drawdown from entry_price """
-        trade_prices = self.ohlcv_df['close'].loc[start_time:end_time].copy()
-        weight = self.trade_loss_drawdown_weight(trade_prices, loss_threshold=0.05)
+        trade_prices = self._trade_prices(entry_datetime, exit_datetime)
+        weight = self.trade_loss_drawdown_weight(trade_prices)
+        return weight
 
-        # Verify price consistency with tolerance for floating point errors
-        if not np.isclose(exit_price, last_price, atol=1e-6):
-            raise ValueError(f"Exit price {exit_price} does not match last price {last_price}")
+    def wait_period_weight(self) -> float:
+        """
+        Calculates the potential maximum loss (weight) relative to the highest and lowest achieved price
 
-        # Calculate price extremes and drawdown
-        high_price = trade_prices.max()
-        low_price = trade_prices.min()
-        max_drawdown_pct = ((high_price - low_price) / high_price) * 100  # Percentage drawdown
+        Returns:
+            float: weight
+        """
+        # Extract trade data
+        entry_datetime = self.current_wait_period.entry_datetime
+        exit_datetime = self.current_wait_period.exit_datetime
+        if entry_datetime == exit_datetime:
+            return 1e-6
 
-        # Calculate risk-adjusted metrics
-        if trade_prices.shape[0] > 3:
-            # Volatility (standard deviation of returns)
-            trade_returns = trade_prices.pct_change().dropna()
-            volatility = trade_returns.std() if not trade_returns.empty else 0.0
-            volatility = max(volatility, 1e-6)  # Ensure non-zero
-            # Sharpe Ratio (mean return divided by volatility)
-            if trade_returns.empty:
-                sharpe_ratio = 0.0
-            else:
-                mean_return = trade_returns.mean()
-                sharpe_ratio = mean_return / volatility
-        else:
-            return 1.0
+        trade_prices = self._trade_prices(entry_datetime, exit_datetime)
 
-        # Risk score (inverse of drawdown with smoothing)
-        risk_score = 1 / (max_drawdown_pct + 1e-6)
+        min_price = trade_prices.min()
+        max_price = trade_prices.max()
+        entry_price = self.current_wait_period.entry_price
 
-        # Combine components with weights
-        score = (
-                self.risk_weight * risk_score +
-                self.sharpe_ratio_weight * sharpe_ratio +
-                self.drawdown_weight * max_drawdown_pct
-        )
+        # Calculate the potential loss considering current price as highest
+        potential_loss1 = (max_price - entry_price) / max_price
+        potential_loss2 = 1e-6
 
-        return abs(score)
+        # If we have bought in minimum price then calculate potential loss from there
+        if min_price < entry_price:
+            potential_loss2 = (entry_price - min_price) / min_price
+
+        # Take the maximum of both potential losses
+        max_potential_loss = max(potential_loss1, potential_loss2)
+
+        return max(0, max_potential_loss - self.loss_threshold)  # Ensure non-negative weight
+
+    def _trade_prices(self, entry_datetime, exit_datetime):
+        return self.ohlcv_df['close'].loc[entry_datetime:exit_datetime].copy()
 
     def closed_trade_reward(self):
         """
-        Calculate the reward for a closed trade by combining PnL and the trade score.
-        The score acts as a weight to adjust the reward based on the trade's risk-adjusted performance.
+        Calculate the reward for a closed trade by combining relative_pnl and the trade weight.
+        The weight to adjust the reward based on the trade's risk-adjusted performance.
         """
-        # Get the trade score (weight) from the trade_score method
-        score = self.trade_score()
-
-        # Ensure the score is non-negative to avoid flipping the sign of the reward
-        if score < 0:
-            raise ValueError("Trade score must be non-negative.")
+        # Get the trade weight from the trade_weight method
+        weight = self.trade_period_weight()
 
         # Get the PnL of the last closed trade
-        pnl = self.pnl(self.__trades.last_trade.profit)  # PnL can be positive or negative
+        relative_pnl = self.pnl(self.__trades.last_trade.profit)  # PnL can be positive or negative
 
-        # Calculate the reward by scaling the PnL with the trade score
-        # reward = pnl * score
-        # if pnl >= 0:
-        #     pnl = pnl * (1 - weight)
-        # else:
-        #     pnl = pnl * (1 + weight)
-        reward = pnl * score
-
+        if relative_pnl >= 0:
+            reward = relative_pnl * (1 - weight)
+        else:
+            reward = relative_pnl * (1 + weight)
         return reward
 
     def buy_action_reward(self):
-        reward = sum(self.__wait_reward)
-        self.__wait_reward.clear()
+        if self.current_wait_period.wait_reward:
+            self.current_wait_period.exit_datetime = self.__trades.last_trade.entry_datetime
+            self.current_wait_period.exit_price = self.__trades.last_trade.entry_price
+        else:
+            return 1e-6
+
+        weight = self.wait_period_weight()
+        relative_pnl = (
+                                   self.current_wait_period.entry_price - self.current_wait_period.exit_price) / self.__asset.initial_total_in_cash
+        if relative_pnl >= 0:
+            reward = relative_pnl * (1 - weight)
+        else:
+            reward = relative_pnl * (1 + weight)
+
+        self.current_wait_period.reset()
         return reward
 
-    def wait_action_reward(self, timecount, momentum_threshold=0.87, perc_threshold=0.005):
+    def wait_action_reward(self, timecount, momentum_threshold=0.87, perc_threshold=0.0087):
+        if not self.current_wait_period.wait_reward:
+            self.current_wait_period.entry_datetime = self.ohlcv_df.index[timecount].to_pydatetime()
+            self.current_wait_period.entry_price = self.ohlcv_df.iloc[timecount]['close']
+            # TODO rewrite for multiassets trading (must updates each timestep)
+            self.current_wait_period.size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
+
         # Get precomputed TA-Lib values
         atr = self.ohlcv_df.iloc[timecount]['atr14']
         momentum = self.ohlcv_df.iloc[timecount]['momentum14']
@@ -205,20 +264,17 @@ class RewardsBase(ABC):
 
         if flat_market:
             # Reward based on volatility suppression
-            reward = 0.015 * (perc_threshold - price_volatility)
+            reward = 0.3 * (perc_threshold - price_volatility)
         else:
-            size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
+            size = self.current_wait_period.size
             reward = ((self.ohlcv_df.iloc[timecount - 1]['close'] - self.ohlcv_df.iloc[timecount]['close']) * size) / (
                 self.__asset.initial_total_in_cash)
 
-        self.__wait_reward.append(reward)
+        self.current_wait_period.wait_reward.append(reward)
         return reward
 
     def reset(self, ohlcv_df):
         self._init_lib()
-
-        # Clear wait_reward buffer
-        self.__wait_reward.clear()
 
         self.ohlcv_df = ohlcv_df.copy()
         # Precompute TA-Lib indicators
@@ -235,6 +291,7 @@ class RewardsBase(ABC):
 
         # Fill NaN values created by indicators
         self.ohlcv_df.fillna(method='bfill', inplace=True)
+        self.current_wait_period.reset()
 
 
 class Rewards(RewardsBase):

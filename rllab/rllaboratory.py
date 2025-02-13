@@ -43,8 +43,6 @@ from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
 from rllab import LabMaskEvalCallback
-# from rllab import LabMpVecEnv
-# from rllab import LabMltVecEnv
 from rllab import LabSubprocVecEnv
 from rllab.labmaskevaluation import lab_mask_evaluate_policy
 from rllab.labtools import deserialize_kwargs, round_up, get_base_env
@@ -55,10 +53,7 @@ from datawizard.dataprocessor import IndicatorProcessor
 from sb3_contrib import MaskablePPO, TRPO
 from tqdm import tqdm
 
-# from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
-# from sb3_contrib.common.maskable.evaluation import evaluate_policy
-
-__version__ = 0.049
+__version__ = 0.052
 
 TZ = timezone('Europe/Moscow')
 

@@ -1,2 +1,3 @@
 from customnn.mlpextractor import MlpExtractorNN
 from customnn.separatedcnnextractor import SeparatedCNNFeatureExtractor
+from customnn.hybrydextractor import HybridFeatureExtractor

@@ -4,6 +4,7 @@ import numpy as np
 from rllab.labcosheduller import CoSheduller
 from torch.nn import ReLU, LeakyReLU, Tanh
 from customnn import MlpExtractorNN
+from customnn import HybridFeatureExtractor
 from customnn import SeparatedCNNFeatureExtractor
 from customnn.multiextractor import MultiExtractorNN
 from customnn.lstmextractor import LSTMExtractorNN
@@ -24,6 +25,7 @@ lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
                         'HerReplayBuffer': HerReplayBuffer,
                         'MlpExtractorNN': MlpExtractorNN,
                         'SeparatedCNNFeatureExtractor': SeparatedCNNFeatureExtractor,
+                        'HybridFeatureExtractor': HybridFeatureExtractor,
                         'LSTMExtractorNN': LSTMExtractorNN,
                         'MultiExtractorNN': MultiExtractorNN,
                         'ReLU': ReLU,
