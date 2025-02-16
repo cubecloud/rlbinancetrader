@@ -276,16 +276,6 @@ class Trade:
             # Set the status to 'closed'
             self.status = 'closed'
 
-
-        # else:
-        #     # If there is no open_order, use only the close_order values
-        #     self.total_commission = self.orders.close_order.order_commission
-        #     self.profit = self.orders.close_order.order_cash
-        #     self.price_diff = 1e-7
-        #     self.pnl = 1e-7
-        #     self.status = 'partly'
-
-
     def __str__(self):
         msg = (f'Trade: orders={self.orders},\n'
                f' size={self.size}, t.commission={self.total_commission}, profit={self.profit}, status={self.status}')

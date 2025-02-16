@@ -7,11 +7,12 @@ channels:
   - pytorch
   - defaults
 dependencies:
+  - python~=3.10.0
   - pip>=21.0.1
   - setuptools>=51.0.0
   - numpy>=1.19.2
   - pandas>=1.1.5,<2.0.0
-  - python-binance==1.0.19
+  - python-binance>=1.0.19
   - ta-lib>=0.4.19
   - pycryptodome~=3.11
   - matplotlib>=3.0.2
@@ -26,7 +27,7 @@ dependencies:
   - typing-extensions>=3.7.4
   - pytz>=2020.4
   - requests
-  - websockets==9.1
+  - websockets>=9.1
   - psycopg2>=2.9.3
   - apscheduler
   - scipy

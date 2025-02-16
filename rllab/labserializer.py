@@ -1,7 +1,8 @@
 import copy
 from typing import Union, Callable, ClassVar
 import numpy as np
-from rllab.labcosheduller import CoSheduller
+from sb3_rllab import CoScheduler
+
 from torch.nn import ReLU, LeakyReLU, Tanh
 from customnn import MlpExtractorNN
 from customnn import HybridFeatureExtractor
@@ -21,7 +22,7 @@ from dbbinance.fetcher import MpCacheManager
 __version__ = 0.015
 
 #   underscore at the end of class name -> call object itself to get method
-lab_serializer: dict = {'learning_rate': {'CoSheduller_': CoSheduller},
+lab_serializer: dict = {'learning_rate': {'CoScheduler_': CoScheduler},
                         'HerReplayBuffer': HerReplayBuffer,
                         'MlpExtractorNN': MlpExtractorNN,
                         'SeparatedCNNFeatureExtractor': SeparatedCNNFeatureExtractor,
@@ -69,7 +70,7 @@ if __name__ == '__main__':
                       replay_buffer_class='HerReplayBuffer',
                       stats_window_size=100,
                       ent_coef='auto_0.0001',
-                      learning_rate={'CoSheduller': dict(warmup=learning_start,
+                      learning_rate={'CoScheduler': dict(warmup=learning_start,
                                                          learning_rate=2e-4,
                                                          min_learning_rate=1e-5,
                                                          total_epochs=total_timesteps,

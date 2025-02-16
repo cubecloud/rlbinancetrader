@@ -26,7 +26,7 @@ from binanceenv.cache import eval_cache_manager_obj
 
 from dbbinance.fetcher.datautils import get_timeframe_bins
 from dbbinance.fetcher.datautils import get_nearest_timeframe
-from dbbinance.fetcher.slocks import SThLock, SMpLock
+from sb3_rllab import SThLock, SMpLock
 
 import multiprocessing as mp
 from dbbinance.fetcher import MpCacheManager
@@ -921,18 +921,19 @@ class BinanceEnvBase(gymnasium.Env):
         if len(self.CM) >= stable_cache:
             if self.reuse_data_prob > self.np_random.random():
                 if not self.key_list:
-                    """ Creating the list of cache data from probs dict """
-                    self.key_list = list(self.CM.hits_probs().keys())
-                    """ 
-                    if cache filled and reuse prob > rnd and key_list empty,
-                    keep old data from cache * 0.01 (remove top 99%) on this learning cycle
-                    and have a short key_list to have 'actual' probs from global cache 
-                    """
                     if self.use_period == 'train':
+                        """ Creating the list of cache data from probs dict """
+                        self.key_list = list(self.CM.hits_probs().keys())
+                        """ 
+                        if cache filled and reuse prob > rnd and key_list empty,
+                        keep old data from cache * 0.01 (remove top 99%) on this learning cycle
+                        and have a short key_list to have 'actual' probs from global cache 
+                        """
                         to_keep_ix = int(len(self.key_list) * 0.01) + 2
                         """ Creating list of keys to use data from cache """
                         self.key_list = self.key_list[:to_keep_ix]
-
+                    else:
+                        self.key_list = list(self.CM.keys())
                 if self.use_period == 'train':
                     self.np_random.shuffle(self.key_list)
                 """ Get 1st key to get data from cache """
@@ -1374,9 +1375,10 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
 
+
         if terminated or truncated:
             self.dones = True
-            # self.reward_step += self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
+            self.reward_step += self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
 
         self.reward_step = self.reward_step * self.reward_scaler * self.dt_weight_obj.calc_weight(
             self.previous_datetime)

@@ -39,11 +39,11 @@ from dataclasses import asdict, dataclass, field, make_dataclass
 import gymnasium
 from gymnasium.utils import seeding
 
+from sb3_rllab import LabSubprocVecEnv
 from rllab import ConfigMethods
 from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
 from rllab import LabMaskEvalCallback
-from rllab import LabSubprocVecEnv
 from rllab.labmaskevaluation import lab_mask_evaluate_policy
 from rllab.labtools import deserialize_kwargs, round_up, get_base_env
 from rllab.labserializer import lab_serializer

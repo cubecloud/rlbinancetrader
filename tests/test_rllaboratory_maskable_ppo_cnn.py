@@ -37,7 +37,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.140
+__version__ = 0.145
 
 logger = get_logger()
 # logger = logging.getLogger()
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     agents_n_env = int(450)
     # agents_n_env = 1
     n_steps = 900
-    warmup_timesteps = (agents_n_env * n_steps) * 100
+    warmup_timesteps = (agents_n_env * n_steps) * 200
 
     index_type = 'target_time'
     # index_type = 'prediction_time'
@@ -119,10 +119,10 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=925,
-                                 maximum_train_size=950,
-                                 minimum_test_size=920,
-                                 maximum_test_size=960,
+                                 minimum_train_size=920,
+                                 maximum_train_size=945,
+                                 minimum_test_size=915,
+                                 maximum_test_size=955,
                                  test_size=0.1,
                                  verbose=1,
                                  indicators_sign=True
@@ -165,7 +165,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.93,
+                               gamma=0.96,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete_4',
@@ -190,7 +190,7 @@ if __name__ == '__main__':
         features_extractor_class='SeparatedCNNFeatureExtractor',
         features_extractor_kwargs=dict(features_dim=256),
         share_features_extractor=True,
-        net_arch=dict(pi=[256, 128, 64], vf=[256, 64])
+        net_arch=dict(pi=[256, 128, 64], vf=[256, 128, 64])
         # net_arch=[256, 64],
     )
     # ppo_policy_kwargs = dict(
@@ -207,24 +207,24 @@ if __name__ == '__main__':
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=n_steps,
-        batch_size=int(agents_n_env * n_steps // 5),
+        batch_size=int(agents_n_env * n_steps // 12),
         n_epochs=10,
         stats_window_size=25,
         ent_coef=0.03,
         normalize_advantage=True,
         clip_range=0.2,
         clip_range_vf=0.2,
-        learning_rate={'CoSheduller': dict(warmup=warmup_timesteps,
+        learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
                                            stable_warmup=False,
-                                           floor_learning_rate=1e-7,
-                                           min_learning_rate=2e-6,
-                                           learning_rate=3.5e-6,
+                                           floor_learning_rate=1e-6,
+                                           min_learning_rate=2.2e-6,
+                                           learning_rate=3.25e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
-                                           pre_warmup_coef=0.03)
+                                           pre_warmup_coef=0.1)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.93,
+        gamma=0.96,
         device='auto',
         seed=seed,
         verbose=1)

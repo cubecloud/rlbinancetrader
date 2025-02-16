@@ -71,12 +71,14 @@ class RewardsBase(ABC):
             score = -np.exp(-pnl) * (weight ** 2)
         return score * 0.01
 
-    def final_reward(self, buy_and_hold_pnl):
-        # pnl_score = self.pnl_score(buy_and_hold_pnl)
-        # win_rate_score = self.win_rate_score()
-        # _final_reward = win_rate_score + pnl_score
-        pass
-        # return _final_reward
+    def final_reward(self, buy_and_hold_pnl) -> float:
+        _final_reward = 0.0
+        episode_relative_pnl = self.pnl(self.__trades.profit)
+        if episode_relative_pnl > .0:
+            _final_reward = 0.5
+            if episode_relative_pnl > buy_and_hold_pnl:
+                _final_reward += 0.5
+        return _final_reward
 
     def size(self, price, cash) -> float:
         """
@@ -236,12 +238,17 @@ class RewardsBase(ABC):
             return 1e-6
 
         weight = self.wait_period_weight()
-        relative_pnl = (
-                                   self.current_wait_period.entry_price - self.current_wait_period.exit_price) / self.__asset.initial_total_in_cash
-        if relative_pnl >= 0:
-            reward = relative_pnl * (1 - weight)
+        size = self.current_wait_period.size
+        # inversed_relative_pnl = ((self.current_wait_period.entry_price - self.current_wait_period.exit_price) * size) / self.__asset.initial_total_in_cash
+        # if inversed_relative_pnl >= 0:
+        #     reward = inversed_relative_pnl * (1 - weight)
+        # else:
+        #     reward = inversed_relative_pnl * (1 + weight)
+        synthetic_pnl = sum(self.current_wait_period.wait_reward) * size
+        if synthetic_pnl >= 0:
+            reward = synthetic_pnl * (1 - weight)
         else:
-            reward = relative_pnl * (1 + weight)
+            reward = synthetic_pnl * (1 + weight)
 
         self.current_wait_period.reset()
         return reward
@@ -262,14 +269,27 @@ class RewardsBase(ABC):
         flat_market = (price_volatility < perc_threshold) & (
                 abs(momentum) < momentum_threshold)  # 0.87% momentum threshold
 
+        size = self.current_wait_period.size
         if flat_market:
-            # Reward based on volatility suppression
-            reward = 0.3 * (perc_threshold - price_volatility)
+            """
+            Reward based on volatility suppression - checked weights 
+            [0.3, 
+            0.5 * size - too much(?)
+            0.25 * size - less than we need
+            0.375 * size - less than we need
+            0.75 * size - over much
+            0.4375 * size - too much
+            0.4130001 * size - too much
+            0.39400005 * size -
+            ]
+            """
+
+            reward = 0.39400005 * size * (perc_threshold - price_volatility)
         else:
-            size = self.current_wait_period.size
             reward = ((self.ohlcv_df.iloc[timecount - 1]['close'] - self.ohlcv_df.iloc[timecount]['close']) * size) / (
                 self.__asset.initial_total_in_cash)
 
+        # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
         self.current_wait_period.wait_reward.append(reward)
         return reward
 
