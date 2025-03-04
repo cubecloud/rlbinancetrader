@@ -50,7 +50,7 @@ from rllab.labserializer import lab_serializer
 from rllab.labfillcache import worker_fill_cache
 from datawizard.dataprocessor import IndicatorProcessor
 
-from sb3_contrib import MaskablePPO, TRPO
+from sb3_contrib import MaskablePPO, TRPO, RecurrentPPO
 from tqdm import tqdm
 
 __version__ = 0.052
@@ -427,11 +427,13 @@ class LabBase:
                      n_eval_episodes: Union[int, None] = None,
                      verbose=1):
 
-        if total_timesteps is not None:
-            env_kwargs_update.update({'total_timesteps': total_timesteps})
-
         if env_kwargs_update is not None:
             self.env_kwargs_lst[ix].update(env_kwargs_update)
+        else:
+            env_kwargs_update = dict()
+
+        if total_timesteps is not None:
+            env_kwargs_update.update({'total_timesteps': total_timesteps})
 
         # noinspection PyTypeChecker
         agent_cfg = LABConfig(**asdict(self.base_cfg))
@@ -926,7 +928,7 @@ class LabBase:
         for ix in range(n_tests):
             logger.info(f"{self.__class__.__name__}: test #{ix:02d}")
             unwrapped_env.set_render_output(f'{path_filename}_{ix:02d}')
-            episode_rewards = .0
+            episode_rewards: List[float] = []
             states = None
             episode_starts = np.ones((1,), dtype=bool)
             while True:
@@ -944,8 +946,8 @@ class LabBase:
                                                        episode_start=None,
                                                        deterministic=self.deterministic
                                                        )
-                observations, rewards, dones, info = env.step(action)
-                episode_rewards += rewards
+                observations, reward, dones, info = env.step(action)
+                episode_rewards.append(reward)
                 if dones.any():
                     unwrapped_env.render_all(unwrapped_env.get_last_render_df())
                     break

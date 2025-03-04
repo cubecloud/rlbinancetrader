@@ -9,7 +9,7 @@ from multiprocessing import freeze_support
 from multiprocessing import get_logger
 from stable_baselines3.common.buffers import RolloutBuffer
 
-__version__ = 0.0021
+__version__ = 0.025
 
 logger = get_logger()
 
@@ -64,21 +64,35 @@ if __name__ == '__main__':
     #                              indicators_sign=True
     #                              )
 
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=500,
+    #                              maximum_train_size=600,
+    #                              minimum_test_size=500,
+    #                              maximum_test_size=600,
+    #                              test_size=0.1,
+    #                              verbose=0,
+    #                              indicators_sign=True
+    #                              )
+
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
                                  timeframe=_timeframe,
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=500,
-                                 maximum_train_size=600,
-                                 minimum_test_size=500,
-                                 maximum_test_size=600,
+                                 minimum_train_size=930,
+                                 maximum_train_size=945,
+                                 minimum_test_size=915,
+                                 maximum_test_size=955,
                                  test_size=0.1,
-                                 verbose=0,
+                                 verbose=1,
                                  indicators_sign=True
                                  )
-
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1011-230816/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2311-021257/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2411-231048/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
@@ -106,7 +120,11 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1501-010030/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1701-200906/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0702-102640/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1602-081234/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1702-175422/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1802-073821/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2802-124403/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2802-192401/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0303-192323/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -114,7 +132,7 @@ if __name__ == '__main__':
     """ Sell action reward """
     rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
                             use_period='test')
-    # rllab.backtesting_agent(filename=75330000, render_mode='human', n_tests=20, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=116_928_000, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='check',

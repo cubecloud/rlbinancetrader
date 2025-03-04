@@ -22,7 +22,8 @@ class PositionalEncoding(nn.Module):
 
 
 class HybridFeatureExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: Box, features_dim: int = 256, assets_features=6, actions_features=4):
+    def __init__(self, observation_space: Box, features_dim: int = 256, assets_features=6, actions_features=4,
+                 indicators_sign=False):
         assert len(observation_space.shape) == 2, "Observation space must be 2D (lookback, features)"
 
         # Input dimensions
@@ -30,6 +31,10 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
         self.action_features = actions_features  # Changed to 4 as requested
         self.indicator_features = observation_space.shape[-1] - self.asset_features - self.action_features
         self.lookback = observation_space.shape[0]
+        if indicators_sign:
+            self.indicator_temporal_activation = nn.Tanh
+        else:
+            self.indicator_temporal_activation = nn.ReLU
 
         super().__init__(observation_space, features_dim)
         print(f'Feature breakdown - Assets: {self.asset_features}, '
@@ -62,22 +67,23 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
             nn.TransformerEncoderLayer(
                 d_model=self.indicator_features,
                 nhead=4,
-                dim_feedforward=256,
+                dim_feedforward=128,
                 dropout=0.1,
-                activation='gelu'
+                activation='gelu',
+                batch_first=True
             ),
             num_layers=2
         )
 
-        # Temporal CNN tailored for [-1, 1] data
+        # Temporal CNN tailored for [-1, 1] or [0,  1] data
         self.indicator_temporal = nn.Sequential(
             nn.Conv1d(self.indicator_features, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
-            nn.Tanh(),  # Matches input range [-1, 1]
+            self.indicator_temporal_activation(),  # Matches input range [-1, 1] or [0, 1]
             nn.MaxPool1d(2),  # Preserves extreme values
             nn.Conv1d(128, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
-            nn.Tanh(),
+            self.indicator_temporal_activation(),
             nn.AdaptiveAvgPool1d(1)  # Global average pooling
         )
 
@@ -125,7 +131,7 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
         # Process indicators
         indicator_input = indicator_input.permute(0, 2, 1)  # (batch, lookback, features)
         indicator_input = self.pos_encoder(indicator_input)
-        transformed = self.indicator_transformer(indicator_input).permute(0, 2, 1)
+        transformed = self.indicator_transformer(indicator_input).permute(0, 2, 1)  # (batch, features, lookback)
         indicator_features = self.indicator_temporal(transformed).flatten(1)
 
         # Combine all features

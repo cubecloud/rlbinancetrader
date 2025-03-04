@@ -7,13 +7,18 @@ __version__ = 0.006  # Update version to reflect changes
 
 
 class SeparatedCNNFeatureExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: Box, features_dim: int = 256, assets_features=6, actions_features=4):
+    def __init__(self, observation_space: Box, features_dim: int = 256, assets_features=6, actions_features=4,
+                 indicators_sign=False):
         assert len(observation_space.shape) == 2, "Observation space must be 2D (lookback, features)"
 
         # Define feature splits dimensions
         self.asset_features = assets_features  # Update based on your environment
         self.action_features = actions_features  # Number of possible actions (one-hot encoded)
         self.indicator_features = observation_space.shape[-1] - self.asset_features - self.action_features
+        if indicators_sign:
+            self.indicator_cnn_activation = nn.Tanh
+        else:
+            self.indicator_cnn_activation = nn.ReLU
 
         self.lookback = observation_space.shape[0]
         super().__init__(observation_space, features_dim)
@@ -47,11 +52,11 @@ class SeparatedCNNFeatureExtractor(BaseFeaturesExtractor):
         self.indicator_cnn = nn.Sequential(
             nn.Conv1d(self.indicator_features, 64, kernel_size=3, padding=1),
             nn.BatchNorm1d(64),
-            nn.Tanh(),
+            self.indicator_cnn_activation(),
             nn.MaxPool1d(2),
             nn.Conv1d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
-            nn.Tanh(),
+            self.indicator_cnn_activation(),
             nn.AdaptiveAvgPool1d(1)
         )
 

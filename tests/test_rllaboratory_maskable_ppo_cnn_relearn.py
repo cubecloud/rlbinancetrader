@@ -10,6 +10,7 @@ from rllab.rllaboratory import LabBase
 from binanceenv.bienv import BinanceEnvCash
 from stable_baselines3 import A2C, PPO, DDPG, DQN, TD3, SAC
 from multiprocessing import freeze_support, get_logger
+from dbbinance.fetcher.datautils import get_timeframe_bins
 import warnings
 
 __version__ = 0.0038
@@ -44,8 +45,10 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0201-015059/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0801-194931/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
-    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1501-010030/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1902-182824/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-0303-192323/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -64,20 +67,37 @@ if __name__ == '__main__':
     # _end_datetime = '2024-12-10 01:00:00'
 
     _start_datetime = '2023-07-20 01:00:00'
-    _end_datetime = '2024-07-30 01:00:00'
+    _end_datetime = '2024-09-20 01:00:00'
 
     # _start_datetime = '2023-03-20 01:00:00'
     # _end_datetime = '2024-10-30 01:00:00'
 
     _timeframe = '15m'
     _discretization = '15m'
-    total_timesteps = 3_000_000_000
+    total_timesteps = 300_000_000
 
-    agents_n_env = int(150)
-    n_steps = 900
-    warmup_timesteps = (agents_n_env * n_steps) * 100
+    agents_n_env = int(840)
+    # agents_n_env = int(200)
+    n_steps = 120
+    warmup_timesteps = (agents_n_env * n_steps) * 500
 
-    # learning_start = (agents_n_env * n_steps * 3)
+    # lookback_window = '3h'
+    indicators_sign = False
+    seed = 543
+    data_processor_kwargs = dict(start_datetime=_start_datetime,
+                                 end_datetime=_end_datetime,
+                                 timeframe=_timeframe,
+                                 discretization=_discretization,
+                                 symbol_pair='BTCUSDT',
+                                 market='spot',
+                                 minimum_train_size=580,
+                                 maximum_train_size=595,
+                                 minimum_test_size=365,
+                                 maximum_test_size=405,
+                                 test_size=0.1,
+                                 verbose=1,
+                                 indicators_sign=indicators_sign
+                                 )
 
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
@@ -121,6 +141,20 @@ if __name__ == '__main__':
     #                              verbose=1,
     #                              indicators_sign=True
     #                              )
+
+    # features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 14 * 1.78)
+    # last_features_dim = int(features_dim // 4)
+    features_dim = 256
+    last_features_dim = 256
+    ppo_policy_kwargs = dict(
+        features_extractor_class='MlpExtractorNN',
+        features_extractor_kwargs=dict(features_dim=features_dim,
+                                       last_features_dim=last_features_dim,
+                                       activation_fn='LeakyReLU'),
+        share_features_extractor=True,
+        net_arch=dict(pi=[last_features_dim, 128, 64], vf=[last_features_dim, 128, 64])
+    )
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
@@ -129,40 +163,48 @@ if __name__ == '__main__':
             filename='best_model',
             reset_num_timesteps=True,
             total_timesteps=total_timesteps,
-            # env_kwargs_update={
-            #     'data_processor_kwargs': data_processor_kwargs,
-            #     'stable_cache_data_n': 10000,
-            #     'reuse_data_prob': 1.0,
-            #     'verbose': 0,
-            #     'render_mode': 'human',
-            #     'gamma': 0.92,
-            # },
+            env_kwargs_update={
+                'data_processor_kwargs': data_processor_kwargs,
+                'pnl_stop': -0.1,
+                'stable_cache_data_n': agents_n_env * 2,
+                'reuse_data_prob': 1.0,
+                'verbose': 0,
+                'render_mode': 'human',
+                'gamma': 0.85,
+                'use_final_reward': True,
+                'chunk_size': 140,
+            },
 
             agent_kwargs_update={
-                # 'n_steps': n_steps,
-                # 'batch_size': 60000,
+                'policy': "MlpPolicy",
+                # 'policy': "CnnPolicy",
+                'policy_kwargs': ppo_policy_kwargs,
+                'n_steps': n_steps,
+                'batch_size': int(agents_n_env * n_steps // 5),
                 'n_epochs': 10,
                 'stats_window_size': 25,
-                'ent_coef': 0.03,
+                'ent_coef': 0.01,
                 'clip_range': 0.2,
                 'clip_range_vf': 0.2,
-                'gamma': 0.986,
-                'learning_rate': {'CoSheduller': dict(warmup=warmup_timesteps,
+                'gamma': 0.85,
+                'normalize_advantage': True,
+                # 'max_grad_norm': 5e-4,
+                'learning_rate': {'CoScheduler': dict(warmup=warmup_timesteps,
                                                       stable_warmup=False,
-                                                      floor_learning_rate=1e-7,
-                                                      min_learning_rate=2.5e-6,
-                                                      learning_rate=4.5e-6,
+                                                      floor_learning_rate=1e-6,
+                                                      min_learning_rate=2.25e-6,
+                                                      learning_rate=3e-6,
                                                       total_epochs=total_timesteps,
                                                       epsilon=1,
-                                                      pre_warmup_coef=0.05)
+                                                      pre_warmup_coef=0.1)
                                   },
-                'seed': 543,
+                'seed': seed,
             },
             env_wrapper='labsubproc',
             env_wrapper_kwargs_update={'use_threads': False},
             n_envs=agents_n_env,
-            n_eval_episodes=50,
-            eval_freq=n_steps,
+            n_eval_episodes=100,
+            eval_freq=n_steps * 30,
             verbose=1,
         )
 

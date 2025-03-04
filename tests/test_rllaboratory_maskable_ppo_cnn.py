@@ -37,7 +37,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.145
+__version__ = 0.155
 
 logger = get_logger()
 # logger = logging.getLogger()
@@ -86,47 +86,49 @@ if __name__ == '__main__':
     # '2024-06-30 04:35:00/2024-08-29 09:43:00'
     # '2024-06-12 03:21:00/2024-07-30 01:00:00'
 
-    total_timesteps = 1_500_000_000
+    total_timesteps = 300_000_000
 
-    agents_n_env = int(450)
+    agents_n_env = int(840)
     # agents_n_env = 1
-    n_steps = 900
+    n_steps = 120
     warmup_timesteps = (agents_n_env * n_steps) * 200
 
     index_type = 'target_time'
     # index_type = 'prediction_time'
 
-    lookback_window = '10h'
+    # lookback_window = '3h'
     seed = 42  # start with 443 -> bad
+    indicators_sign = False
+    reward_scaler = 10
 
-    # data_processor_kwargs = dict(start_datetime=_start_datetime,
-    #                              end_datetime=_end_datetime,
-    #                              timeframe=_timeframe,
-    #                              discretization=_discretization,
-    #                              symbol_pair='BTCUSDT',
-    #                              market='spot',
-    #                              minimum_train_size=340,
-    #                              maximum_train_size=365,
-    #                              minimum_test_size=320,
-    #                              maximum_test_size=380,
-    #                              test_size=0.1,
-    #                              verbose=1,
-    #                              indicators_sign=True
-    #                              )
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
                                  timeframe=_timeframe,
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=920,
-                                 maximum_train_size=945,
-                                 minimum_test_size=915,
-                                 maximum_test_size=955,
+                                 minimum_train_size=580,
+                                 maximum_train_size=595,
+                                 minimum_test_size=365,
+                                 maximum_test_size=405,
                                  test_size=0.1,
                                  verbose=1,
-                                 indicators_sign=True
+                                 indicators_sign=indicators_sign
                                  )
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=930,
+    #                              maximum_train_size=945,
+    #                              minimum_test_size=915,
+    #                              maximum_test_size=955,
+    #                              test_size=0.1,
+    #                              verbose=1,
+    #                              indicators_sign=True
+    #                              )
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
     #                              timeframe=_timeframe,
@@ -143,7 +145,7 @@ if __name__ == '__main__':
     #                              )
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                               pnl_stop=-0.9,
+                               pnl_stop=-0.5,
                                verbose=0,
                                log_interval=1,
                                seed=seed,
@@ -153,79 +155,91 @@ if __name__ == '__main__':
                                target_scale_decay=200_000,
                                # observation_type='lookback_dict',
                                # observation_type='assets_close_indicators',
-                               observation_type='lookback_norm_assets_close_action_indicators_hybrid',
+                               observation_type='norm_assets_close_action_indicators',
                                # observation_type='indicators_close',
                                stable_cache_data_n=agents_n_env * 2,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
-                               # lookback_window=None,
-                               lookback_window=lookback_window,
+                               lookback_window=None,
+                               # lookback_window=lookback_window,
                                max_hold_timeframes='24h',
                                total_timesteps=total_timesteps,
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.96,
+                               gamma=0.85,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete_4',
                                # index_type='target_time',
                                index_type=index_type,
                                render_mode='human',
-                               reward_scaler=10
+                               reward_scaler=reward_scaler,
+                               use_final_reward=True,
+                               chunk_size=140,
                                )
 
     # features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 14 * 1.78)
     # last_features_dim = int(features_dim // 4)
-    # ppo_policy_kwargs = dict(
-    #     features_extractor_class='MlpExtractorNN',
-    #     features_extractor_kwargs=dict(features_dim=features_dim,
-    #                                    last_features_dim=last_features_dim,
-    #                                    activation_fn='ReLU'),
-    #     share_features_extractor=True,
-    #     net_arch=[last_features_dim, 256, 144],
-    # )
-
+    features_dim = 256
+    last_features_dim = 256
     ppo_policy_kwargs = dict(
-        features_extractor_class='SeparatedCNNFeatureExtractor',
-        features_extractor_kwargs=dict(features_dim=256),
+        features_extractor_class='MlpExtractorNN',
+        features_extractor_kwargs=dict(features_dim=features_dim,
+                                       last_features_dim=last_features_dim,
+                                       activation_fn='LeakyReLU'),
         share_features_extractor=True,
-        net_arch=dict(pi=[256, 128, 64], vf=[256, 128, 64])
-        # net_arch=[256, 64],
+        # net_arch=[last_features_dim, 256, 144],
+        net_arch=dict(pi=[last_features_dim, 128, 64], vf=[last_features_dim, 128, 64])
     )
+
+    # ppo_policy_kwargs = dict(
+    #     features_extractor_class='SeparatedCNNFeatureExtractor',
+    #     features_extractor_kwargs=dict(features_dim=256,
+    #                                    indicators_sign=indicators_sign
+    #                                    ),
+    #     share_features_extractor=True,
+    #     net_arch=dict(pi=[256, 64], vf=[256, 64])
+    #     # net_arch=[256, 64],
+    # )
     # ppo_policy_kwargs = dict(
     #     features_extractor_class='HybridFeatureExtractor',
     #     features_extractor_kwargs=dict(features_dim=256,
     #                                    assets_features=6,
-    #                                    actions_features=4),
+    #                                    actions_features=4+2,
+    #                                    indicators_sign=indicators_sign),
     #     share_features_extractor=True,
-    #     net_arch=dict(pi=[256, 128, 64], vf=[256, 64])
+    #     net_arch=dict(pi=[256, 128, 64], vf=[256, 128, 64])
     # )
 
     ppo_kwargs = dict(
-        policy="CnnPolicy",
+        policy="MlpPolicy",
+        # policy="CnnPolicy",
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=n_steps,
-        batch_size=int(agents_n_env * n_steps // 12),
+        batch_size=int(agents_n_env * n_steps // 5),
         n_epochs=10,
         stats_window_size=25,
-        ent_coef=0.03,
+        ent_coef=0.01,
         normalize_advantage=True,
         clip_range=0.2,
         clip_range_vf=0.2,
+        #   truncating gradient around ~56 steps
+        # max_grad_norm=5e-4,
+        gamma=0.85,
         learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
                                            stable_warmup=False,
                                            floor_learning_rate=1e-6,
-                                           min_learning_rate=2.2e-6,
-                                           learning_rate=3.25e-6,
+                                           min_learning_rate=2.25e-6,
+                                           learning_rate=3e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
-                                           pre_warmup_coef=0.1)
+                                           pre_warmup_coef=0.07)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.96,
-        device='auto',
+
+        device='cuda',
         seed=seed,
         verbose=1)
 
@@ -242,10 +256,10 @@ if __name__ == '__main__':
             # env_wrapper='dummy',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
-            checkpoint_num=n_steps * 3,
-            n_eval_episodes=50,
+            checkpoint_num=n_steps * 30,
+            n_eval_episodes=100,
             log_interval=1,
-            eval_freq=n_steps * 3,
+            eval_freq=n_steps * 30,
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,

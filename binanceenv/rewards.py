@@ -3,18 +3,56 @@ from binanceenv.orderbook import TradesBook, Asset, Trade
 from typing import Optional, List
 import numpy as np
 import pandas as pd
+import math
 
-__version__ = 0.009
+__version__ = 0.017
 
 
-class WaitPeriod:
-    def __init__(self):
+class SigmoidCalculator:
+    """A class for precalculating sigmoid function values from 0 to max_len."""
+
+    def __init__(self, max_len: int = 1000, normalization_window: int = 96) -> None:
+        """
+        Initializes the SigmoidCalculator with parameters to calculate sigmoid values.
+
+        Args:
+            max_len (int): The maximum length of x values.
+            normalization_window (int, optional): Normalization window for scaling x. Defaults to 100.
+        """
+        self.normalization_window = normalization_window
+        self.max_len = max_len
+        x_values = np.arange(0, max_len + 1, dtype=np.float32)
+        self.sigmoid_results = 1 / (1 + np.exp(-x_values / self.normalization_window))
+
+    def sigmoid(self, x: int) -> float:
+        """
+        Retrieves the sigmoid value at a specific x from the precalculated results.
+
+        Args:
+            x (int): The x value for which to retrieve the sigmoid result.
+
+        Returns:
+            float: The calculated sigmoid value for the given x.
+        """
+        return self.sigmoid_results[x]
+
+
+class AnyPeriod:
+    def __init__(self, normalization_window: int):
         self.entry_datetime = None
         self.exit_datetime = None
         self.entry_price = None
         self.exit_price = None
-        self.wait_reward: List[float] = []
         self.size: float = 0.0
+        self.reward: List[float] = []
+        self.sigmoid_calc = SigmoidCalculator(max_len=normalization_window * 15,
+                                              normalization_window=normalization_window
+                                              )
+        self.gamma_reward: float = 0.0
+
+    @property
+    def normalized_steps(self) -> float:
+        return self.sigmoid_calc.sigmoid(len(self.reward))
 
     def reset(self):
         self.entry_datetime = None
@@ -22,22 +60,39 @@ class WaitPeriod:
         self.entry_price = None
         self.exit_price = None
         self.size: float = 0.0
-        self.wait_reward.clear()
+        self.reward: List[float] = []
+        self.gamma_reward: float = 0.0
+
+
+class WaitPeriod(AnyPeriod):
+    pass
+
+
+class HoldPeriod(AnyPeriod):
+    pass
 
 
 class RewardsBase(ABC):
     def __init__(self, asset: Asset,
-                 loss_threshold: float = 0.0089,
-                 profit_threshold: float = 0.011):
+                 gamma=0.93,
+                 loss_threshold: float = 0.0087,
+                 profit_threshold: float = 0.011,
+                 normalization_window: int = 12,
+                 use_final_reward: bool = False):
         self.__asset = asset
+        self.gamma = gamma
         self.loss_threshold = loss_threshold
         self.profit_threshold = profit_threshold
+        self.window_size = normalization_window
+        self.use_final_reward = use_final_reward
         self.__trades: TradesBook = asset.trades
         self.ohlcv_df: Optional[pd.DataFrame] = None
+        self.raw_rewards: List[float] = []
 
         # Local initialization of TALib, for multiprocessing
         self.talib = None
-        self.current_wait_period = WaitPeriod()
+        self.current_wait_period = WaitPeriod(self.window_size)
+        self.current_hold_period = HoldPeriod(self.window_size)
 
     def _init_lib(self):
         # Called only once per instance, in the child process
@@ -71,13 +126,63 @@ class RewardsBase(ABC):
             score = -np.exp(-pnl) * (weight ** 2)
         return score * 0.01
 
+    def get_normalized_reward(self, window_size):
+        if len(self.raw_rewards) <= 2:
+            # Not enough data points yet; return the last raw reward
+            return self.raw_rewards[-1]
+
+        # Take the tail of the rewards with size equal to window_size
+        # Calculate mean and standard deviation using numpy
+        mean = np.mean(self.raw_rewards[-window_size:])
+        std = np.std(self.raw_rewards[-window_size:])
+
+        # Normalize the last reward (or current if needed)
+        last_reward = self.raw_rewards[-1]
+        normalized = (last_reward - mean) / (std + 1e-7)  # Add small epsilon to avoid division by zero
+
+        return normalized
+
     def final_reward(self, buy_and_hold_pnl) -> float:
         _final_reward = 0.0
-        episode_relative_pnl = self.pnl(self.__trades.profit)
-        if episode_relative_pnl > .0:
-            _final_reward = 0.5
-            if episode_relative_pnl > buy_and_hold_pnl:
-                _final_reward += 0.5
+        _reward_constant = 1e-6
+
+        if self.use_final_reward:
+            """
+            id no trades and B&H PNL <=0 
+            we return penalized reward 
+            """
+            if self.__trades.trades_qty == 0:
+                if buy_and_hold_pnl <= 0.:
+                    return -_reward_constant * 100
+
+            #   calculating mean reward
+            _final_reward = 0. if not len(self.raw_rewards) else np.mean(self.raw_rewards)
+            # episode_relative_pnl = self.pnl(self.__trades.profit)
+            # return 0. if not len(self.raw_rewards) else episode_relative_pnl / len(self.raw_rewards)
+
+            # """
+            # Changed final reward calculations (was +0.5):
+            # # PNL > B&H   => +0.0125
+            # # PNL > 0.    => +0.0125
+            # PNL > B&H   => +0.00001 else -0.00001
+            # PNL > 0.    => +0.00001 else -0.00001
+            # """
+            # if episode_relative_pnl > .0:
+            #     _final_reward += _reward_constant * 5
+            #     if episode_relative_pnl > buy_and_hold_pnl:
+            #         _final_reward += _reward_constant * 5
+            #
+            # else:
+            #     _final_reward -= _reward_constant * 5
+            #     if episode_relative_pnl <= buy_and_hold_pnl:
+            #         _final_reward -= _reward_constant * 5
+            #
+            # if self.__trades.profit_rate > 0.65:
+            #     _final_reward += _reward_constant * 5
+            # #   if profit negative and profit_rate negative too
+            # elif self.__trades.profit_rate <= -0.75:
+            #     _final_reward -= _reward_constant * 5
+
         return _final_reward
 
     def size(self, price, cash) -> float:
@@ -93,31 +198,44 @@ class RewardsBase(ABC):
         size = max(min_trade, max_trade)
         return size
 
-    def trade_loss_drawdown_weight(self, prices: pd.Series) -> float:
-        """Calculates the maximum drawdown relative to the highest achieved price.
+    def trade_loss_drawdown_weight(self, prices: pd.Series, penalty_per_step: float = 0.01) -> float:
+        """Calculates the maximum drawdown relative to the highest achieved price with additional penalty per step after the peak.
+
+        If there are no data points after the maximum price,
+        it assumes that there's no further drawdown and returns zero.
 
         Args:
             prices (pd.Series): Series of prices for analysis.
+            penalty_per_step (float): Penalty percentage added for each step after the maximum price.
 
         Returns:
             float: weight
         """
-        max_price = prices.max()
-        drawdown = (max_price - prices.min()) / max_price
-        return max(0.0, drawdown - self.loss_threshold)  # ensure non-negative weight
+        # Find the index of the maximum value
+        index_max = prices.values.argmax()
 
-    def trade_profit_max_weight(self, prices: pd.Series) -> float:
-        """Calculates the maximum profit relative to the lowest achieved price.
+        # Check if the maximum price is the last element in the series
+        if index_max == prices.shape[0] - 1:
+            # Maximum price is at the end, so assume no drawdown
+            return 0.0
 
-        Args:
-            prices (pd.Series): Series of prices for analysis.
+        # Calculate the number of steps after the maximum price
+        steps_after_peak = prices.shape[0] - index_max - 1
 
-        Returns:
-            float: weight
-        """
-        min_price = prices.min()
-        max_profit = (prices.max() - min_price) / min_price
-        return max(0, max_profit - self.profit_threshold)  # Ensure non-negative weight
+        # Apply penalty based on the number of steps after the peak
+        penalty_amount = steps_after_peak * penalty_per_step
+
+        # Get the minimum price after the maximum
+        min_after_max = prices.iloc[index_max + 1:].min()
+        max_price = prices.iloc[index_max]
+
+        # Calculate the drawdown relative to the maximum
+        drawdown = (max_price - min_after_max) / max_price
+
+        # Multiply drawdown by (1 + penalty_amount) to increase it proportionally
+        increased_drawdown = drawdown * (1 + penalty_amount)
+
+        return max(0.0, increased_drawdown - self.loss_threshold)
 
     def wait_potential_loss(self, prices: pd.Series) -> float:
         """Calculates the potential maximum loss relative to the highest achieved price.
@@ -132,37 +250,7 @@ class RewardsBase(ABC):
         potential_loss = (max_price - prices[-1]) / max_price  # Potential loss considering current price as highest
         return max(0, potential_loss - self.loss_threshold)  # Ensure non-negative weight
 
-    # @staticmethod
-    # def trade_loss_drawdown_weight(prices: pd.Series, loss_threshold: float = 0.089) -> float:
-    #     """Calculates the maximum drawdown relative to the highest achieved price.
-    #
-    #     Args:
-    #         prices (pd.Series): Series of prices for analysis.
-    #         loss_threshold (float): Loss threshold at which we switch to calculating losses from the entry price.
-    #
-    #     Returns:
-    #         float: weight
-    #     """
-    #     max_drawdown = 0.0
-    #     max_loss = 0.0
-    #     entry_price = prices.iloc[0]
-    #     high_price = entry_price
-    #
-    #     for price in prices:
-    #         if price > high_price:
-    #             high_price = price
-    #
-    #         current_loss = (price - entry_price) / entry_price
-    #         drawdown = (high_price - price) / high_price
-    #         if drawdown > max_drawdown and drawdown > -loss_threshold:
-    #             max_drawdown = drawdown
-    #
-    #         if current_loss < max_loss and current_loss < -loss_threshold:
-    #             max_loss = current_loss
-    #
-    #     return max_loss if max_drawdown < max_loss else max_drawdown
-
-    def trade_period_weight(self):
+    def trade_period_weight(self) -> float:
         """
         Calculate the weight for a single trade based on drawdown metrics.
         The weight is always non-zero and provides meaningful feedback for every trade
@@ -188,8 +276,10 @@ class RewardsBase(ABC):
         # Extract trade data
         entry_datetime = self.current_wait_period.entry_datetime
         exit_datetime = self.current_wait_period.exit_datetime
+
+        # If entry and exit dates are equal, consider no loss
         if entry_datetime == exit_datetime:
-            return 1e-6
+            return 0.0  # Minimize weight if dates are identical
 
         trade_prices = self._trade_prices(entry_datetime, exit_datetime)
 
@@ -197,27 +287,35 @@ class RewardsBase(ABC):
         max_price = trade_prices.max()
         entry_price = self.current_wait_period.entry_price
 
-        # Calculate the potential loss considering current price as highest
-        potential_loss1 = (max_price - entry_price) / max_price
-        potential_loss2 = 1e-6
+        # Calculate potential loss assuming current price reached its maximum
+        loss_from_high = (max_price - entry_price) / entry_price
 
-        # If we have bought in minimum price then calculate potential loss from there
+        # If minimum price is lower than entry price, calculate loss from it
         if min_price < entry_price:
-            potential_loss2 = (entry_price - min_price) / min_price
+            loss_from_low = (entry_price - min_price) / entry_price
+        else:
+            loss_from_low = 0.0  # No potential loss from low prices
 
-        # Take the maximum of both potential losses
-        max_potential_loss = max(potential_loss1, potential_loss2)
+        # Take the maximum of two possible losses
+        max_potential_loss = max(loss_from_high, loss_from_low)
 
         return max(0, max_potential_loss - self.loss_threshold)  # Ensure non-negative weight
 
     def _trade_prices(self, entry_datetime, exit_datetime):
         return self.ohlcv_df['close'].loc[entry_datetime:exit_datetime].copy()
 
-    def closed_trade_reward(self):
+    def closed_trade_reward(self, timecount) -> float:
         """
         Calculate the reward for a closed trade by combining relative_pnl and the trade weight.
         The weight to adjust the reward based on the trade's risk-adjusted performance.
         """
+        #   if current_hold_period NOT empty -> add exit data to object
+        if self.current_hold_period.reward:
+            self.current_hold_period.exit_datetime = self.__asset.orders.last_order.order_datetime
+            self.current_hold_period.exit_price = self.__asset.orders.last_order.price
+            # TODO rewrite for multi assets trading (must updates each timestep)
+            self.current_hold_period.size = self.__asset.orders.last_order.size
+
         # Get the trade weight from the trade_weight method
         weight = self.trade_period_weight()
 
@@ -225,39 +323,78 @@ class RewardsBase(ABC):
         relative_pnl = self.pnl(self.__trades.last_trade.profit)  # PnL can be positive or negative
 
         if relative_pnl >= 0:
-            reward = relative_pnl * (1 - weight)
+            action_reward = relative_pnl * (1 - weight)
         else:
-            reward = relative_pnl * (1 + weight)
-        return reward
+            action_reward = relative_pnl * (1 + weight)
 
-    def buy_action_reward(self):
-        if self.current_wait_period.wait_reward:
-            self.current_wait_period.exit_datetime = self.__trades.last_trade.entry_datetime
-            self.current_wait_period.exit_price = self.__trades.last_trade.entry_price
+        # hold_actions_length = len(self.current_hold_period.reward) + 1
+        self.current_hold_period.reset()
+
+        self.raw_rewards.append(action_reward)
+
+        return action_reward
+
+    def hold_action_reward(self, timecount) -> float:
+        #   if current_hold_period empty -> add starting data to object
+        if not self.current_hold_period.reward:
+            self.current_hold_period.entry_datetime = self.ohlcv_df.index[timecount].to_pydatetime()
+            self.current_hold_period.entry_price = self.ohlcv_df.iloc[timecount]['close']
+            # TODO rewrite for multi assets trading (must updates each timestep)
+            self.current_hold_period.size = self.__asset.orders.last_order.size
+
+        price = self.ohlcv_df.iloc[timecount]['close']
+        previous_price = self.ohlcv_df.iloc[timecount - 1]['close']
+        action_reward = ((
+                                 price - previous_price) * self.__asset.orders.last_order.size) / self.__asset.initial_total_in_cash
+
+        self.current_hold_period.reward.append(action_reward)
+        # self.current_hold_period.gamma_reward = self.current_hold_period.gamma_reward * self.gamma + action_reward
+
+        self.raw_rewards.append(action_reward)
+        return action_reward
+
+    def buy_action_reward(self, timecount) -> float:
+        #   if current_wait_period reward NOT empty -> add exit data to object
+        if self.current_wait_period.reward:
+            self.current_wait_period.exit_datetime = self.__asset.orders.last_order.order_datetime
+            self.current_wait_period.exit_price = self.__asset.orders.last_order.price
         else:
             return 1e-6
 
+        synthetic_pnl = self._wait_action_reward(timecount)
         weight = self.wait_period_weight()
-        size = self.current_wait_period.size
-        # inversed_relative_pnl = ((self.current_wait_period.entry_price - self.current_wait_period.exit_price) * size) / self.__asset.initial_total_in_cash
-        # if inversed_relative_pnl >= 0:
-        #     reward = inversed_relative_pnl * (1 - weight)
-        # else:
-        #     reward = inversed_relative_pnl * (1 + weight)
-        synthetic_pnl = sum(self.current_wait_period.wait_reward) * size
+
         if synthetic_pnl >= 0:
-            reward = synthetic_pnl * (1 - weight)
+            action_reward = synthetic_pnl * (1 - weight)
         else:
-            reward = synthetic_pnl * (1 + weight)
+            action_reward = synthetic_pnl * (1 + weight)
 
+        # wait_actions_length = len(self.current_wait_period.reward)
         self.current_wait_period.reset()
-        return reward
 
-    def wait_action_reward(self, timecount, momentum_threshold=0.87, perc_threshold=0.0087):
-        if not self.current_wait_period.wait_reward:
+        self.raw_rewards.append(action_reward)
+        return action_reward
+
+    def _wait_action_reward(self,
+                            timecount: int,
+                            momentum_threshold: float = 0.87,
+                            perc_threshold: float = 0.0087) -> float:
+        """
+        Wait_action_reward function, for calculate wait action reward
+        Args:
+            timecount (int):                timecount
+            momentum_threshold (float):     momentum threshold
+            perc_threshold (float):         percentage threshold
+
+        Returns:
+            float
+        """
+        #   if current_wait_period reward empty -> add starting data to object
+
+        if not self.current_wait_period.reward:
             self.current_wait_period.entry_datetime = self.ohlcv_df.index[timecount].to_pydatetime()
             self.current_wait_period.entry_price = self.ohlcv_df.iloc[timecount]['close']
-            # TODO rewrite for multiassets trading (must updates each timestep)
+            # TODO rewrite for multi assets trading (must updates each timestep)
             self.current_wait_period.size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
 
         # Get precomputed TA-Lib values
@@ -270,28 +407,36 @@ class RewardsBase(ABC):
                 abs(momentum) < momentum_threshold)  # 0.87% momentum threshold
 
         size = self.current_wait_period.size
+        price = self.ohlcv_df.iloc[timecount]['close']
+        previous_price = self.ohlcv_df.iloc[timecount - 1]['close']
         if flat_market:
-            """
-            Reward based on volatility suppression - checked weights 
-            [0.3, 
-            0.5 * size - too much(?)
-            0.25 * size - less than we need
-            0.375 * size - less than we need
-            0.75 * size - over much
-            0.4375 * size - too much
-            0.4130001 * size - too much
-            0.39400005 * size -
-            ]
-            """
-
-            reward = 0.39400005 * size * (perc_threshold - price_volatility)
+            # action_reward = 0.105 * size * (perc_threshold - price_volatility)
+            action_reward = abs(((previous_price - price) * size) / self.__asset.initial_total_in_cash)
         else:
-            reward = ((self.ohlcv_df.iloc[timecount - 1]['close'] - self.ohlcv_df.iloc[timecount]['close']) * size) / (
-                self.__asset.initial_total_in_cash)
+            action_reward = ((previous_price - price) * size) / self.__asset.initial_total_in_cash
 
-        # self.gamma_return = self.gamma_return * self.gamma + self.reward_step
-        self.current_wait_period.wait_reward.append(reward)
-        return reward
+        self.current_wait_period.reward.append(action_reward)
+        # self.current_wait_period.gamma_reward = self.current_wait_period.gamma_reward * self.gamma + action_reward
+
+        self.raw_rewards.append(action_reward)
+        return action_reward
+
+    def wait_action_reward(self,
+                           timecount: int,
+                           momentum_threshold: float = 0.87,
+                           perc_threshold: float = 0.0087) -> float:
+        """
+        Wrapper for _wait_action_reward function
+        Args:
+            timecount (int):                timecount
+            momentum_threshold (float):     momentum threshold
+            perc_threshold (float):         percentage threshold
+
+        Returns:
+            float
+        """
+        action_reward = self._wait_action_reward(timecount, momentum_threshold, perc_threshold)
+        return action_reward
 
     def reset(self, ohlcv_df):
         self._init_lib()
@@ -312,6 +457,8 @@ class RewardsBase(ABC):
         # Fill NaN values created by indicators
         self.ohlcv_df.fillna(method='bfill', inplace=True)
         self.current_wait_period.reset()
+        self.current_hold_period.reset()
+        self.raw_rewards.clear()
 
 
 class Rewards(RewardsBase):

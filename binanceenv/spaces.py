@@ -90,6 +90,24 @@ class AssetsCloseIndicatorsSpace:
         self.__observation_space = value
 
 
+class AssetsCloseActionIndicatorsSpace:
+    def __init__(self, ind_num, assets_data, actions, low=0.0, high=1.0):
+        self.__observation_space = spaces.Box(low=low,
+                                              high=high,
+                                              shape=(assets_data + actions + ind_num, ),
+                                              dtype=np.float32,
+                                              seed=42)
+        self.name = 'assets_close_action_indicators'
+
+    @property
+    def observation_space(self):
+        return self.__observation_space
+
+    @observation_space.setter
+    def observation_space(self, value):
+        self.__observation_space = value
+
+
 class LookbackAssetsCloseIndicatorsSpace:
     def __init__(self, ind_num, assets_data, lookback, low=0.0, high=1.0):
         self.__observation_space = spaces.Box(low=low,
@@ -216,7 +234,7 @@ class DiscreteActionSpace:
             if masked_actions[act]:
                 return act
 
-    def convert2action(self, action: Union[np.ndarray, list], masked_actions=None):
+    def convert2action(self, action: Union[np.ndarray, list], masked_actions=None) -> Tuple[int, float]:
         amount = 1.
         if masked_actions is not None:
             action = self._check_masked(action, masked_actions)
@@ -271,14 +289,14 @@ class BoxActionSpace:
 
 class BoxExtActionSpace:
     def __init__(self, n_action):
-        self.__action_space = spaces.Box(low=-1., high=1, shape=(n_action,), dtype=np.float32)
+        self.__action_space = spaces.Box(low=-1., high=1., shape=(n_action,), dtype=np.float32)
         self.name = 'box1_1'
 
     @staticmethod
     def scale_amount(value):
         return (value - -1) / 2
 
-    def convert2action(self, action, masked_actions=None):
+    def convert2action(self, action, masked_actions=None) -> Tuple[int, float]:
         if masked_actions is None:
             act = np.argmax(action)
             amount = self.scale_amount(action[act])

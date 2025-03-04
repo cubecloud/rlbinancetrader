@@ -79,9 +79,12 @@ class Balance:
         self.scaled_arr = self.calc_scaled_arr()
 
     def calc_scaled_arr(self):
-        return np.clip(np.array([self.scaler(self.size),
-                                 self.target.scaler(self.cost),
-                                 self.target.scaler(self.price)],
+        _scaled_price = self.target.scaler(self.price)
+        _scaled_size = self.scaler(self.size)
+        _scaled_cost = _scaled_size * _scaled_price
+        return np.clip(np.array([_scaled_size,
+                                 _scaled_cost,
+                                 _scaled_price],
                                 dtype=np.float32),
                        a_min=0.,
                        a_max=np.inf)
@@ -337,10 +340,19 @@ class TradesBook:
     def win_rate(self) -> float:
         """ win rate calculation """
         num_profitable_trades = sum(1 for trade in self.book if trade.profit > 0)
-        total_num_trades = len(self.book)
-        if total_num_trades <= 1:
-            return -0.5
+        total_num_trades = self.trades_qty
+        if self.trades_qty <= 1:
+            return 0.0
         return num_profitable_trades / total_num_trades
+
+    @property
+    def profit_rate(self) -> float:
+        """ profit rate calculation """
+        total_trade_volume = sum(abs(trade.profit) for trade in self.book)
+        total_num_trades = self.trades_qty
+        if total_num_trades == 0 or total_trade_volume == 0:
+            return 0.0
+        return self.profit / total_trade_volume
 
     def show(self):
         for i, trade in enumerate(self.book):

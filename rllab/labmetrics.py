@@ -29,6 +29,7 @@ def get_trade_metrics(trades_book, df: pd.DataFrame) -> Dict:
         'Avg. Drawdown Duration': pd.Timedelta(0),
         '# Trades': 0,
         'Win Rate [%]': 0.0,
+        'Profit Rate [%]': 0.0,
         'Best Trade [%]': 0.0,
         'Worst Trade [%]': 0.0,
         'Avg. Trade [%]': 0.0,
@@ -39,7 +40,60 @@ def get_trade_metrics(trades_book, df: pd.DataFrame) -> Dict:
         'SQN': 0.0
     }
 
+    # Returns
+    initial_equity = df['total'].iloc[0]
+    final_equity = metrics['Equity Final [$]']
+    metrics['Return [%]'] = (final_equity / initial_equity - 1) * 100
+
+    # Buy & Hold return
+    initial_price = df['close'].iloc[0]
+    final_price = df['close'].iloc[-1]
+    metrics['Buy & Hold Return [%]'] = (final_price / initial_price - 1) * 100
+
+    # Annualized return
+    timeframe_minutes = (df.index[-1] - df.index[0]).total_seconds() / 60 / len(df)
+    periods_per_year = (365 * 24 * 60) / timeframe_minutes
+    metrics['Return (Ann.) [%]'] = ((final_equity / initial_equity) ** (periods_per_year / len(df)) - 1) * 100
+
+    # Volatility
+    returns = np.log(df['total'] / df['total'].shift(1)).dropna()
+    metrics['Volatility (Ann.) [%]'] = returns.std() * np.sqrt(periods_per_year) * 100
+
+    # Drawdown calculations
+    df['running_max'] = df['total'].cummax()
+    df['drawdown'] = (df['total'] - df['running_max']) / df['running_max']
+    drawdowns = df[df['drawdown'] < 0]['drawdown']
+
+    if not drawdowns.empty:
+        metrics.update({
+            'Max. Drawdown [%]': drawdowns.min() * 100,
+            'Avg. Drawdown [%]': drawdowns.mean() * 100,
+            'Max. Drawdown Duration': drawdowns.idxmin() - df['running_max'].idxmax(),
+            'Avg. Drawdown Duration': pd.Timedelta(seconds=drawdowns.count() * timeframe_minutes * 60 / len(df))
+        })
+
+    # Risk-adjusted ratios
+    risk_free_rate = 0.0
+    sharpe_ratio = (returns.mean() - risk_free_rate) / returns.std() * np.sqrt(periods_per_year)
+    downside_returns = returns[returns < 0]
+    sortino_ratio = (returns.mean() - risk_free_rate) / downside_returns.std() * np.sqrt(
+        periods_per_year) if downside_returns.std() != 0 else 0.0
+
+    # Calmar Ratio calculation
+    calmar_ratio = 0.0
+    if metrics['Max. Drawdown [%]'] != 0:
+        annual_return_decimal = metrics['Return (Ann.) [%]'] / 100
+        max_dd_decimal = abs(metrics['Max. Drawdown [%]'] / 100)
+        calmar_ratio = annual_return_decimal / max_dd_decimal
+
+    metrics.update({
+        'Sharpe Ratio': sharpe_ratio,
+        'Sortino Ratio': sortino_ratio,
+        'Calmar Ratio': calmar_ratio
+    })
+
     if not trades_book.book:
+        metrics['# Trades'] = 0
         return metrics
 
     # Time metrics
@@ -62,63 +116,12 @@ def get_trade_metrics(trades_book, df: pd.DataFrame) -> Dict:
     metrics['Exposure Time [%]'] = (exposure_time.total_seconds() /
                                     total_duration.total_seconds()) * 100
 
-    # Returns
-    initial_equity = df['total'].iloc[0]
-    final_equity = metrics['Equity Final [$]']
-    metrics['Return [%]'] = (final_equity / initial_equity - 1) * 100
-
-    # Buy & Hold return
-    initial_price = df['close'].iloc[0]
-    final_price = df['close'].iloc[-1]
-    metrics['Buy & Hold Return [%]'] = (final_price / initial_price - 1) * 100
-
-    # Annualized return
-    timeframe_minutes = (df.index[-1] - df.index[0]).total_seconds() / 60 / len(df)
-    periods_per_year = (365 * 24 * 60) / timeframe_minutes
-    metrics['Return (Ann.) [%]'] = ((final_equity / initial_equity) ** (periods_per_year / len(df)) - 1) * 100
-
-    # Volatility
-    returns = np.log(df['total'] / df['total'].shift(1)).dropna()
-    metrics['Volatility (Ann.) [%]'] = returns.std() * np.sqrt(periods_per_year) * 100
-
-    # Risk-adjusted ratios
-    risk_free_rate = 0.0
-    sharpe_ratio = (returns.mean() - risk_free_rate) / returns.std() * np.sqrt(periods_per_year)
-    downside_returns = returns[returns < 0]
-    sortino_ratio = (returns.mean() - risk_free_rate) / downside_returns.std() * np.sqrt(
-        periods_per_year) if downside_returns.std() != 0 else 0.0
-
-    # Calmar Ratio calculation
-    calmar_ratio = 0.0
-    if metrics['Max. Drawdown [%]'] != 0:
-        annual_return_decimal = metrics['Return (Ann.) [%]'] / 100
-        max_dd_decimal = abs(metrics['Max. Drawdown [%]'] / 100)
-        calmar_ratio = annual_return_decimal / max_dd_decimal
-
-    metrics.update({
-        'Sharpe Ratio': sharpe_ratio,
-        'Sortino Ratio': sortino_ratio,
-        'Calmar Ratio': calmar_ratio
-    })
-
-    # Drawdown calculations
-    df['running_max'] = df['total'].cummax()
-    df['drawdown'] = (df['total'] - df['running_max']) / df['running_max']
-    drawdowns = df[df['drawdown'] < 0]['drawdown']
-
-    if not drawdowns.empty:
-        metrics.update({
-            'Max. Drawdown [%]': drawdowns.min() * 100,
-            'Avg. Drawdown [%]': drawdowns.mean() * 100,
-            'Max. Drawdown Duration': drawdowns.idxmin() - df['running_max'].idxmax(),
-            'Avg. Drawdown Duration': pd.Timedelta(seconds=drawdowns.count() * timeframe_minutes * 60 / len(df))
-        })
-
     # Trade statistics
     trade_returns = []
     trade_durations = []
     wins = []
     losses = []
+    volume = 0.0
 
     for trade in all_trades:
         entry = trade.entry_price * trade.size
@@ -128,6 +131,7 @@ def get_trade_metrics(trades_book, df: pd.DataFrame) -> Dict:
 
         trade_returns.append(trade_return)
         trade_durations.append(duration)
+        volume += abs(trade.profit)
 
         if trade_return > 0:
             wins.append(trade_return)
@@ -139,6 +143,7 @@ def get_trade_metrics(trades_book, df: pd.DataFrame) -> Dict:
     if trade_returns:
         metrics.update({
             'Win Rate [%]': len(wins) / len(trade_returns) * 100,
+            'Profit Rate [%]': trades_book.profit / volume * 100,
             'Best Trade [%]': max(trade_returns) if trade_returns else 0.0,
             'Worst Trade [%]': min(trade_returns) if trade_returns else 0.0,
             'Avg. Trade [%]': np.mean(trade_returns),

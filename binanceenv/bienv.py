@@ -13,7 +13,7 @@ import numpy as np
 import numba
 import pandas as pd
 from numba import jit
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, List, Callable
 
 # from gymnasium.spaces import Discrete
 # from gymnasium.spaces import Box
@@ -119,12 +119,16 @@ class BinanceEnvBase(gymnasium.Env):
                  index_type: str = 'target_time',
                  deterministic: bool = True,
                  use_multiprocessing: bool = False,
-                 reward_scaler: int = 10
+                 reward_scaler: int = 10,
+                 use_final_reward: bool = False,
+                 chunk_size: Union[int, None] = None,
                  #  mlp_rlock: Union[Any, None] = None
                  ):
 
         self.verbose = verbose
         self.reward_scaler = reward_scaler
+        self.use_final_reward = use_final_reward
+
         self.use_multiprocessing = use_multiprocessing
         # if (self.use_multiprocessing and mlp_rlock is None) or (not self.use_multiprocessing and mlp_rlock is not None):
         #     raise AssertionError("Error: invalid use of mlp_rlock with multiprocessing")
@@ -153,6 +157,19 @@ class BinanceEnvBase(gymnasium.Env):
 
         self.max_hold_timeframes = int(
             get_timeframe_bins(max_hold_timeframes) // get_timeframe_bins(self.data_processor_kwargs['timeframe']))
+
+        self.timeframes_24h: int = int(
+            get_timeframe_bins('24h') // get_timeframe_bins(self.data_processor_kwargs['timeframe']))
+
+        if chunk_size is not None:
+            self.chunk_size = chunk_size
+            self.use_chunks = True
+            self.ohlcv_df_4_chunks: Union[pd.DataFrame, None] = None
+            self.indicators_df_4_chunks: Union[pd.DataFrame, None] = None
+            self.slice_size = self.chunk_size + self.lookback_timeframes
+        else:
+            self.use_chunks = False
+
         self.invalid_actions = invalid_actions
         self.penalty_value = penalty_value
         self.stable_cache_data_n = stable_cache_data_n
@@ -202,6 +219,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.cache_obj = cache_obj
         self.data_processor_obj = None
         self.eval_reuse_prob = eval_reuse_prob
+        self.key_list: list = []
 
         """ Init CacheManager and setting 1st ohlcv and indicators if cache already filled """
         self.set_CM(self.cache_obj)
@@ -209,7 +227,7 @@ class BinanceEnvBase(gymnasium.Env):
         """ Add DateTimeWeight object """
         self.dt_weight_obj = DateTimeWeight(start_datetime=data_processor_kwargs['start_datetime'],
                                             end_datetime=data_processor_kwargs['end_datetime'],
-                                            start_weight=0.5,
+                                            start_weight=0.8,
                                             end_weight=1.0,
                                             )
 
@@ -218,24 +236,41 @@ class BinanceEnvBase(gymnasium.Env):
             self.ohlcv_df, self.indicators_df = self.data_processor_obj.get_ohlcv_and_indicators_sample(
                 timedelta=timedelta, index_type=self.index_type)
 
-        self.action_space_obj = None
+        self.initial_total_assets = self.initial_cash + (self.asset.balance.size * self.asset.balance.price)
+        self.min_coin_trade = self.asset.orders.minimum_trade + (
+                self.asset.orders.commission * self.asset.orders.minimum_trade)
+
+        self.action_space_obj: [
+            Union[DiscreteActionSpace, DiscreteActionSpaceSpot, BoxActionSpace, BoxExtActionSpace, None]] = None
+
         self.obs_lookback = deque(maxlen=self.lookback_timeframes)
-        self._warmup_func = lambda *args: None
+        self._warmup_func: Union[Callable, None] = lambda *args: None
         self._last_lookback_timecount: int = 0
-        self.action_space = self.get_action_space(action_type=action_type)  # {0, 1, 2}
+        self.actions_lst: List[int] = []
+        self.size_lst: List[float] = []
+        self.stop_buy_timecount = self.ohlcv_df.shape[0] - (min(4, self.timeframes_24h))
+
+        self.render_path_filename = None
+        self.render_mode = render_mode
+        self.render_df: pd.DataFrame = self.new_render_file()
+        self.last_render_df: Union[pd.DataFrame, None] = None
+        self.last_asset: Union[Asset, None] = None
+
+        self.action_space = self.get_action_space(action_type=action_type)
+
+        # noinspection PyUnresolvedReferences
+        self.all_actions = self.action_space_obj.actions_keys
+
+        self.rewards_obj = Rewards(asset=self.asset,
+                                   gamma=self.gamma,
+                                   normalization_window=self.timeframes_24h,
+                                   use_final_reward=self.use_final_reward)
+
         self.observation_space = self.get_observation_space(observation_type=observation_type)
 
-        # self._action_buy_hold_sell = ["Buy", "Sell", "Hold"]
-
-        self.initial_total_assets = self.initial_cash + (self.asset.balance.size * self.asset.balance.price)
-
-        # self.action_bin_obj = ActionsBins([-1, 1], 3)
-        self.actions_lst: list = []
         self.np_random = None
         self.seed = self.get_seed(seed + self.idnum)
 
-        self.min_coin_trade = self.asset.orders.minimum_trade + (
-                self.asset.orders.commission * self.asset.orders.minimum_trade)
         self.total_timesteps = total_timesteps
         self.action_symbol = str()
         self.order_closed = False
@@ -244,39 +279,20 @@ class BinanceEnvBase(gymnasium.Env):
         self.previous_total_assets: float = 0.
 
         self.order_pnl: float = .0
-        self.all_actions = np.asarray(list(range(3)))
+
         self.invalid_action_counter: int = 0
         self.episode_reward: float = 0.
-        self.key_list: list = []
+
         self.first_epsilon = 0.
         self.epsilon: float = 1.0
         self.dones: bool = False
 
-        self.render_path_filename = None
-        self.render_mode = render_mode
-
-        self.render_df = pd.DataFrame(index=self.ohlcv_df.index,
-                                      data=0.,
-                                      columns=['open', 'high', 'low', 'close', 'volume', 'action', 'amount', 'pnl',
-                                               'total', 'reward'])
-        self.last_render_df: Union[pd.DataFrame, None] = None
-        self.last_asset: Union[Asset, None] = None
-
         self.total_reward: float = 0.
         self.previous_pnl = float(self.pnl)
-        self.timeframes_24h: int = int(
-            get_timeframe_bins('24h') // get_timeframe_bins(self.data_processor_kwargs['timeframe']))
+
         self.ret_obs_df = None
-        self.rewards_obj = Rewards(asset=self.asset)
 
     def set_CM(self, cache_obj):
-        def get_ohlcv_and_indicators():
-            """ Creating the list of cache data from probs dict with 3 values """
-            self.key_list = list(self.CM.hits_probs().keys())
-            self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
-            self.np_random.shuffle(self.key_list)
-            self.key_list = self.key_list[1:self.np_random.integers(3, min(len(self.key_list), 100))]
-
         if self.CM is None:
             if self.use_period == 'train':
                 # using external cache_manager for multiprocessing or multithreading
@@ -286,7 +302,11 @@ class BinanceEnvBase(gymnasium.Env):
                     mp_cache_manager_kwargs = {'port': 5005, 'start_host': False, 'unique_name': 'train'}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
                 if len(self.CM) > 3:
-                    get_ohlcv_and_indicators()
+                    """ Creating the list of cache data from probs dict with 3 values """
+                    self.key_list = list(self.CM.hits_probs().keys())
+                    self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
+                    self.np_random.shuffle(self.key_list)
+                    self.key_list = self.key_list[1:self.np_random.integers(3, min(len(self.key_list), 105))]
                 self._take_action_func = self._take_action_train
             elif self.use_period == 'test' or self.use_period == 'check':
                 if self.use_period == 'test':
@@ -302,7 +322,10 @@ class BinanceEnvBase(gymnasium.Env):
                     mp_cache_manager_kwargs = {'port': port, 'start_host': False, 'unique_name': unique_name}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
                 if len(self.CM) > 3:
-                    get_ohlcv_and_indicators()
+                    """ Creating the list of cache data from keys() with all values """
+                    self.key_list = list(self.CM.keys())
+                    self.ohlcv_df, self.indicators_df = self.CM.get(self.key_list[0])
+                    self.key_list = self.key_list[1:]
                 self._take_action_func = self._take_action_test
                 self.reuse_data_prob = self.eval_reuse_prob
             else:
@@ -346,6 +369,8 @@ class BinanceEnvBase(gymnasium.Env):
             self._get_obs_func = self._get_assets_indicators_obs
             # if self.asset.balance.size == .0:
             #     self.asset.balance = (1e-7, 56000.)
+            self._warmup_func: Union[Callable, None] = self._pre_warmup_step
+
         elif observation_type == 'assets_close_indicators':
             if self.data_processor_kwargs.get('indicators_sign', False):
                 low = -1.0
@@ -353,6 +378,8 @@ class BinanceEnvBase(gymnasium.Env):
                 low = 0.0
             space_obj = AssetsCloseIndicatorsSpace(self.indicators_df.shape[1], 5, low=low, high=1.0)
             self._get_obs_func = self._get_assets_close_indicators_obs
+            self._warmup_func: Union[Callable, None] = self._pre_warmup_step
+
         elif observation_type == 'lookback_assets_close_indicators':
             if self.data_processor_kwargs.get('indicators_sign', False):
                 low = -1.0
@@ -365,7 +392,7 @@ class BinanceEnvBase(gymnasium.Env):
                                                            lookback=self.lookback_timeframes)
             self._get_obs_func = self._get_lookback_assets_close_indicators_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
 
         elif observation_type == 'lookback_norm_assets_close_indicators':
             if self.data_processor_kwargs.get('indicators_sign', False):
@@ -379,7 +406,7 @@ class BinanceEnvBase(gymnasium.Env):
                                                            lookback=self.lookback_timeframes)
             self._get_obs_func = self._get_lookback_norm_assets_close_indicators_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
 
         elif observation_type == 'lookback_norm_assets_close_indicators_conv1d':
             if self.data_processor_kwargs.get('indicators_sign', False):
@@ -393,7 +420,7 @@ class BinanceEnvBase(gymnasium.Env):
                                                               lookback=self.lookback_timeframes)
             self._get_obs_func = self._get_lookback_norm_assets_close_indicators_conv1d_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
 
         elif observation_type == 'lookback_norm_assets_close_action_indicators_hybrid':
             if self.data_processor_kwargs.get('indicators_sign', False):
@@ -403,12 +430,30 @@ class BinanceEnvBase(gymnasium.Env):
             space_obj = LookbackAssetsCloseActionIndicatorsSpaceCNN(low=low,
                                                                     high=1.0,
                                                                     assets_data=6,
-                                                                    actions=self.action_space_obj.n_action,
+                                                                    #   +2 normalized steps for Hold, Wait
+                                                                    actions=self.action_space_obj.n_action * 2 + 2,
                                                                     ind_num=self.indicators_df.shape[1],
-                                                                    lookback=self.lookback_timeframes)
+                                                                    lookback=self.lookback_timeframes,
+                                                                    )
             self._get_obs_func = self._get_lookback_norm_assets_close_action_indicators_hybrid_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
+
+        elif observation_type == 'norm_assets_close_action_indicators':
+            if self.data_processor_kwargs.get('indicators_sign', False):
+                low = -1.0
+            else:
+                low = 0.0
+
+            space_obj = AssetsCloseActionIndicatorsSpace(low=low,
+                                                         high=1.0,
+                                                         assets_data=6,
+                                                         #   +2 normalized steps_num for Hold and Wait actions
+                                                         actions=self.action_space_obj.n_action * 2 + 2,
+                                                         ind_num=self.indicators_df.shape[1],
+                                                         )
+            self._get_obs_func = self._get_norm_assets_close_action_indicators_obs
+            self._warmup_func: Union[Callable, None] = self._pre_warmup_step
 
         elif observation_type == 'lookback_assets_close_indicators_action':
             if self.data_processor_kwargs.get('indicators_sign', False):
@@ -423,7 +468,7 @@ class BinanceEnvBase(gymnasium.Env):
                                                                  actions=self.action_space_obj.n_action)
             self._get_obs_func = self._get_lookback_assets_close_indicators_action_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
 
         elif observation_type == 'lookback_assets_close_indicators_action_ret':
             if self.data_processor_kwargs.get('indicators_sign', False):
@@ -441,7 +486,7 @@ class BinanceEnvBase(gymnasium.Env):
                 self.render_mode = 'human'
             self._get_obs_func = self._get_lookback_assets_close_indicators_action_ret_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
 
         elif observation_type == 'lookback_dict':
             space_obj = LookbackDictOHLCAssetsIndicatorsSpace(ind_num=self.indicators_df.shape[1],
@@ -450,17 +495,20 @@ class BinanceEnvBase(gymnasium.Env):
 
             self._get_obs_func = self._get_lookback_dict_obs
             # filling deque stack
-            self._warmup_func = self.lookback_warmup
+            self._warmup_func: Union[Callable, None] = self.lookback_warmup
 
         elif observation_type == 'indicators_pnl':
             space_obj = IndicatorsAndPNLSpace(self.indicators_df.shape[1], 1)
             self._get_obs_func = self._get_pnl_indicators_obs
+            self._warmup_func: Union[Callable, None] = self._pre_warmup_step
         elif observation_type == 'indicators_close':
             space_obj = IndicatorsSpace(self.indicators_df.shape[1] + 1)
             self._get_obs_func = self._get_indicators_close_obs
+            self._warmup_func: Union[Callable, None] = self._pre_warmup_step
         elif observation_type == 'indicators':
             space_obj = IndicatorsSpace(self.indicators_df.shape[1])
             self._get_obs_func = self._get_indicators_obs
+            self._warmup_func: Union[Callable, None] = self._pre_warmup_step
         else:
             sys.exit(f'Error: Unknown observation type {observation_type}!')
         observation_space = space_obj.observation_space
@@ -528,21 +576,20 @@ class BinanceEnvBase(gymnasium.Env):
         return np.asarray(self.obs_lookback).astype(np.float32).flatten()
 
     def _get_norm_assets_close_indicators_obs(self) -> np.ndarray:
+        _scaled_current_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
-                              [self.asset.balance.scaled_arr[0],  # balance.size
-                               self.asset.balance.cost,  # balance.cost
-                               self.asset.balance.price],  # balance.price
-                              [self.price,  # balance.scaled_cost * self.price
-                               self.price]],
+                              [self.asset.balance.scaled_arr[0],  # scaled_balance_size
+                               self.asset.balance.scaled_arr[1],  # scaled_balance_cost
+                               self.asset.balance.scaled_arr[2]],  # scaled_balance_price
+                              # scaled_cost (current_cost) = scaled_current_price * scaled_balance_size
+                              [_scaled_current_price * self.asset.balance.scaled_arr[0],
+                               _scaled_current_price]],
                              dtype=np.float32)
         return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
 
     def _get_lookback_norm_assets_close_indicators_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
         obs = np.array(self.obs_lookback).astype(np.float32)
-        # obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
-        # obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
-        # obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
         return obs.flatten()
 
     def _get_lookback_norm_assets_close_indicators_conv1d_obs(self) -> np.ndarray:
@@ -554,14 +601,22 @@ class BinanceEnvBase(gymnasium.Env):
         return obs
 
     def _get_norm_assets_close_action_indicators_obs(self) -> np.ndarray:
-        scaled_price = self.target.scaler(self.price)
+        _scaled_current_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
                               self.asset.balance.scaled_arr,
-                              [self.asset.balance.scaled_arr[0] * scaled_price, scaled_price]],
+                              [_scaled_current_price * self.asset.balance.scaled_arr[0],
+                               _scaled_current_price]],
                              dtype=np.float32)
         one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float32)
         one_hot_action[self.actions_lst[-1]] = 1.0
-        return np.concatenate([obs, one_hot_action, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
+        h_w_steps = np.array([self.rewards_obj.current_hold_period.normalized_steps,
+                              self.rewards_obj.current_wait_period.normalized_steps], dtype=np.float32)
+        one_hot_actions_mask = self._get_action_masks().astype(dtype=np.float32)
+        return np.concatenate([obs,
+                               one_hot_action,
+                               h_w_steps,
+                               one_hot_actions_mask,
+                               self.indicators_df.iloc[self.timecount].values]).astype(dtype=np.float32)
 
     def _get_lookback_norm_assets_close_action_indicators_hybrid_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_action_indicators_obs())
@@ -779,7 +834,7 @@ class BinanceEnvBase(gymnasium.Env):
         self._take_action_func(action, amount)
 
         if self.render_mode is not None:
-            self._render(self.timecount, self.price, action, amount, self.pnl, self.total_assets)
+            self._render(self.timecount, self.price, action, amount, self.pnl, self.total_assets, 0)
         # self.reward_step = self.calc_sharpe_ratio(risk_free_rate=0.02)
 
         observation = self._get_obs()
@@ -812,6 +867,16 @@ class BinanceEnvBase(gymnasium.Env):
 
         return observation, self.reward_step, terminated, truncated, info
 
+    def new_render_file(self) -> pd.DataFrame:
+        if self.ohlcv_df is not None:
+            cols = ['open', 'high', 'low', 'close', 'volume', 'action', 'amount', 'pnl',
+                    'total', 'reward']
+            return pd.DataFrame(index=self.ohlcv_df.index,
+                                data=np.zeros(shape=(self.ohlcv_df.shape[0], len(cols))),
+                                columns=cols)
+        else:
+            raise Error('ohlcv_df is None')
+
     def _render(self, timecount, price, action, amount, pnl, total, reward):
         assert price == self.ohlcv_df.iloc[timecount]['close'], f'Error: price not equal "close" at {timecount}'
         self.render_df.iloc[timecount] = self.ohlcv_df.iloc[timecount]['open'], self.ohlcv_df.iloc[timecount][
@@ -837,12 +902,24 @@ class BinanceEnvBase(gymnasium.Env):
     def _warmup(self):
         self._warmup_func()
 
+    def _pre_warmup_step(self):
+        # add action to actions_lst (Hold or Wait)
+        action = self.action_space_obj.convert2action(3, self._get_action_masks())[0]
+        size = 0.
+        self.actions_lst.append(action)
+        self.size_lst.append(size)
+        if self.render_mode is not None:
+            reward = self.rewards_obj.wait_action_reward(
+                self.timecount) if action == 3 else self.rewards_obj.hold_action_reward(self.timecount)
+            self._render(self.timecount, self.price, action, size, self.pnl, self.total_assets, reward)
+
+    def _warmup_step(self):
+        self._pre_warmup_step()
+        _ = self._get_obs_func()
+
     def lookback_warmup(self):
         for ix in range(self.lookback_timeframes):
-            self.actions_lst.append(actions_4_dict['Hold'])
-            _ = self._get_obs_func()
-            if self.render_mode is not None:
-                self._render(self.timecount, self.price, actions_4_dict['Hold'], 0, self.pnl, self.total_assets)
+            self._warmup_step()
             self.timecount += 1
 
     def _lookback_reset(self):
@@ -850,7 +927,7 @@ class BinanceEnvBase(gymnasium.Env):
             self.ret_obs_df = prepare_ret_obs(self.ohlcv_df, self.timeframes_24h)
             for ix in range(max(20, self.timeframes_24h)):
                 self.actions_lst.append(actions_4_dict['Hold'])
-                self._render(self.timecount, self.price, actions_4_dict['Hold'], 0, self.pnl, self.total_assets)
+                self._render(self.timecount, self.price, actions_4_dict['Hold'], 0, self.pnl, self.total_assets, 0)
                 self.timecount += 1
         self._warmup()
 
@@ -893,27 +970,7 @@ class BinanceEnvBase(gymnasium.Env):
         else:
             self.get_new_ohlcv_and_indicators()
 
-    def reset(self, seed=None, options=None):
-        self.set_CM(cache_obj=self.cache_obj)
-        if self.render_mode is not None:
-            self.last_render_df = self.render_df.copy(deep=True)
-            self.last_asset = copy.deepcopy(self.asset)
-        if 'ret' in self.observation_type:
-            self.total_timesteps_counter += (self.timecount - self.lookback_timeframes - self.timeframes_24h)
-        else:
-            self.total_timesteps_counter += (self.timecount - self.lookback_timeframes)
-
-        if self.verbose:
-            self.log_reset_msg()
-        # self.target_balance = float(self.initial_target_balance)
-        # self.coin_balance = float(self.initial_coin_balance)
-        self.timecount: int = 0
-        self.reward = 0.
-        self.reward_step = 0.
-        self.actions_lst: list = []
-        self.invalid_action_counter = 0
-        self.recalc_epsilon()  # recalculate epsilon
-        self.dones = False
+    def _update_data_from_cache(self):
         stable_cache = max(15.,
                            self.stable_cache_data_n * min(1.0,
                                                           self.first_epsilon + 0.3)) if self.use_period == 'train' else self.stable_cache_data_n
@@ -934,6 +991,7 @@ class BinanceEnvBase(gymnasium.Env):
                         self.key_list = self.key_list[:to_keep_ix]
                     else:
                         self.key_list = list(self.CM.keys())
+
                 if self.use_period == 'train':
                     self.np_random.shuffle(self.key_list)
                 """ Get 1st key to get data from cache """
@@ -944,14 +1002,68 @@ class BinanceEnvBase(gymnasium.Env):
         else:
             self.get_new_ohlcv_and_indicators()
 
+    def _prepare_chunk(self) -> None:
+        self.ohlcv_df = self.ohlcv_df_4_chunks.iloc[:self.slice_size]
+        self.indicators_df = self.indicators_df_4_chunks.iloc[:self.slice_size]
+        self.ohlcv_df_4_chunks = self.ohlcv_df_4_chunks.iloc[self.slice_size:]
+        self.indicators_df_4_chunks = self.indicators_df_4_chunks.iloc[self.slice_size:]
+
+    def _update_data_4_chunks(self) -> None:
+        """
+        Wrapper class for preparing data for using with chunk strategy
+
+        Returns:
+            None
+        """
+        self._update_data_from_cache()
+        self.ohlcv_df_4_chunks = self.ohlcv_df
+        self.indicators_df_4_chunks = self.indicators_df
+
+    def reset(self, seed=None, options=None):
+        self.set_CM(cache_obj=self.cache_obj)
+        if self.render_mode is not None:
+            self.last_render_df = self.render_df.copy(deep=True)
+            self.last_asset = copy.deepcopy(self.asset)
+        if 'ret' in self.observation_type:
+            self.total_timesteps_counter += (self.timecount - self.lookback_timeframes - self.timeframes_24h)
+        else:
+            self.total_timesteps_counter += (self.timecount - self.lookback_timeframes)
+
+        if self.verbose:
+            self.log_reset_msg()
+        # self.target_balance = float(self.initial_target_balance)
+        # self.coin_balance = float(self.initial_coin_balance)
+
+        self.reward = 0.
+        self.reward_step = 0.
+        self.actions_lst.clear()
+        self.size_lst.clear()
+        self.invalid_action_counter = 0
+        self.recalc_epsilon()  # recalculate epsilon
+        self.dones = False
+
+        if self.use_chunks and self.use_period == 'train':
+            if self.ohlcv_df_4_chunks is None:
+                self._update_data_4_chunks()
+            else:
+                if self.ohlcv_df_4_chunks.shape[0] <= self.slice_size:
+                    self._update_data_4_chunks()
+            self._prepare_chunk()
+        else:
+            self._update_data_from_cache()
+
+        #   reset timecount after getting new chunk
+        self.timecount: int = 0
+
         if self.use_period == 'train':
             """ random start index for data from cache """
-            rnd_start = self.np_random.integers(self.timeframes_24h)
+            rnd_start = self.np_random.integers(int(self.timeframes_24h // 2))
         else:
             rnd_start = 0
 
-        self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].copy(deep=True)
-        self.indicators_df = self.indicators_df.iloc[rnd_start:].copy(deep=True)
+        # sort index and create copy of dataframe
+        self.ohlcv_df = self.ohlcv_df.iloc[rnd_start:].sort_index(inplace=False)
+        self.indicators_df = self.indicators_df.iloc[rnd_start:].sort_index(inplace=False)
 
         size, cost, price, initial_datetime = Bal(.0, .0, .0, self.current_datetime)
         if self.use_period == 'train':
@@ -970,16 +1082,17 @@ class BinanceEnvBase(gymnasium.Env):
                 self.asset.initial_balance.size * self.asset.initial_balance.price)
 
         if self.render_mode is not None:
-            self.render_df = pd.DataFrame(index=self.ohlcv_df.index, data=0.,
-                                          columns=['open', 'high', 'low', 'close', 'volume', 'action', 'amount', 'pnl',
-                                                   'total', 'reward'])
+            # create the new df file for render data
+            self.render_df = self.new_render_file()
 
         self.order_closed = False
         self.episode_reward = .0
         self.gamma_return = .0
-
+        #   preparing starting data for observations
         if 'lookback' in self.observation_type:
             self._lookback_reset()
+        else:
+            self._warmup()
 
         observation = self._get_obs()
         info = self._get_info()
@@ -1144,6 +1257,8 @@ class BinanceEnvCash(BinanceEnvBase):
                  deterministic: bool = True,
                  use_multiprocessing: bool = False,
                  reward_scaler: int = 10,
+                 use_final_reward: bool = False,
+                 chunk_size: Union[int, None] = None,
                  #  mlp_rlock = None
                  ):
         super().__init__(data_processor_kwargs, target_balance, target_minimum_trade, target_maximum_trade,
@@ -1151,7 +1266,7 @@ class BinanceEnvCash(BinanceEnvBase):
                          action_type, use_period, stable_cache_data_n, reuse_data_prob,
                          eval_reuse_prob, seed, lookback_window, max_hold_timeframes, penalty_value,
                          invalid_actions, total_timesteps, eps_start, eps_end, eps_decay, gamma, cache_obj, render_mode,
-                         index_type, deterministic, use_multiprocessing, reward_scaler,
+                         index_type, deterministic, use_multiprocessing, reward_scaler, use_final_reward, chunk_size
                          #  mlp_rlock
                          )
 
@@ -1168,8 +1283,10 @@ class BinanceEnvCash(BinanceEnvBase):
         self.last_sell_order_pnl: float = 0.
         self.previous_balance = str()
         self.previous_datetime: Union[datetime or None] = None
-        self.size_lst: list = []
-        self.stop_buy_timecount = self.ohlcv_df.shape[0] - (min(4, self.timeframes_24h))
+        self.size_lst: List[float] = []
+
+        self.previous_timecount: int = 0
+
         # self.order_buy = False
         # self.order_sell = False
         self.gamma_return_reset = False
@@ -1198,15 +1315,18 @@ class BinanceEnvCash(BinanceEnvBase):
              self.asset.orders.last_order.OrderType == 'sell' if self.asset.orders.last_order is not None else True],
             dtype=bool)
 
-    def lookback_warmup(self):
-        """ Added max (20, self.lookback_timeframes) for sma20 in reward_obj """
-        for ix in range(max(20, self.lookback_timeframes)):
-            self.actions_lst.append(actions_4_spot_dict['Wait'])
-            _ = self._get_obs_func()
-            if self.render_mode is not None:
-                self._render(self.timecount, self.price, actions_4_spot_dict['Wait'], 0., self.pnl, self.total_assets,
-                             0.)
-            self.timecount += 1
+    # def _pre_warmup_step(self):
+    #     # add action to actions_lst
+    #     self.actions_lst.append(self.action_space_obj.convert2action(4, self._get_action_masks()))
+    #     self.size_lst.append(0.)
+
+    def _warmup_step(self):
+        self._pre_warmup_step()
+        _ = self._get_obs_func()
+        if self.render_mode is not None:
+            self._render(self.timecount, self.price, self.actions_lst[-1], self.size_lst[-1], self.pnl,
+                         self.total_assets, self.rewards_obj.wait_action_reward(self.timecount))
+        self.timecount += 1
 
     def _action_msg(self, action, size, amount, action_commission, order_cash, order_profit, old_target_balance,
                     old_coin_balance):
@@ -1243,7 +1363,7 @@ class BinanceEnvCash(BinanceEnvBase):
             self.asset.orders.buy(size, self.price, self.current_datetime)
             action_commission = self.asset.orders.last_order.order_commission
             order_cash = self.asset.orders.last_order.order_cash
-            self.reward_step += self.rewards_obj.buy_action_reward()
+            self.reward_step += self.rewards_obj.buy_action_reward(self.timecount)
             # self.reward_step += (self.previous_pnl - self.pnl)
             # """ remove commission from cumulatve reward from wait to BUY """
             # self.gamma_return = self.gamma_return - (action_commission / self.initial_total_assets)
@@ -1272,7 +1392,7 @@ class BinanceEnvCash(BinanceEnvBase):
             order_profit = self.asset.trades.last_trade.profit
 
             """ Add reward from closed trade reward calculations """
-            self.reward_step += self.rewards_obj.closed_trade_reward()
+            self.reward_step += self.rewards_obj.closed_trade_reward(self.timecount)
             # """
             # Sell action reward - removed cos of added trade tracking to
             # hold action -> from order_closed=False until order_closed=True
@@ -1290,8 +1410,7 @@ class BinanceEnvCash(BinanceEnvBase):
 
     def _hold_action(self, amount) -> None:
         self.action_symbol = f'{self.asset.symbol}->{self.target.symbol}'
-        self.reward_step += ((
-                                     self.price - self.previous_price) * self.asset.orders.last_order.size) / self.initial_total_assets
+        self.reward_step += self.rewards_obj.hold_action_reward(self.timecount)
         # if self.asset.trades.last_trade and self.asset.trades.last_trade.opened:
         # """ Trade tracking data from buy to sell (we checking uptrend)"""
         # self.reward_step += (self.pnl - self.previous_pnl)
@@ -1336,27 +1455,25 @@ class BinanceEnvCash(BinanceEnvBase):
         self.reward_step = 0.
         amount = 1.
 
+        terminated = bool(self.pnl < self.pnl_stop)
+
+        # if self.use_period == 'train':
+        #     terminated = bool(self.pnl < self.pnl_stop)
+        #     self.stop_buy_timecount = self.timecount
+        #     info = self._get_info()
+        # else:
+        #     terminated = False
+
         # action, amount = self.action_space_obj.convert2action(action, None)
-        action, amount = self.action_space_obj.convert2action(action, info['action_masks'])
+        action, amount = self.action_space_obj.convert2action(action, info.get('action_masks'))
 
         real_action, real_size = self._take_action_func(action, amount)
-
-        if self.render_mode is not None:
-            self._render(self.timecount, self.price, real_action, real_size, self.pnl, self.total_assets, 0.)
-
         self.actions_lst.append(real_action)
         self.size_lst.append(real_size)
 
         observation = self._get_obs()
 
-        # truncated = bool(self.invalid_action_counter >= self.invalid_actions)
         truncated = False
-        terminated = bool(self.pnl < self.pnl_stop)
-
-        # """ To remove sparse -> PNL reward every max_hold_timeframes (24h) """
-        # if self.timecount % self.lookback_timeframes == 0:
-        #     self.reward_step += (self.pnl - self.previous_lookback_pnl)
-        #     self.previous_lookback_pnl = float(self.pnl)
 
         """ don't move. use it before increasing timecount """
         """ ----------------------------------------------- """
@@ -1364,10 +1481,10 @@ class BinanceEnvCash(BinanceEnvBase):
         self.previous_pnl = float(self.pnl)
         self.previous_buy_and_hold_pnl = float(self.buy_and_hold_pnl)
         self.previous_total_assets = float(self.total_assets)
-        self.previous_price = self.price
+        self.previous_price = float(self.price)
         self.previous_balance = str(self.current_balance)
         self.previous_datetime = self.current_datetime
-
+        self.previous_timecount = self.timecount
         """ ----------------------------------------------- """
         self.timecount += 1
         """ ----------------------------------------------- """
@@ -1375,15 +1492,26 @@ class BinanceEnvCash(BinanceEnvBase):
         if self.timecount == self.ohlcv_df.shape[0]:
             terminated = True
 
-
         if terminated or truncated:
             self.dones = True
-            self.reward_step += self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
+            """ Last reward  """
+            self.reward_step = self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
 
         self.reward_step = self.reward_step * self.reward_scaler * self.dt_weight_obj.calc_weight(
             self.previous_datetime)
 
-        self.render_df['reward'][self.timecount - 1] = self.reward_step
+        if self.render_mode is not None:
+            self._render(self.previous_timecount, self.previous_price, real_action, real_size, self.previous_pnl,
+                         self.previous_total_assets, self.reward_step)
+
+        # try:
+        #     self.render_df.iloc[self.previous_timecount].loc['reward'] = self.reward_step
+        # except IndexError as err:
+        #     print(
+        #         f'{err}, previous_timecount = {self.previous_timecount}, current_timecount = {self.timecount}, shape = {self.ohlcv_df.shape[0]} ',
+        #         flush=True)
+        #     print(f'{self.render_df.shape}\n', self.render_df.index.iloc[-10:], flush=True)
+
         self.episode_reward += self.reward_step
 
         return observation, self.reward_step, terminated, truncated, info
@@ -1408,7 +1536,8 @@ class BinanceEnvCash(BinanceEnvBase):
             self.ret_obs_df = prepare_ret_obs(self.ohlcv_df, self.timeframes_24h)
             for ix in range(self.timeframes_24h):
                 self.actions_lst.append(actions_4_spot_dict['Wait'])
-                self._render(self.timecount, self.price, actions_4_spot_dict['Wait'], 0, self.pnl, self.total_assets)
+                self._render(self.timecount, self.price, actions_4_spot_dict['Wait'], 0, self.pnl, self.total_assets,
+                             self.rewards_obj.wait_action_reward(self.timecount))
                 self.timecount += 1
         self._warmup()
 
@@ -1416,13 +1545,13 @@ class BinanceEnvCash(BinanceEnvBase):
 
         self.total_episodes_counter += 1 if self.use_period == 'train' else 0
         observation, info = super().reset(seed, options)
-        self.size_lst = []
         self.last_sell_order_pnl = 0.
         self.buy_and_hold_start_size = self.asset.balance.size + (self.initial_cash / self.price) * (
                 1 - self.asset.orders.commission)
         self.previous_buy_and_hold_pnl = 0.
         self.previous_balance = str()
-        self.stop_buy_timecount = self.ohlcv_df.shape[0] - (min(4, self.timeframes_24h))
+        self.stop_buy_timecount = self.ohlcv_df.shape[0] - max(1,
+                                                               self.np_random.integers(int(self.timeframes_24h // 4)))
 
         # self.previous_lookback_pnl = float(self.pnl)
         return observation, info
