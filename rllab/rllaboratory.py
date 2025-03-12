@@ -53,7 +53,7 @@ from datawizard.dataprocessor import IndicatorProcessor
 from sb3_contrib import MaskablePPO, TRPO, RecurrentPPO
 from tqdm import tqdm
 
-__version__ = 0.052
+__version__ = 0.055
 
 TZ = timezone('Europe/Moscow')
 
@@ -90,7 +90,7 @@ env_wrapper_dict: dict = {'dummy': DummyVecEnv, 'subproc': SubprocVecEnv, 'labsu
                           # 'labmpenv': LabMpVecEnv, 'labmltenv': LabMltVecEnv
                           }
 
-AGENT_TYPE = Union[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO, TRPO]
+AGENT_TYPE = Union[PPO, SAC, DQN, DDPG, TD3, A2C, MaskablePPO, RecurrentPPO, TRPO]
 
 
 class LabBase:
@@ -782,7 +782,8 @@ class LabBase:
                                  n_eval_episodes=self.n_eval_episodes,
                                  deterministic=self.deterministic,
                                  return_episode_rewards=True,
-                                 use_masking=True if self.use_masking else False
+                                 use_masking=True if self.use_masking else False,
+                                 warn=False
                                  )
 
         self.show_result(result, agent_cfg, save_csv=True)

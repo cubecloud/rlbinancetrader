@@ -1,4 +1,7 @@
 from abc import ABC, abstractmethod
+
+from numpy import ndarray
+
 from binanceenv.orderbook import TradesBook, Asset, Trade
 from typing import Optional, List
 import numpy as np
@@ -8,36 +11,24 @@ import math
 __version__ = 0.017
 
 
-class SigmoidCalculator:
-    """A class for precalculating sigmoid function values from 0 to max_len."""
+def get_sigmoid_results(max_len: int = 600, normalization_window: int = 96) -> np.array:
+    """
+    calculate sigmoid results with parameters to calculate sigmoid values.
 
-    def __init__(self, max_len: int = 1000, normalization_window: int = 96) -> None:
-        """
-        Initializes the SigmoidCalculator with parameters to calculate sigmoid values.
+    Args:
+        max_len (int): The maximum length of x values.
+        normalization_window (int, optional): Normalization window for scaling x. Defaults to 96.
+    Returns:
+        np.ndarray
+    """
 
-        Args:
-            max_len (int): The maximum length of x values.
-            normalization_window (int, optional): Normalization window for scaling x. Defaults to 100.
-        """
-        self.normalization_window = normalization_window
-        self.max_len = max_len
-        x_values = np.arange(0, max_len + 1, dtype=np.float32)
-        self.sigmoid_results = 1 / (1 + np.exp(-x_values / self.normalization_window))
-
-    def sigmoid(self, x: int) -> float:
-        """
-        Retrieves the sigmoid value at a specific x from the precalculated results.
-
-        Args:
-            x (int): The x value for which to retrieve the sigmoid result.
-
-        Returns:
-            float: The calculated sigmoid value for the given x.
-        """
-        return self.sigmoid_results[x]
+    x_values = np.arange(0, max_len + 1, dtype=np.float32)
+    sigmoid_results = 1 / (1 + np.exp(-x_values / normalization_window))
+    return sigmoid_results
 
 
 class AnyPeriod:
+
     def __init__(self, normalization_window: int):
         self.entry_datetime = None
         self.exit_datetime = None
@@ -45,14 +36,13 @@ class AnyPeriod:
         self.exit_price = None
         self.size: float = 0.0
         self.reward: List[float] = []
-        self.sigmoid_calc = SigmoidCalculator(max_len=normalization_window * 15,
-                                              normalization_window=normalization_window
-                                              )
+        self.sigmoid_results: np.array = get_sigmoid_results(max_len=normalization_window * 6,
+                                                             normalization_window=normalization_window)
         self.gamma_reward: float = 0.0
 
     @property
     def normalized_steps(self) -> float:
-        return self.sigmoid_calc.sigmoid(len(self.reward))
+        return self.sigmoid_results[len(self.reward)]
 
     def reset(self):
         self.entry_datetime = None
@@ -73,7 +63,8 @@ class HoldPeriod(AnyPeriod):
 
 
 class RewardsBase(ABC):
-    def __init__(self, asset: Asset,
+    def __init__(self,
+                 asset: Asset,
                  gamma=0.93,
                  loss_threshold: float = 0.0087,
                  profit_threshold: float = 0.011,
@@ -144,7 +135,7 @@ class RewardsBase(ABC):
 
     def final_reward(self, buy_and_hold_pnl) -> float:
         _final_reward = 0.0
-        _reward_constant = 1e-6
+        _reward_constant = 1e-5
 
         if self.use_final_reward:
             """
@@ -152,13 +143,12 @@ class RewardsBase(ABC):
             we return penalized reward 
             """
             if self.__trades.trades_qty == 0:
-                if buy_and_hold_pnl <= 0.:
-                    return -_reward_constant * 100
+                return -_reward_constant * 1000
 
             #   calculating mean reward
-            _final_reward = 0. if not len(self.raw_rewards) else np.mean(self.raw_rewards)
-            # episode_relative_pnl = self.pnl(self.__trades.profit)
-            # return 0. if not len(self.raw_rewards) else episode_relative_pnl / len(self.raw_rewards)
+            # _final_reward = 0. if not len(self.raw_rewards) else np.mean(self.raw_rewards)
+            episode_relative_pnl = self.pnl(self.__trades.profit)
+            return 0. if not len(self.raw_rewards) else episode_relative_pnl / len(self.raw_rewards)
 
             # """
             # Changed final reward calculations (was +0.5):
@@ -168,14 +158,14 @@ class RewardsBase(ABC):
             # PNL > 0.    => +0.00001 else -0.00001
             # """
             # if episode_relative_pnl > .0:
-            #     _final_reward += _reward_constant * 5
+            #     _final_reward += _reward_constant * 10
             #     if episode_relative_pnl > buy_and_hold_pnl:
-            #         _final_reward += _reward_constant * 5
+            #         _final_reward += _reward_constant * 10
             #
             # else:
-            #     _final_reward -= _reward_constant * 5
+            #     _final_reward -= _reward_constant * 10
             #     if episode_relative_pnl <= buy_and_hold_pnl:
-            #         _final_reward -= _reward_constant * 5
+            #         _final_reward -= _reward_constant * 10
             #
             # if self.__trades.profit_rate > 0.65:
             #     _final_reward += _reward_constant * 5
@@ -351,7 +341,8 @@ class RewardsBase(ABC):
         # self.current_hold_period.gamma_reward = self.current_hold_period.gamma_reward * self.gamma + action_reward
 
         self.raw_rewards.append(action_reward)
-        return action_reward
+        # return action_reward
+        return 0.
 
     def buy_action_reward(self, timecount) -> float:
         #   if current_wait_period reward NOT empty -> add exit data to object
@@ -436,7 +427,8 @@ class RewardsBase(ABC):
             float
         """
         action_reward = self._wait_action_reward(timecount, momentum_threshold, perc_threshold)
-        return action_reward
+        # return action_reward
+        return 0.
 
     def reset(self, ohlcv_df):
         self._init_lib()

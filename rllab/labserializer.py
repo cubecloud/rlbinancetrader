@@ -12,6 +12,7 @@ from customnn.lstmextractor import LSTMExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC, HerReplayBuffer
 from sb3_contrib import MaskablePPO
+from sb3_contrib import RecurrentPPO
 
 from binanceenv import BinanceEnvBase
 from binanceenv import BinanceEnvCash
@@ -44,6 +45,7 @@ lab_serializer: dict = {'learning_rate': {'CoScheduler_': CoScheduler},
                         'BinanceEnvCash': BinanceEnvCash,
                         'MpCacheManager': MpCacheManager,
                         'MaskablePPO': MaskablePPO,
+                        'RecurrentPPO': RecurrentPPO,
                         # 'BinanceEnvPPO': BinanceEnvPPO,
                         }
 

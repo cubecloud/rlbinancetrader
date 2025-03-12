@@ -63,6 +63,7 @@ def prepare_ret_obs(ohlcv_df, rolling_window):
     obs_ohlcv_df['x3'] = obs_ohlcv_df.low.pct_change()
     obs_ohlcv_df['x4'] = (obs_ohlcv_df['high'] - obs_ohlcv_df['close']) / obs_ohlcv_df['close']
     obs_ohlcv_df['x5'] = (obs_ohlcv_df['close'] - obs_ohlcv_df['low']) / obs_ohlcv_df['close']
+    obs_ohlcv_df.fillna(method='bfill', inplace=True)
     return obs_ohlcv_df[['x1', 'x2', 'x3', 'x4', 'x5', 'vwap_ret']]
 
 
@@ -109,6 +110,7 @@ def calculate_volatility(ohlcv_df, window: Union[int, str] = '24h', method='park
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+
     # Generate sample 15-minute OHLCV data
     np.random.seed(42)
     length = 10000

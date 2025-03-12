@@ -248,7 +248,8 @@ class BinanceEnvBase(gymnasium.Env):
         self._last_lookback_timecount: int = 0
         self.actions_lst: List[int] = []
         self.size_lst: List[float] = []
-        self.stop_buy_timecount = self.ohlcv_df.shape[0] - (min(4, self.timeframes_24h))
+        self.stop_buy_timecount = self.ohlcv_df.shape[0] - max(3,
+                                                               self.np_random.integers(int(self.timeframes_24h // 4)))
 
         self.render_path_filename = None
         self.render_mode = render_mode
@@ -263,6 +264,8 @@ class BinanceEnvBase(gymnasium.Env):
 
         self.rewards_obj = Rewards(asset=self.asset,
                                    gamma=self.gamma,
+                                   # loss_threshold=0.0087,
+                                   # profit_threshold=0.011,
                                    normalization_window=self.timeframes_24h,
                                    use_final_reward=self.use_final_reward)
 
@@ -620,8 +623,8 @@ class BinanceEnvBase(gymnasium.Env):
 
     def _get_lookback_norm_assets_close_action_indicators_hybrid_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_action_indicators_obs())
-        obs = np.array(self.obs_lookback).astype(np.float32)
-        return obs
+        # obs = np.array(self.obs_lookback).astype(np.float32)
+        return np.array(self.obs_lookback).astype(np.float32)
 
     def _get_assets_close_indicators_action_obs(self) -> np.ndarray:
         scaled_price = self.target.scaler(self.price)
@@ -920,15 +923,11 @@ class BinanceEnvBase(gymnasium.Env):
     def lookback_warmup(self):
         for ix in range(self.lookback_timeframes):
             self._warmup_step()
-            self.timecount += 1
+            # self.timecount += 1
 
     def _lookback_reset(self):
         if 'ret' in self.observation_type:
             self.ret_obs_df = prepare_ret_obs(self.ohlcv_df, self.timeframes_24h)
-            for ix in range(max(20, self.timeframes_24h)):
-                self.actions_lst.append(actions_4_dict['Hold'])
-                self._render(self.timecount, self.price, actions_4_dict['Hold'], 0, self.pnl, self.total_assets, 0)
-                self.timecount += 1
         self._warmup()
 
     # def calc_sharpe_ratio(self, risk_free_rate=0.02) -> float:
@@ -1550,7 +1549,7 @@ class BinanceEnvCash(BinanceEnvBase):
                 1 - self.asset.orders.commission)
         self.previous_buy_and_hold_pnl = 0.
         self.previous_balance = str()
-        self.stop_buy_timecount = self.ohlcv_df.shape[0] - max(1,
+        self.stop_buy_timecount = self.ohlcv_df.shape[0] - max(3,
                                                                self.np_random.integers(int(self.timeframes_24h // 4)))
 
         # self.previous_lookback_pnl = float(self.pnl)
