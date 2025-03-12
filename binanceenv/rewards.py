@@ -343,6 +343,7 @@ class RewardsBase(ABC):
         self.raw_rewards.append(action_reward)
         # return action_reward
         return 0.
+        # return self.current_hold_period.gamma_reward
 
     def buy_action_reward(self, timecount) -> float:
         #   if current_wait_period reward NOT empty -> add exit data to object
@@ -352,18 +353,27 @@ class RewardsBase(ABC):
         else:
             return 1e-6
 
-        synthetic_pnl = self._wait_action_reward(timecount)
+        start_price = self.current_wait_period.entry_price
+        end_price = self.current_wait_period.exit_price
+        #   wait_reward append to raw_rewards list with self._wait_action_reward
+        _ = self._wait_action_reward(timecount)
+
+        wait_period_pnl = ((start_price - end_price) * self.current_wait_period.size) / self.__asset.initial_total_in_cash
+
         weight = self.wait_period_weight()
 
-        if synthetic_pnl >= 0:
-            action_reward = synthetic_pnl * (1 - weight)
+        if abs(wait_period_pnl) > self.loss_threshold:
+            if wait_period_pnl >= 0:
+                action_reward = wait_period_pnl * (1 - weight)
+            else:
+                action_reward = wait_period_pnl * (1 + weight)
         else:
-            action_reward = synthetic_pnl * (1 + weight)
+            action_reward = wait_period_pnl * 1.1
 
         # wait_actions_length = len(self.current_wait_period.reward)
+
         self.current_wait_period.reset()
 
-        self.raw_rewards.append(action_reward)
         return action_reward
 
     def _wait_action_reward(self,
@@ -389,28 +399,30 @@ class RewardsBase(ABC):
             self.current_wait_period.size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
 
         # Get precomputed TA-Lib values
-        atr = self.ohlcv_df.iloc[timecount]['atr14']
-        momentum = self.ohlcv_df.iloc[timecount]['momentum14']
-
-        # Calculate trend conditions
-        price_volatility = atr / self.ohlcv_df.iloc[timecount]['close']
-        flat_market = (price_volatility < perc_threshold) & (
-                abs(momentum) < momentum_threshold)  # 0.87% momentum threshold
+        # atr = self.ohlcv_df.iloc[timecount]['atr14']
+        # momentum = self.ohlcv_df.iloc[timecount]['momentum14']
+        #
+        # # Calculate trend conditions
+        # price_volatility = atr / self.ohlcv_df.iloc[timecount]['close']
+        # flat_market = (price_volatility < perc_threshold) & (
+        #         abs(momentum) < momentum_threshold)  # 0.87% momentum threshold
 
         size = self.current_wait_period.size
         price = self.ohlcv_df.iloc[timecount]['close']
         previous_price = self.ohlcv_df.iloc[timecount - 1]['close']
-        if flat_market:
-            # action_reward = 0.105 * size * (perc_threshold - price_volatility)
-            action_reward = abs(((previous_price - price) * size) / self.__asset.initial_total_in_cash)
-        else:
-            action_reward = ((previous_price - price) * size) / self.__asset.initial_total_in_cash
+        # if flat_market:
+        #     # action_reward = 0.105 * size * (perc_threshold - price_volatility)
+        #     action_reward = abs(((previous_price - price) * size) / self.__asset.initial_total_in_cash)
+        # else:
+        #     action_reward = ((previous_price - price) * size) / self.__asset.initial_total_in_cash
+        action_reward = ((previous_price - price) * size) / self.__asset.initial_total_in_cash
 
         self.current_wait_period.reward.append(action_reward)
         # self.current_wait_period.gamma_reward = self.current_wait_period.gamma_reward * self.gamma + action_reward
 
         self.raw_rewards.append(action_reward)
         return action_reward
+        # return self.current_wait_period.gamma_reward
 
     def wait_action_reward(self,
                            timecount: int,
@@ -431,23 +443,23 @@ class RewardsBase(ABC):
         return 0.
 
     def reset(self, ohlcv_df):
-        self._init_lib()
-
-        self.ohlcv_df = ohlcv_df.copy()
-        # Precompute TA-Lib indicators
-        # Calculate ATR (14-period)
-        self.ohlcv_df['atr14'] = self.talib.ATR(
-            self.ohlcv_df['high'],
-            self.ohlcv_df['low'],
-            self.ohlcv_df['close'],
-            timeperiod=14
-        )
-
-        # Calculate Momentum (14-period ROC)
-        self.ohlcv_df['momentum14'] = self.talib.ROC(self.ohlcv_df['close'], timeperiod=14)
-
-        # Fill NaN values created by indicators
-        self.ohlcv_df.fillna(method='bfill', inplace=True)
+        # self._init_lib()
+        #
+        # self.ohlcv_df = ohlcv_df.copy()
+        # # Precompute TA-Lib indicators
+        # # Calculate ATR (14-period)
+        # self.ohlcv_df['atr14'] = self.talib.ATR(
+        #     self.ohlcv_df['high'],
+        #     self.ohlcv_df['low'],
+        #     self.ohlcv_df['close'],
+        #     timeperiod=14
+        # )
+        #
+        # # Calculate Momentum (14-period ROC)
+        # self.ohlcv_df['momentum14'] = self.talib.ROC(self.ohlcv_df['close'], timeperiod=14)
+        #
+        # # Fill NaN values created by indicators
+        # self.ohlcv_df.fillna(method='bfill', inplace=True)
         self.current_wait_period.reset()
         self.current_hold_period.reset()
         self.raw_rewards.clear()
