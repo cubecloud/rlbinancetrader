@@ -75,7 +75,7 @@ class SeparatedCNNFeatureExtractor(BaseFeaturesExtractor):
         self.final_layer = nn.Sequential(
             nn.Linear(total_features, features_dim),
             nn.LayerNorm(features_dim),
-            nn.Dropout(0.1)
+            # nn.Dropout(0.1)
         )
         print(f'Total features before final layer: {total_features}')
         print(f'Final feature dimension: {features_dim}')

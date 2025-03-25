@@ -9,7 +9,7 @@ from itertools import cycle
 
 from datetime import timezone, datetime
 from dateutil.relativedelta import relativedelta
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Optional
 
 from dbbinance.fetcher import check_convert_to_datetime
 from dbbinance.fetcher.getfetcher import get_datafetcher
@@ -42,7 +42,9 @@ class ProcessorBase:
                  maximum_test_size: Union[float, int] = 0.7,
                  test_size: float = 0.2,
                  verbose: int = 0,
-                 seed=42):
+                 seed=42,
+                 use_shifts_num: Optional[int] = None,
+                 ):
 
         with ProcessorBase.count.get_lock():
             ProcessorBase.count.value += 1
@@ -55,6 +57,7 @@ class ProcessorBase:
         self.discretization = discretization
         self.market = market
         self.symbol_pair = symbol_pair
+        self.use_shifts_num = use_shifts_num
 
         self.__initial_minimum_train_size = minimum_train_size
         self.__initial_minimum_test_size = minimum_test_size
@@ -464,7 +467,7 @@ class ProcessorBase:
             offset = None
         else:
             num_episodes = n_episodes
-            offset = None   # auto offset calculations
+            offset = None  # auto offset calculations
 
         if period_type == 'train':
             logger.info(
@@ -477,7 +480,8 @@ class ProcessorBase:
                                                   min_timeframes_per_episode=self.minimum_train_timeframes_num,
                                                   max_timeframes_per_episode=self.maximum_train_timeframes_num,
                                                   timeframe=self.timeframe,
-                                                  offset=offset
+                                                  offset=offset,
+                                                  use_shifts_num=self.use_shifts_num
                                                   )
         else:
             logger.info(
@@ -489,7 +493,8 @@ class ProcessorBase:
                                                   min_timeframes_per_episode=self.minimum_test_timeframes_num,
                                                   max_timeframes_per_episode=self.maximum_test_timeframes_num,
                                                   timeframe=self.timeframe,
-                                                  offset=offset
+                                                  offset=offset,
+                                                  use_shifts_num=self.use_shifts_num
                                                   )
 
     def get_random_ohlcv_df(self):
@@ -528,10 +533,12 @@ class IndicatorProcessor(ProcessorBase):
                  test_size: float = 0.2,
                  verbose: int = 0,
                  seed=42,
-                 indicators_sign=False):
+                 indicators_sign=False,
+                 use_shifts_num: Optional[int] = None
+                 ):
         super().__init__(start_datetime, end_datetime, timeframe, discretization, symbol_pair, market,
                          minimum_train_size, maximum_train_size, minimum_test_size, maximum_test_size, test_size,
-                         verbose, seed)
+                         verbose, seed, use_shifts_num)
 
         self.indicators_sign = indicators_sign
         self.idnum = int(IndicatorProcessor.count.value)
@@ -626,14 +633,16 @@ class IndicatorProcessor(ProcessorBase):
     def get_n_episodes_start_end_lst(self,
                                      index_type='target_time',
                                      period_type='train',
-                                     n_episodes: Union[str, int] = 'auto'):
+                                     n_episodes: Union[str, int] = 'auto',
+                                     ):
         self.check_cache(index_type)
-        return self.prepare_n_episodes_lst(period_type=period_type, n_episodes=n_episodes)
+        return self.prepare_n_episodes_lst(period_type=period_type, n_episodes=n_episodes, )
 
     def get_n_episodes_ohlcv_and_indicators(self,
                                             index_type='target_time',
                                             period_type='train',
-                                            n_episodes: Union[str, int] = 'auto'):
+                                            n_episodes: Union[str, int] = 'auto',
+                                            ):
 
         episodes_lst: list = []
         msg = f"{self.__class__.__name__} #{self.idnum}: {period_type.upper()} pool timeframes: "

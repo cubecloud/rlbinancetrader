@@ -110,7 +110,7 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
         self.final_layer = nn.Sequential(
             nn.Linear(total_features, features_dim),
             nn.LayerNorm(features_dim),
-            nn.Dropout(0.3),
+            nn.Dropout(0.25),
             nn.GELU(),
             nn.Linear(features_dim, features_dim)
         )

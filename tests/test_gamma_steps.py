@@ -9,7 +9,7 @@ def calculate_steps(gamma_values, num_steps, lr_rate=1e-3):
     for gamma in gamma_values:
         regress_reward = 0
         steps = 0
-        rewards = np.round(np.linspace(2e-1, 1e-6, num_steps), 10)  # Round rewards to 5 decimal places
+        rewards = np.round(np.linspace(2e-1, 5e-4, num_steps), 10)  # Round rewards to 5 decimal places
         for reward in rewards:
             regress_reward = reward
             steps = 0

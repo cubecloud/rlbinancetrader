@@ -86,15 +86,15 @@ if __name__ == '__main__':
     # '2024-06-30 04:35:00/2024-08-29 09:43:00'
     # '2024-06-12 03:21:00/2024-07-30 01:00:00'
 
-    total_timesteps = 300_000_000
+    total_timesteps = 50_000_000
 
-    agents_n_env = int(420)
+    agents_n_env = int(140)
     # agents_n_env = 1
     n_steps = 120
     warmup_timesteps = (agents_n_env * n_steps) * 200
 
-    # index_type = 'target_time'
-    index_type = 'prediction_time'
+    index_type = 'target_time'
+    # index_type = 'prediction_time'
 
     lookback_window = '5h'
     seed = 42  # start with 443 -> bad
@@ -167,7 +167,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.7,
+                               gamma=0.8,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete_4',
@@ -199,12 +199,12 @@ if __name__ == '__main__':
         n_epochs=10,
         stats_window_size=100,
         normalize_advantage=True,
-        clip_range=0.15,
-        clip_range_vf=0.15,
+        clip_range=0.07,
+        clip_range_vf=0.07,
         ent_coef=0.01,
         vf_coef=1.0,
         # max_grad_norm=0.25,
-        gamma=0.7,
+        gamma=0.8,
         learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
                                            stable_warmup=False,
                                            floor_learning_rate=1e-6,
@@ -216,7 +216,7 @@ if __name__ == '__main__':
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
 
-        device='cuda',
+        device='auto',
         seed=seed,
         verbose=1)
 
@@ -233,10 +233,10 @@ if __name__ == '__main__':
             # env_wrapper='dummy',
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
-            checkpoint_num=n_steps * 10,
+            checkpoint_num=n_steps * 5,
             n_eval_episodes=100,
             log_interval=1,
-            eval_freq=n_steps * 10,
+            eval_freq=n_steps * 5,
             experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
             deterministic=False,
             verbose=0,

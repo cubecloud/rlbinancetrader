@@ -37,7 +37,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.135
+__version__ = 0.139
 
 logger = get_logger()
 # logger = logging.getLogger()
@@ -86,16 +86,18 @@ if __name__ == '__main__':
     # '2024-06-30 04:35:00/2024-08-29 09:43:00'
     # '2024-06-12 03:21:00/2024-07-30 01:00:00'
 
-    total_timesteps = 3_000_000_000
+    total_timesteps = 300_000_000
 
-    agents_n_env = int(3780)
-    n_steps = 300
+    agents_n_env = int(360)
+    n_steps = 200
     warmup_timesteps = (agents_n_env * n_steps) * 100
     index_type = 'target_time'
     # index_type = 'prediction_time'
 
-    lookback_window = '10h'
+    lookback_window = '1h'
+    indicators_sign = True
     seed = 42  # start with 443 -> bad
+    reward_scaler = 1
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -103,13 +105,14 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=940,
-                                 maximum_train_size=990,
-                                 minimum_test_size=940,
-                                 maximum_test_size=990,
+                                 minimum_train_size=640,
+                                 maximum_train_size=645,
+                                 minimum_test_size=640,
+                                 maximum_test_size=645,
                                  test_size=0.1,
                                  verbose=1,
-                                 indicators_sign=True
+                                 indicators_sign=indicators_sign,
+                                 use_shifts_num=4
                                  )
 
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
@@ -128,7 +131,7 @@ if __name__ == '__main__':
     #                              )
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                               pnl_stop=-0.9,
+                               pnl_stop=-0.04,
                                verbose=0,
                                log_interval=1,
                                seed=seed,
@@ -138,9 +141,9 @@ if __name__ == '__main__':
                                target_scale_decay=200_000,
                                # observation_type='lookback_dict',
                                # observation_type='assets_close_indicators',
-                               observation_type='lookback_norm_assets_close_indicators_conv1d',
+                               observation_type='lookback_norm_assets_close_action_indicators_hybrid',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=agents_n_env * 2,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=int(agents_n_env // 2),  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -150,57 +153,66 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.92,
+                               gamma=0.8,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete_4',
                                # index_type='target_time',
                                index_type=index_type,
                                render_mode='human',
-                               reward_scaler=100
+                               reward_scaler=reward_scaler,
+                               use_final_reward=True,
+                               chunk_size=None,
                                )
 
     # features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * 14 * 1.78)
-    # last_features_dim = int(features_dim // 4)
-    # ppo_policy_kwargs = dict(
-    #     features_extractor_class='MlpExtractorNN',
-    #     features_extractor_kwargs=dict(features_dim=features_dim,
-    #                                    last_features_dim=last_features_dim,
-    #                                    activation_fn='ReLU'),
-    #     share_features_extractor=True,
-    #     net_arch=[last_features_dim, 256, 144],
-    # )
-
+    features_dim = int((get_timeframe_bins(lookback_window) // get_timeframe_bins(_timeframe)) * (6+4*2+2+12) * 1.78)
+    last_features_dim = int(features_dim // 4)
     ppo_policy_kwargs = dict(
-        features_extractor_class='SeparatedCNNFeatureExtractor',
-        features_extractor_kwargs=dict(features_dim=256, ),
+        features_extractor_class='MlpExtractorNN',
+        features_extractor_kwargs=dict(features_dim=features_dim,
+                                       last_features_dim=last_features_dim,
+                                       activation_fn='ReLU'),
         share_features_extractor=True,
-        net_arch=[256, dict(pi=[64], vf=[64])],
+        # net_arch=[last_features_dim, 256, 144],
+        net_arch = dict(pi=[last_features_dim, 256, 144], vf=[last_features_dim, 256, 144])
     )
 
+    # ppo_policy_kwargs = dict(
+    #     features_extractor_class='HybridFeatureExtractor',
+    #     features_extractor_kwargs=dict(features_dim=256,
+    #                                    assets_features=6,
+    #                                    actions_features=4 * 2 + 2,
+    #                                    indicators_sign=indicators_sign),
+    #     share_features_extractor=True,
+    #     net_arch=dict(pi=[256, 128, 64], vf=[256, 128, 64])
+    # )
+
     ppo_kwargs = dict(
-        policy="CnnPolicy",
+        policy="MlpPolicy",
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=n_steps,
-        batch_size=int(agents_n_env * n_steps // 10),
+        batch_size=int(agents_n_env * n_steps // 80),
         n_epochs=10,
-        stats_window_size=25,
-        ent_coef=0.03,
+        stats_window_size=50,
         normalize_advantage=True,
-        clip_range=0.2,
-        clip_range_vf=0.2,
-        learning_rate={'CoSheduller': dict(warmup=warmup_timesteps,
+        clip_range=0.07,
+        clip_range_vf=0.07,
+        ent_coef=0.01,
+        vf_coef=0.5,
+        # max_grad_norm=0.25,
+        gamma=0.8,
+        learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
                                            stable_warmup=False,
-                                           floor_learning_rate=1e-7,
-                                           min_learning_rate=2e-6,
-                                           learning_rate=4.5e-6,
+                                           floor_learning_rate=1e-6,
+                                           min_learning_rate=8e-6,
+                                           learning_rate=1e-5,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
-                                           pre_warmup_coef=0.1)
+                                           pre_warmup_coef=0.03)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
-        gamma=0.95,
         device='auto',
         seed=seed,
         verbose=1)
@@ -218,10 +230,10 @@ if __name__ == '__main__':
             env_wrapper_kwargs={'use_threads': False},
             total_timesteps=total_timesteps,
             checkpoint_num=n_steps * 3,
-            n_eval_episodes=50,
+            n_eval_episodes=100,
             log_interval=1,
             eval_freq=n_steps * 3,
-            experiment_path='/home/cubecloud/Python/projects/rlbinancetrader/tests/save',
+            experiment_path='/home/cubecloud/Backup/Experiments/rlbinancetrader/save',
             deterministic=False,
             verbose=0,
             seed=seed,

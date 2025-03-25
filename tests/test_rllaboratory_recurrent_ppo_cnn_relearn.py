@@ -35,7 +35,7 @@ if __name__ == '__main__':
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    json_cfg = './save/BinanceEnvCash/RecurrentPPO/exp-1103-103439/RecurrentPPO_BinanceEnvCash_300000000_cfg.json'
+    json_cfg = './save/BinanceEnvCash/RecurrentPPO/exp-1203-114139/RecurrentPPO_BinanceEnvCash_50000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab.test_agent(filename='best_model', verbose=1)
@@ -61,17 +61,18 @@ if __name__ == '__main__':
 
     _timeframe = '15m'
     _discretization = '15m'
-    total_timesteps = 300_000_000
+    total_timesteps = 100_000_000
 
-    agents_n_env = int(420)
+    agents_n_env = int(840)
     # agents_n_env = int(200)
-    n_steps = 120
+    n_steps = 480
     warmup_timesteps = (agents_n_env * n_steps) * 500
 
     lookback_window = '5h'
     indicators_sign = False
     seed = 543
-    index_type = 'prediction_time'
+    index_type = 'target_time'
+    # index_type = 'prediction_time'
 
     data_processor_kwargs = dict(start_datetime=_start_datetime,
                                  end_datetime=_end_datetime,
@@ -104,8 +105,8 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
 
         rllab.loaded_learn(
-            # filename=117_936_000,
-            filename='best_model',
+            filename=49980000,
+            # filename='best_model',
             reset_num_timesteps=True,
             total_timesteps=total_timesteps,
             env_kwargs_update={
@@ -115,10 +116,10 @@ if __name__ == '__main__':
                 'reuse_data_prob': 1.0,
                 'verbose': 0,
                 'render_mode': 'human',
-                'gamma': 0.7,
+                'gamma': 0.8,
                 'index_type': index_type,
                 'use_final_reward': True,
-                'chunk_size': 135,
+                'chunk_size': None,
             },
 
             agent_kwargs_update={
@@ -129,17 +130,17 @@ if __name__ == '__main__':
                 'n_epochs': 10,
                 'stats_window_size': 100,
                 'ent_coef': 0.01,
-                'clip_range': 0.2,
-                'clip_range_vf': 0.2,
+                'clip_range': 0.07,
+                'clip_range_vf': 0.07,
                 'vf_coef': 1.0,
-                'gamma': 0.7,
+                'gamma': 0.8,
                 'normalize_advantage': True,
                 # 'max_grad_norm': 0.25,
                 'learning_rate': {'CoScheduler': dict(warmup=warmup_timesteps,
                                                       stable_warmup=False,
                                                       floor_learning_rate=1e-6,
-                                                      min_learning_rate=1e-5,
-                                                      learning_rate=2e-4,
+                                                      min_learning_rate=1e-4,
+                                                      learning_rate=4e-4,
                                                       total_epochs=total_timesteps,
                                                       epsilon=1,
                                                       pre_warmup_coef=0.1)

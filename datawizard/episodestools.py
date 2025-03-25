@@ -1,6 +1,6 @@
 import random
 import pandas as pd
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Optional
 from dateutil.relativedelta import relativedelta
 from itertools import cycle
 from multiprocessing import get_logger
@@ -11,7 +11,7 @@ from dbbinance.fetcher.datautils import get_timedelta_kwargs
 from dbbinance.fetcher.constants import Constants
 from rllab.labtools import round_up
 
-__version__ = 0.098
+__version__ = 0.101
 
 logger = get_logger()
 
@@ -105,11 +105,12 @@ def generate_episodes(dates_range: pd.Series, min_timeframes_per_episode: int, m
 
 
 def prepare_episodes_start_end_lst(num_episodes: int,
-                                   minute_timeframes: pd.Series,  # minute timeframe
-                                   min_timeframes_per_episode: int,  # number in chose timeframe
-                                   max_timeframes_per_episode: int,  # number in chose timeframe
-                                   timeframe: str,  # chose timeframe
-                                   offset: Union[int, None] = None
+                                   minute_timeframes: pd.Series,        # minute timeframe
+                                   min_timeframes_per_episode: int,     # number in chose timeframe
+                                   max_timeframes_per_episode: int,     # number in chose timeframe
+                                   timeframe: str,                      # chose timeframe
+                                   offset: Union[int, None] = None,
+                                   use_shifts_num: Optional[int] = None
                                    ) -> List[Tuple]:
     def get_shifted_range(shifted_minute_ix):
         return pd.Series(index=pd.date_range(start=minute_timeframes.index[shifted_minute_ix],
@@ -118,6 +119,8 @@ def prepare_episodes_start_end_lst(num_episodes: int,
                          dtype=int)
 
     shifts = generate_shifts(Constants.binsizes[timeframe])
+    if use_shifts_num is not None:
+        shifts = shifts[:use_shifts_num]
     circular_shifts = cycle(shifts)
 
     """

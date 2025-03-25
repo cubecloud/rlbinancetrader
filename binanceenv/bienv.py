@@ -540,6 +540,10 @@ class BinanceEnvBase(gymnasium.Env):
         return self.ohlcv_df.iloc[self.timecount]['close']
 
     @property
+    def ohlc(self) -> float:
+        return self.ohlcv_df.iloc[self.timecount][['open', 'high', 'low', 'close']]
+
+    @property
     def total_assets(self) -> float:
         return self.target.cash + (self.asset.balance.size * self.price)
 
@@ -699,7 +703,7 @@ class BinanceEnvBase(gymnasium.Env):
 
     def not_max_holding_time(self, max_hold_timeframes) -> bool:
         check = True
-        if len(self.actions_lst) > self.max_hold_timeframes:  # Hold
+        if len(self.actions_lst) > self.max_hold_timeframes:  # Hold or Wait
             # Penalty actions for just holding
             if np.all(np.array(self.actions_lst[-max_hold_timeframes:]) - 1):
                 check = False
@@ -1449,19 +1453,36 @@ class BinanceEnvCash(BinanceEnvBase):
 
         return action, size
 
+    def is_terminate_conditions(self) -> bool:
+        # check if we loose money or our win_rate is too low or we wait too much time
+        if self.pnl < self.pnl_stop or (self.asset.trades.trades_qty > 3 and self.asset.trades.win_rate < 50) or len(
+                self.rewards_obj.current_wait_period.reward) > self.max_hold_timeframes:
+            return True
+        else:
+            return False
+
     def step(self, action):
         info = self._get_info()
         self.reward_step = 0.
         amount = 1.
 
-        terminated = bool(self.pnl < self.pnl_stop)
+        # terminated = bool(self.pnl < self.pnl_stop)
 
-        # if self.use_period == 'train':
-        #     terminated = bool(self.pnl < self.pnl_stop)
-        #     self.stop_buy_timecount = self.timecount
-        #     info = self._get_info()
-        # else:
-        #     terminated = False
+        if self.use_period == 'train':
+
+            if self.is_terminate_conditions():
+                if self.stop_buy_timecount == self.timecount - 3:
+                    terminated = True
+                    info = self._get_info()
+                    self.reward_step += self.rewards_obj.reward_constant * 500  # 0.005 = 0.5%
+                else:
+                    if self.stop_buy_timecount > self.timecount:
+                        self.stop_buy_timecount = self.timecount
+                    terminated = False
+            else:
+                terminated = False
+        else:
+            terminated = False
 
         # action, amount = self.action_space_obj.convert2action(action, None)
         action, amount = self.action_space_obj.convert2action(action, info.get('action_masks'))
@@ -1494,10 +1515,12 @@ class BinanceEnvCash(BinanceEnvBase):
         if terminated or truncated:
             self.dones = True
             """ Last reward  """
-            self.reward_step = self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
+            self.reward_step += self.rewards_obj.final_reward(self.previous_buy_and_hold_pnl)
 
-        self.reward_step = self.reward_step * self.reward_scaler * self.dt_weight_obj.calc_weight(
-            self.previous_datetime)
+        # self.reward_step = self.reward_step * self.reward_scaler * self.dt_weight_obj.calc_weight(
+        #     self.previous_datetime)
+
+        self.reward_step = self.reward_step * self.reward_scaler
 
         if self.render_mode is not None:
             self._render(self.previous_timecount, self.previous_price, real_action, real_size, self.previous_pnl,

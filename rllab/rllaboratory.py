@@ -45,7 +45,7 @@ from rllab import lab_evaluate_policy
 from rllab import LabEvalCallback
 from rllab import LabMaskEvalCallback
 from rllab.labmaskevaluation import lab_mask_evaluate_policy
-from rllab.labtools import deserialize_kwargs, round_up, get_base_env
+from rllab.labtools import deserialize_kwargs, round_up, get_base_env, dive_kvreplace
 from rllab.labserializer import lab_serializer
 from rllab.labfillcache import worker_fill_cache
 from datawizard.dataprocessor import IndicatorProcessor
@@ -194,12 +194,12 @@ class LabBase:
                 kwargs.update({'deterministic': self.deterministic})
 
         if not isinstance(agents_kwargs, list):
-            self.update_agent_kwargs(agents_kwargs)
+            self.update_agent_kwargs_tb(agents_kwargs)
             self.agents_kwargs_lst = list([agents_kwargs, ])
         else:
             self.agents_kwargs_lst = agents_kwargs
             for kwargs in self.agents_kwargs_lst:
-                self.update_agent_kwargs(kwargs)
+                self.update_agent_kwargs_tb(kwargs)
 
         if agents_n_env is None:
             self.agents_n_env = []
@@ -228,7 +228,7 @@ class LabBase:
         self.mp_test_cache_server: Union[MpCacheManager, PERCacheManager, None] = None
         # self.init_agents()
 
-    def update_agent_kwargs(self, agent_kwargs):
+    def update_agent_kwargs_tb(self, agent_kwargs):
         agent_kwargs.update({'tensorboard_log': os.path.join(self.base_cfg.EXPERIMENT_PATH, 'TB')})
         return agent_kwargs
 
@@ -326,7 +326,8 @@ class LabBase:
         dp_obj = IndicatorProcessor(**env_kwargs['data_processor_kwargs'])
         episodes_start_end_lst = dp_obj.get_n_episodes_start_end_lst(index_type=env_kwargs['index_type'],
                                                                      period_type=env_kwargs['use_period'],
-                                                                     n_episodes=env_kwargs['stable_cache_data_n'])
+                                                                     n_episodes=env_kwargs['stable_cache_data_n'],
+                                                                     )
 
         logger.info(f'{self.__class__.__name__}: start-end list contains: #{len(episodes_start_end_lst)}')
 
@@ -456,6 +457,8 @@ class LabBase:
             agent_cfg.N_EVAL_EPISODES = n_eval_episodes
             self.n_eval_episodes = n_eval_episodes
 
+        path_filename = self._get_checkpoint_path_filename(agent_cfg, filename)
+
         train_env_kwargs = copy.deepcopy(self.env_kwargs_lst[ix])
         train_env_kwargs.update({'use_period': 'train', 'verbose': verbose, })
 
@@ -509,14 +512,15 @@ class LabBase:
 
         # agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
         # _ = agent_kwargs.pop('action_noise')
+        # update tensorboard directory with actual 'exp' dir
+        self.agents_kwargs[ix] = self.update_agent_kwargs_tb(self.agents_kwargs[ix])
 
-        path_filename = self._get_checkpoint_path_filename(agent_cfg, filename)
-        agent_obj = self.agents_classes_lst[ix].load(path=path_filename,
-                                                     env=train_vec_env,
-                                                     **deserialize_kwargs(agent_kwargs_update, lab_serializer))
+        agent_kwargs: dict = copy.deepcopy(self.agents_kwargs[ix])
 
-        logger.info(
-            f'{self.__class__.__name__}: Creating agent: #{ix:02d} {agent_obj.__class__.__name__}')
+        if agent_kwargs_update is not None:
+            agent_kwargs.update(deserialize_kwargs(agent_kwargs_update, lab_serializer))
+
+        logger.info(f'{self.__class__.__name__}: TB directory check: {agent_kwargs["tensorboard_log"]}')
 
         # agent_obj = self.agents_classes_lst[ix](env=self.train_vecenv_lst[ix],
         #                                         **deserialize_kwargs(agent_kwargs, lab_serializer))
@@ -531,7 +535,7 @@ class LabBase:
                 new_agent_cfg.TOTAL_TIMESTEPS = total_timesteps
                 self.total_timesteps = total_timesteps
 
-            new_agent_cfg.FILENAME = f'{agent_obj.__class__.__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}'
+            new_agent_cfg.FILENAME = f'{self.agents_classes_lst[ix].__name__}_{self.env_classes_lst[ix].__name__}_{self.total_timesteps}'
             dirs = self.create_exp_dirs(new_agent_cfg)
             new_agent_cfg.DIRS = dirs
 
@@ -539,14 +543,24 @@ class LabBase:
                                       os.path.join(new_agent_cfg.DIRS['exp'], f'{new_agent_cfg.FILENAME}_cfg.json'))
             import shutil
 
-            # TODO: check what saved in the agent_kwargs (not lab _cfg.json), check serialization
+            # load old agent kwargs from old location to have serialized data
             agent_kwargs = ConfigMethods.load_config(
                 os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
+
+            self.base_cfg = new_agent_cfg
+            # update tensorboard directory with new 'exp' dir
+            agent_kwargs = self.update_agent_kwargs_tb(agent_kwargs)
+
+            # update agent_kwargs with update (serialized data)
             if agent_kwargs_update is not None:
                 agent_kwargs.update(agent_kwargs_update)
-
+            # save serialized new agent_kwargs
             ConfigMethods.save_config(agent_kwargs,
                                       os.path.join(new_agent_cfg.DIRS['exp'], f'{new_agent_cfg.FILENAME}_kwargs.json'))
+
+            # deserialize new agent_kwargs
+            agent_kwargs.update(deserialize_kwargs(agent_kwargs, lab_serializer))
+
             # shutil.copy(os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'),
             #             os.path.join(new_agent_cfg.DIRS['exp'], f'{new_agent_cfg.FILENAME}_kwargs.json'))
 
@@ -554,6 +568,13 @@ class LabBase:
                         os.path.join(new_agent_cfg.DIRS['exp'], f'{new_agent_cfg.FILENAME}_env_kwargs.json'))
 
             agent_cfg = new_agent_cfg
+
+        agent_obj = self.agents_classes_lst[ix].load(path=path_filename,
+                                                     env=train_vec_env,
+                                                     **agent_kwargs)
+
+        logger.info(
+            f'{self.__class__.__name__}: Creating agent: #{ix:02d} {self.agents_classes_lst[ix].__name__}')
 
         logger.info(
             f'{self.__class__.__name__}: Eval freq: {self.eval_freq}')
@@ -958,13 +979,28 @@ class LabBase:
         return seed
 
     @classmethod
-    def load_agent(cls, json_path_filename, verbose=1):
+    def change_exp_path(cls, config_kwargs: dict, old_exp_path: str, new_exp_path: str) -> dict:
+        return dive_kvreplace(config_kwargs, old_exp_path, new_exp_path)
+
+    @classmethod
+    def load_agent(cls, json_path_filename, change_experiment_path: Optional[str] = None, verbose=1):
         lab_config_kwargs = ConfigMethods.load_config(json_path_filename)
+        old_exp_path = lab_config_kwargs.get('EXPERIMENT_PATH')
+
+        # Changing experiment path to new location in lab_config_kwargs
+        if change_experiment_path is not None:
+            lab_config_kwargs = cls.change_exp_path(lab_config_kwargs, old_exp_path, change_experiment_path)
         agent_cfg = LABConfig(**lab_config_kwargs)
+
         env_kwargs = ConfigMethods.load_config(
             os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_env_kwargs.json'))
+
         agent_kwargs = ConfigMethods.load_config(
             os.path.join(agent_cfg.DIRS['exp'], f'{agent_cfg.FILENAME}_kwargs.json'))
+
+        # Changing experiment path to new location in agent_kwargs (for 'tb_log')
+        if change_experiment_path is not None:
+            agent_kwargs = cls.change_exp_path(agent_kwargs, old_exp_path, change_experiment_path)
 
         if isinstance(agent_kwargs.get('train_freq', None), list):
             agent_kwargs.update({'train_freq': tuple(agent_kwargs['train_freq'])})

@@ -14,14 +14,14 @@ def sigmoid(x, norm_factor=96):
     Returns:
     array-like: The computed sigmoid values.
     """
-    return 1 / (1 + np.exp(-(x / norm_factor)))
+    return 1 / (1 + np.exp(-(x / norm_factor))) - 0.5
 
 
 # Set the normalization value globally
-normalization_value = 96
+normalization_value = 200
 
 # Generate test data from 0 to 450
-x_values = np.arange(0, 450)
+x_values = np.arange(-1000, 1000, step=1)
 
 # Compute the sigmoid values using the specified normalization value
 y_values = sigmoid(x_values, norm_factor=normalization_value)
