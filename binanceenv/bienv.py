@@ -20,15 +20,16 @@ from typing import Any, Union, Optional, List, Callable
 from gymnasium.utils import seeding
 # from collections import OrderedDict
 
-from binanceenv.cache import CacheManager
-from binanceenv.cache import cache_manager_obj
-from binanceenv.cache import eval_cache_manager_obj
+# from binanceenv.cache import CacheManager
+# from binanceenv.cache import cache_manager_obj
+# from binanceenv.cache import eval_cache_manager_obj
 
 from dbbinance.fetcher.datautils import get_timeframe_bins
 from dbbinance.fetcher.datautils import get_nearest_timeframe
 from sb3_rllab import SThLock, SMpLock
 
 import multiprocessing as mp
+from dbbinance.fetcher import CacheManager
 from dbbinance.fetcher import MpCacheManager
 from dbbinance.fetcher import PERCacheManager
 
@@ -300,10 +301,16 @@ class BinanceEnvBase(gymnasium.Env):
             if self.use_period == 'train':
                 # using external cache_manager for multiprocessing or multithreading
                 if cache_obj is None:
-                    self.CM = cache_manager_obj
+                    self.CM = CacheManager(max_memory_gb=3, unique_name=f'CacheManager_{self.use_period}')
                 elif cache_obj == 'MpCacheManager':
-                    mp_cache_manager_kwargs = {'port': 5005, 'start_host': False, 'unique_name': 'train'}
+                    mp_cache_manager_kwargs = {'port': 5005, 'start_host': False,
+                                               'unique_name': f'MpCacheManager_{self.use_period}'}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
+                elif cache_obj.__class__.__name__ == 'CacheManager':
+                    self.CM = cache_obj
+                elif cache_obj.__class__.__name__ == 'MpCacheManager':
+                    self.CM = cache_obj
+
                 if len(self.CM) > 3:
                     """ Creating the list of cache data from probs dict with 3 values """
                     self.key_list = list(self.CM.hits_probs().keys())
@@ -320,10 +327,16 @@ class BinanceEnvBase(gymnasium.Env):
                     unique_name = 'check'
                 # separated CacheManager for eval environment
                 if cache_obj is None:
-                    self.CM = eval_cache_manager_obj
+                    self.CM = CacheManager(max_memory_gb=3, unique_name=f'CacheManager_{self.use_period}')
                 elif cache_obj == 'MpCacheManager':
-                    mp_cache_manager_kwargs = {'port': port, 'start_host': False, 'unique_name': unique_name}
+                    mp_cache_manager_kwargs = {'port': port, 'start_host': False,
+                                               'unique_name': f'MpCacheManager_{self.use_period}'}
                     self.CM = MpCacheManager(**mp_cache_manager_kwargs)
+                elif cache_obj.__class__.__name__ == 'CacheManager':
+                    self.CM = cache_obj
+                elif cache_obj.__class__.__name__ == 'MpCacheManager':
+                    self.CM = cache_obj
+
                 if len(self.CM) > 3:
                     """ Creating the list of cache data from keys() with all values """
                     self.key_list = list(self.CM.keys())
@@ -1059,7 +1072,7 @@ class BinanceEnvBase(gymnasium.Env):
         self.timecount: int = 0
 
         if self.use_period == 'train':
-            """ random start index for data from cache """
+            """ random start index for data from train cache """
             rnd_start = self.np_random.integers(int(self.timeframes_24h // 2))
         else:
             rnd_start = 0
@@ -1207,12 +1220,13 @@ class BinanceEnvBase(gymnasium.Env):
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state['CM'] = None
+        if self.CM.__class__.__name__ == 'MpCacheManager':
+            state['CM'] = None
+            state['cache_obj'] = 'MpCacheManager'
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # BinanceEnvBase.count = mp_count
         with BinanceEnvBase.count.get_lock():
             BinanceEnvBase.count.value += 1
             self.idnum = BinanceEnvBase.count.value
@@ -1453,13 +1467,13 @@ class BinanceEnvCash(BinanceEnvBase):
 
         return action, size
 
-    def is_terminate_conditions(self) -> bool:
-        # check if we loose money or our win_rate is too low or we wait too much time
-        if self.pnl < self.pnl_stop or (self.asset.trades.trades_qty > 3 and self.asset.trades.win_rate < 50) or len(
-                self.rewards_obj.current_wait_period.reward) > self.max_hold_timeframes:
-            return True
-        else:
-            return False
+    # def is_terminate_conditions(self) -> bool:
+    #     # check if we loose money or our win_rate is too low or we wait too much time
+    #     if self.pnl < self.pnl_stop or (self.asset.trades.trades_qty > 2 and self.asset.trades.win_rate < 60 and len(
+    #             self.rewards_obj.raw_rewards) > 48):
+    #         return True
+    #     else:
+    #         return False
 
     def step(self, action):
         info = self._get_info()
@@ -1469,12 +1483,10 @@ class BinanceEnvCash(BinanceEnvBase):
         # terminated = bool(self.pnl < self.pnl_stop)
 
         if self.use_period == 'train':
-
-            if self.is_terminate_conditions():
+            if self.rewards_obj.is_terminate_condition(self.pnl_stop):
                 if self.stop_buy_timecount == self.timecount - 3:
                     terminated = True
                     info = self._get_info()
-                    self.reward_step += self.rewards_obj.reward_constant * 500  # 0.005 = 0.5%
                 else:
                     if self.stop_buy_timecount > self.timecount:
                         self.stop_buy_timecount = self.timecount

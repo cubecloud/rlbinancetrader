@@ -38,6 +38,7 @@ _discretization = '15m'
 
 _start_datetime = '2023-07-20 01:00:00'
 _end_datetime = '2024-07-30 01:00:00'
+indicators_sign = False
 
 data_processor_kwargs = dict(start_datetime=_start_datetime,
                              end_datetime=_end_datetime,
@@ -45,20 +46,22 @@ data_processor_kwargs = dict(start_datetime=_start_datetime,
                              discretization=_discretization,
                              symbol_pair='BTCUSDT',
                              market='spot',
-                             minimum_train_size=0.0227,
-                             maximum_train_size=0.0237,
-                             minimum_test_size=0.148,
-                             maximum_test_size=0.17,
-                             test_size=0.13,
+                             minimum_train_size=320,
+                             maximum_train_size=323,
+                             minimum_test_size=320,
+                             maximum_test_size=323,
+                             test_size=0.1,
                              verbose=1,
-                             indicators_sign=True,
+                             indicators_sign=indicators_sign,
+                             use_shifts_num=2,
                              )
 
 dp = IndicatorProcessor(**data_processor_kwargs)
-n_episodes = 630
+n_episodes = 200
 episodes_start_end_lst = dp.get_n_episodes_start_end_lst(index_type='target_time',
                                                          period_type='train',
-                                                         n_episodes=n_episodes)
+                                                         n_episodes=n_episodes
+                                                         )
 # episodes_start_end_lst = list(set(episodes_start_end_lst))
 print(f'Length = {len(episodes_start_end_lst)}')
 
@@ -78,7 +81,7 @@ env_start_end_lst: list = []
 
 indices = np.arange(0, len(episodes_start_end_lst) + 1, n_episodes_per_env)
 for idx in indices:
-    ep_start_end = episodes_start_end_lst[idx: min(idx + n_episodes_per_env, len(episodes_start_end_lst)+1)]
+    ep_start_end = episodes_start_end_lst[idx: min(idx + n_episodes_per_env, len(episodes_start_end_lst) + 1)]
     env_start_end_lst.append(ep_start_end)
 
 print(env_start_end_lst)

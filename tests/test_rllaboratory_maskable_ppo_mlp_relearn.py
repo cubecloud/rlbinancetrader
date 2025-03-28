@@ -76,7 +76,7 @@ if __name__ == '__main__':
     total_timesteps = 300_000_000
 
     agents_n_env = int(720)
-    n_steps = 250
+    n_steps = 200
     warmup_timesteps = (agents_n_env * n_steps) * 100
     indicators_sign = True
 
@@ -87,13 +87,13 @@ if __name__ == '__main__':
                                  symbol_pair='BTCUSDT',
                                  market='spot',
                                  minimum_train_size=320,
-                                 maximum_train_size=323,
+                                 maximum_train_size=325,
                                  minimum_test_size=320,
-                                 maximum_test_size=323,
+                                 maximum_test_size=325,
                                  test_size=0.1,
                                  verbose=1,
                                  indicators_sign=indicators_sign,
-                                 use_shifts_num=4,
+                                 use_shifts_num=2,
                                  )
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
@@ -129,30 +129,30 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
 
         rllab.loaded_learn(
-            filename=14_040_000,
+            filename=48_960_000,
             # filename='best_model',
             reset_num_timesteps=True,
             total_timesteps=total_timesteps,
             env_kwargs_update={
                 'data_processor_kwargs': data_processor_kwargs,
-                'stable_cache_data_n': int(agents_n_env // 2),
+                'stable_cache_data_n': int(agents_n_env // 3),
                 'reuse_data_prob': 1.0,
                 'verbose': 0,
                 'render_mode': 'human',
-                'gamma': 0.8,
+                'gamma': 0.93,
             },
 
             agent_kwargs_update={
                 'n_steps': n_steps,
-                'batch_size': int(agents_n_env * n_steps // 80),
+                'batch_size': int(agents_n_env * n_steps // 40),
                 'n_epochs': 10,
-                'stats_window_size': 50,
+                'stats_window_size': 100,
                 'clip_range': 0.08,
                 'clip_range_vf': 0.08,
                 'ent_coef': 0.01,
                 'vf_coef': 0.5,
                 # 'max_grad_norm': 0.5,
-                'gamma': 0.8,
+                'gamma': 0.93,
                 'learning_rate': {'CoScheduler': dict(warmup=warmup_timesteps,
                                                       stable_warmup=False,
                                                       floor_learning_rate=1e-6,
@@ -165,10 +165,11 @@ if __name__ == '__main__':
                 'seed': 543,
             },
             env_wrapper='labsubproc',
-            env_wrapper_kwargs_update={'use_threads': False},
+            env_wrapper_kwargs_update={'use_threads': False,
+                                       'use_fakelock': False},
             n_envs=agents_n_env,
             n_eval_episodes=100,
-            eval_freq=n_steps * 3,
+            eval_freq=n_steps * 2,
             verbose=1,
         )
 

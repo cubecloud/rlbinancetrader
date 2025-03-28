@@ -330,7 +330,7 @@ class TradesBook:
 
     @property
     def trades_qty(self) -> int:
-        return len(self.book)
+        return sum(1 for trade in self.book if trade.closed)
 
     @property
     def profit(self) -> float:

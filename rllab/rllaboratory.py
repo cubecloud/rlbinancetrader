@@ -16,9 +16,10 @@ import multiprocessing as mp
 from typing import List, Union, Dict, Type, Optional, Type, ClassVar, TypeVar, Any
 
 from binanceenv import BinanceEnvCash, BinanceEnvBase
-from binanceenv.cache import CacheManager
-from binanceenv.cache import cache_manager_obj
-from binanceenv.cache import eval_cache_manager_obj
+# from binanceenv.cache import CacheManager
+# from binanceenv.cache import cache_manager_obj
+# from binanceenv.cache import eval_cache_manager_obj
+from dbbinance.fetcher import CacheManager
 from dbbinance.fetcher import MpCacheManager
 from dbbinance.fetcher import PERCacheManager
 
@@ -221,8 +222,8 @@ class LabBase:
         self.eval_vecenv_lst: list = []
         # self.mp_train_cache_manager: Union[MpCacheManager, None] = None
         # self.mp_eval_cache_manager: Union[MpCacheManager, None] = None
-        self.cache_manager: CacheManager = cache_manager_obj
-        self.eval_cache_manager: CacheManager = eval_cache_manager_obj
+        self.cache_manager: CacheManager = None
+        self.eval_cache_manager: CacheManager = None
         self.data_processor_obj = None
         self.mp_train_cache_server: Union[MpCacheManager, PERCacheManager, None] = None
         self.mp_test_cache_server: Union[MpCacheManager, PERCacheManager, None] = None
@@ -310,7 +311,7 @@ class LabBase:
                 self.mp_train_cache_server = MpCacheManager(max_memory_gb=6,
                                                             start_host=start_host,
                                                             port=port,
-                                                            unique_name='train')
+                                                            unique_name=f"MpCacheManager_{env_kwargs['use_period']}")
             mp_cache_server = self.mp_train_cache_server
         else:
             if self.mp_test_cache_server is None:
@@ -318,7 +319,7 @@ class LabBase:
                     port = 5006
                 self.mp_test_cache_server = MpCacheManager(start_host=start_host,
                                                            port=port,
-                                                           unique_name=env_kwargs['use_period'])
+                                                           unique_name=f"MpCacheManager_{env_kwargs['use_period']}")
             mp_cache_server = self.mp_test_cache_server
 
         """ Get the list of episodes start - end """
@@ -378,12 +379,15 @@ class LabBase:
             mp_cache_server = self.mp_fill_cache(env_kwargs, port=port)
         else:
             start_host = False
-            mp_cache_server = MpCacheManager(start_host=start_host, port=port, unique_name=env_kwargs['use_period'])
+            mp_cache_server = MpCacheManager(start_host=start_host, port=port,
+                                             unique_name=f"MpCacheManager_{env_kwargs['use_period']}")
 
         if env_wrapper == 'dummy':
             update_dict = {}
             if env_kwargs['use_period'] == 'train':
                 _mp_train_cache_items = mp_cache_server.items()
+                cache_manager_obj = CacheManager(max_memory_gb=3,
+                                                 unique_name=f"CacheManager_{env_kwargs['use_period']}")
                 for k, v in _mp_train_cache_items:
                     cache_manager_obj.update_cache(key=k, value=v)
                 del _mp_train_cache_items
@@ -395,6 +399,8 @@ class LabBase:
                 # cache_obj = None by default and next load initialized cache_manager_obj
             else:
                 _mp_test_cache_items = mp_cache_server.items()
+                eval_cache_manager_obj = CacheManager(max_memory_gb=3,
+                                                      unique_name=f"CacheManager_{env_kwargs['use_period']}")
                 for k, v in _mp_test_cache_items:
                     eval_cache_manager_obj.update_cache(key=k, value=v)
                 del _mp_test_cache_items
@@ -408,11 +414,40 @@ class LabBase:
             update_dict = dict({'cache_obj': 'MpCacheManager'})
 
         elif self.env_wrapper == 'labsubproc':
-            update_dict = dict({'cache_obj': 'MpCacheManager'})
+            update_dict = dict({'cache_obj': self.try_simplify_cm(mp_cache_server, env_kwargs)})
+
         else:
             msg = f'Error: unknown env wrapper {self.env_wrapper}'
             sys.exit(msg)
         return update_dict
+
+    def try_simplify_cm(self, cache_obj, env_kwargs):
+        """
+        Trying to speed up and simplify cachemanager depending on capacity
+
+        Args:
+            cache_obj:
+            env_kwargs:
+
+        Returns:
+
+        """
+        if 50 < len(cache_obj) < 1000 and cache_obj.__class__.__name__ == 'MpCacheManager':
+            if not CacheManager.is_server_running(unique_name=f"CacheManager_{env_kwargs['use_period']}"):
+                """ Create data copy from current MpCacheManager"""
+                _mp_cache_items = cache_obj.items()
+                cache_manager_obj = CacheManager(max_memory_gb=3,
+                                                 unique_name=f"CacheManager_{env_kwargs['use_period']}")
+                for k, v in _mp_cache_items:
+                    cache_manager_obj.update_cache(key=k, value=v)
+                del _mp_cache_items
+            else:
+                """ Get singleton copy """
+                cache_manager_obj = CacheManager(max_memory_gb=3,
+                                                 unique_name=f"CacheManager_{env_kwargs['use_period']}")
+        else:
+            cache_manager_obj = 'MpCacheManager'
+        return cache_manager_obj
 
     def loaded_learn(self, ix=0,
                      filename: Union[str, int] = 'best_model',

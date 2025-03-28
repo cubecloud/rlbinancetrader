@@ -1,11 +1,76 @@
 from abc import ABC, abstractmethod
 
 from binanceenv.orderbook import TradesBook, Asset, Trade
-from typing import Optional, List
+from typing import Optional, List, Union
 import numpy as np
 import pandas as pd
 
-__version__ = 0.017
+__version__ = 0.021
+
+
+class RollingRewardNormalizer:
+    """Class for normalizing rewards using a running average and standard deviation."""
+
+    def __init__(self, epsilon: np.float64 = 1e-8, dtype=np.float64) -> None:
+        """
+        Initializes the reward normalizer object.
+
+        Args:
+            epsilon: A small number to ensure numerical stability.
+        """
+        self.dtype = dtype
+        self.running_mean: dtype = 0.0  # Running mean of rewards.
+        self.running_var: dtype = 1.0  # Running variance of rewards, initialized to be positive.
+        self.epsilon = epsilon
+        self.count = self.epsilon  # Count of observed rewards, starts with epsilon to avoid division by zero.
+
+    def __call__(self, reward) -> Union[np.float64, float]:
+        """
+        Returns normalized value
+
+        Args:
+            reward: The new reward value.
+
+        Returns:
+            np.float64 or float: The normalized reward.
+        """
+
+        self.update(reward)
+        return self.normalize(reward)
+
+    def update(self, reward) -> None:
+        """
+        Updates the running mean and variance based on the new reward.
+
+        Args:
+            reward: The new reward value.
+        """
+        self.count += 1
+        old_mean = self.running_mean  # Save the old mean before updating
+        delta = reward - old_mean  # Calculate delta from the old mean
+        self.running_mean += delta / self.count  # Update the mean
+        self.running_var += delta * (reward - old_mean)  # Update the variance correctly
+
+    def normalize(self, reward) -> Union[np.float64, float]:
+        """
+        Normalizes the given reward based on current mean and variance.
+
+        Args:
+            reward: The reward to be normalized.
+
+        Returns:
+            float: The normalized reward.
+        """
+        if self.running_var > 1e-8:
+            std_dev = np.sqrt(self.running_var / (self.count - 1))  # Standard deviation.
+            return (reward - self.running_mean) / std_dev
+        else:
+            return reward
+
+    def reset(self):
+        self.running_mean = 0.0  # Running mean of rewards.
+        self.running_var = 1.0  # Running variance of rewards, initialized to be positive.
+        self.count = self.epsilon  # Count of observed rewards, starts with epsilon to avoid division by zero.
 
 
 def get_sigmoid_results(max_len: int = 3000, normalization_window: int = 96) -> np.array:
@@ -59,6 +124,11 @@ class HoldPeriod(AnyPeriod):
     pass
 
 
+class TerminalConditions(dict):
+    def __getattr__(self, item):
+        return self[item]
+
+
 class RewardsBase(ABC):
     def __init__(self,
                  asset: Asset,
@@ -77,17 +147,24 @@ class RewardsBase(ABC):
         self.ohlcv_df: Optional[pd.DataFrame] = None
         self.raw_rewards: List[float] = []
         self.reward_constant = 1e-5
-
+        self.rrn_obj = RollingRewardNormalizer()
+        self.term_cond = TerminalConditions()
+        self.term_cond.stop = False
+        self.term_cond.win_rate = False
         # Local initialization of TALib, for multiprocessing
-        self.talib = None
+        # self.talib = None
         self.current_wait_period = WaitPeriod(self.window_size)
         self.current_hold_period = HoldPeriod(self.window_size)
 
-    def _init_lib(self):
-        # Called only once per instance, in the child process
-        if self.talib is None:
-            import talib
-            self.talib = talib
+    @property
+    def episode_relative_pnl(self) -> float:
+        return self.pnl(self.__trades.profit)
+
+    # def _init_lib(self):
+    #     # Called only once per instance, in the child process
+    #     if self.talib is None:
+    #         import talib
+    #         self.talib = talib
 
     def pnl(self, profit):
         return profit / (self.__asset.target.initial_cash + (
@@ -115,20 +192,8 @@ class RewardsBase(ABC):
             score = -np.exp(-pnl) * (weight ** 2)
         return score * 0.01
 
-    def get_normalized_reward(self, window_size):
-        if len(self.raw_rewards) <= 2:
-            # Not enough data points yet; return the last raw reward
-            return self.raw_rewards[-1]
-
-        # Take the tail of the rewards with size equal to window_size
-        # Calculate mean and standard deviation using numpy
-        mean = np.mean(self.raw_rewards[-window_size:])
-        std = np.std(self.raw_rewards[-window_size:])
-
-        # Normalize the last reward (or current if needed)
-        last_reward = self.raw_rewards[-1]
-        normalized = (last_reward - mean) / (std + 1e-7)  # Add small epsilon to avoid division by zero
-        return normalized
+    def get_normalized_reward(self):
+        return self.rrn_obj(self.raw_rewards[-1])
 
     def get_rolling_average_reward(self, window_size):
         if len(self.raw_rewards) <= 2:
@@ -139,6 +204,13 @@ class RewardsBase(ABC):
         # Calculate mean using numpy
         return np.mean(self.raw_rewards[-window_size:])
 
+    def is_terminate_condition(self, pnl_stop):
+        #   start working from window_size (usually qty of current timeframe for 24h)
+        if len(self.raw_rewards) > self.window_size:
+            self.term_cond.stop = self.episode_relative_pnl < pnl_stop
+            self.term_cond.win_rate = (self.__asset.trades.trades_qty > 2 and self.__asset.trades.win_rate < 60)
+        return self.term_cond.stop or self.term_cond.win_rate
+
     def final_reward(self, buy_and_hold_pnl) -> float:
         _final_reward = 0.0
 
@@ -147,39 +219,23 @@ class RewardsBase(ABC):
             if no trades and B&H PNL <=0 
             we return penalized reward 
             """
-            if self.__trades.trades_qty < 2:
-                return -self.reward_constant * 12000  # 0.12 = 12% increased from 0.01 = 1%
+            if len(self.raw_rewards) > self.window_size and self.__trades.trades_qty < 2:
+                self.raw_rewards[-1] += -self.reward_constant * 12000   # 0.12 = 12% increased from 0.01 = 1%
+                return self.get_normalized_reward()
 
-            #   calculating mean reward
-            # _final_reward = 0. if not len(self.raw_rewards) else np.mean(self.raw_rewards)
-            episode_relative_pnl = self.pnl(self.__trades.profit)
-            # return 0. if not len(self.raw_rewards) else episode_relative_pnl
-            # return 0. if not len(self.raw_rewards) else episode_relative_pnl / len(self.raw_rewards)
+            if self.term_cond.stop:
+                _final_reward += -self.reward_constant * 50
 
-            # """
-            # Changed final reward calculations (was +0.5):
-            # # PNL > B&H   => +0.0125
-            # # PNL > 0.    => +0.0125
-            # PNL > B&H   => +0.00001 else -0.00001
-            # PNL > 0.    => +0.00001 else -0.00001
-            # """
-
-            if episode_relative_pnl > .0:
+            if self.term_cond.win_rate:
+                _final_reward += -self.reward_constant * 50
+            else:
                 _final_reward += self.reward_constant * 100
-                # if episode_relative_pnl > buy_and_hold_pnl:
-                #     _final_reward += _reward_constant * 10
-            # else:
-            #     _final_reward -= _reward_constant * 100
-            #     # if episode_relative_pnl <= buy_and_hold_pnl:
-            #     #     _final_reward -= _reward_constant * 10
 
-            if self.__trades.win_rate > 0.60:
-                _final_reward += self.reward_constant * 100
-            # # if profit negative and profit_rate negative too
-            # elif self.__trades.profit_rate <= -0.75:
-            #     _final_reward -= _reward_constant * 5
+            if self.episode_relative_pnl > .0:
+                _final_reward += self.reward_constant * 1000
 
-        return _final_reward
+            self.raw_rewards[-1] += _final_reward
+        return self.get_normalized_reward()
 
     def size(self, price, cash) -> float:
         """
@@ -329,7 +385,7 @@ class RewardsBase(ABC):
         self.raw_rewards.append(action_reward)
 
         # return action_reward
-        return self.get_normalized_reward(self.window_size)
+        return self.get_normalized_reward()
 
     def hold_action_reward(self, timecount) -> float:
         #   if current_hold_period empty -> add starting data to object
@@ -350,7 +406,7 @@ class RewardsBase(ABC):
         self.raw_rewards.append(action_reward)
 
         # return action_reward
-        return self.get_normalized_reward(self.window_size)
+        return self.get_normalized_reward()
         # return self.current_hold_period.gamma_reward
 
     def buy_action_reward(self, timecount) -> float:
@@ -366,7 +422,8 @@ class RewardsBase(ABC):
         #   wait_reward append to raw_rewards list with self._wait_action_reward
         # _ = self._wait_action_reward(timecount)
 
-        wait_period_pnl = ((start_price - end_price) * self.current_wait_period.size) / self.__asset.initial_total_in_cash
+        wait_period_pnl = ((
+                                   start_price - end_price) * self.current_wait_period.size) / self.__asset.initial_total_in_cash
 
         weight = self.wait_period_weight()
 
@@ -390,7 +447,7 @@ class RewardsBase(ABC):
         self.current_wait_period.reset()
 
         # return action_reward
-        return self.get_normalized_reward(self.window_size)
+        return self.get_normalized_reward()
 
     def _wait_action_reward(self,
                             timecount: int,
@@ -437,7 +494,8 @@ class RewardsBase(ABC):
         # self.current_wait_period.gamma_reward = self.current_wait_period.gamma_reward * self.gamma + action_reward
 
         self.raw_rewards.append(action_reward)
-        return self.get_normalized_reward(self.window_size)
+        # return action_reward
+        return self.get_normalized_reward()
         # return self.current_wait_period.gamma_reward
 
     def wait_action_reward(self,
@@ -479,6 +537,9 @@ class RewardsBase(ABC):
         self.current_wait_period.reset()
         self.current_hold_period.reset()
         self.raw_rewards.clear()
+        self.rrn_obj.reset()
+        self.term_cond.stop = False
+        self.term_cond.win_rate = False
 
 
 class Rewards(RewardsBase):
