@@ -217,10 +217,10 @@ class OrdersBook:
 
 """
 entry_datetime    - orders.open_order.order_datetime  
-exit_datetime    - orders.close_order.order_datetime
-size                - orders.close_order.size
+exit_datetime     - orders.close_order.order_datetime
+size              - orders.close_order.size
 entry_price       - orders.open_order.price 
-exit_price       - orders.close_order.price 
+exit_price        - orders.close_order.price 
 # opening_commission  - orders.open_order.order_commission 
 # closing_commission  - orders.close_order.order_commission  
 profit        - trade profit =    ((closing_price*size) - closing_commission) - 
@@ -348,7 +348,8 @@ class TradesBook:
     @property
     def profit_rate(self) -> float:
         """ profit rate calculation """
-        total_trade_volume = sum(abs(trade.profit) for trade in self.book)
+        # total_trade_volume = sum(abs(trade.profit) for trade in self.book)
+        total_trade_volume = sum(trade.orders.open_order.order_cash for trade in self.book)
         total_num_trades = self.trades_qty
         if total_num_trades == 0 or total_trade_volume == 0:
             return 0.0

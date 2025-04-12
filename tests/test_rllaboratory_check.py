@@ -38,14 +38,21 @@ if __name__ == '__main__':
 
     # _start_datetime = datetime.datetime.strptime('2023-07-20 01:00:00', Constants.default_datetime_format)
     # _start_datetime = '2022-12-31 23:00:00'
-    _start_datetime = '2023-07-20 01:00:00'
+    # _start_datetime = '2023-07-20 01:00:00'
     # _start_datetime = datetime.datetime.strptime('2024-03-01 01:00:00', Constants.default_datetime_format)
+
 
     # _end_datetime = datetime.datetime.strptime('2024-07-30 01:00:00', Constants.default_datetime_format)
     # _end_datetime = '2023-07-20 01:00:00'
     # _end_datetime = '2024-07-30 01:00:00'
     # _end_datetime = '2024-11-01 01:00:00'
-    _end_datetime = '2024-12-11 01:00:00'
+    # _start_datetime = '2023-01-01 01:00:00'
+    # _end_datetime = '2023-06-30 01:00:00'
+    # _start_datetime = '2024-06-11 01:00:00'
+    # _end_datetime = '2024-12-11 01:00:00'
+    _start_datetime = '2025-02-01 01:00:00'
+    _end_datetime = '2025-04-01 01:00:00'
+
 
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
@@ -85,13 +92,14 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=930,
-                                 maximum_train_size=945,
-                                 minimum_test_size=915,
-                                 maximum_test_size=955,
-                                 test_size=0.1,
+                                 minimum_train_size=200,
+                                 maximum_train_size=205,
+                                 minimum_test_size=4250,
+                                 maximum_test_size=4400,
+                                 test_size=0.8,
                                  verbose=1,
-                                 indicators_sign=True
+                                 indicators_sign=True,
+                                 use_shifts_num=1,
                                  )
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1011-230816/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2311-021257/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
@@ -126,20 +134,21 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2802-192401/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/RecurrentPPO/exp-1203-114139/RecurrentPPO_BinanceEnvCash_50000000_cfg.json'
     # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-2103-093747/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
-    json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-2703-204027/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-002315/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-193243/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab = LabBase.load_agent(json_cfg, '/home/cubecloud/Backup/Experiments/rlbinancetrader/save')
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename=750_000, n_tests=15, verbose=1)
     """ Sell action reward """
-    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-                            use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='train')
-    # rllab.backtesting_agent(filename=16380000, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='check',
-    #                         data_processor_kwargs=data_processor_kwargs)
+    #                         use_period='train')
+    # rllab.backtesting_agent(filename=203489280, render_mode='human', n_tests=20, verbose=1, seed=443,
+    #                         use_period='test')
+    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=1, verbose=1, seed=443,
+                            use_period='check',
+                            data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

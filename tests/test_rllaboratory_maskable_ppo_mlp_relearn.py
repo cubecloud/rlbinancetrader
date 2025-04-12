@@ -46,7 +46,9 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1212-030411/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1101-120227/MaskablePPO_BinanceEnvCash_1200000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1501-010030/MaskablePPO_BinanceEnvCash_1500000000_cfg.json'
-    json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-2403-145123/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-3003-134823/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
+    # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-002315/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
+    json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-002315/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab = LabBase.load_agent(json_cfg, '/home/cubecloud/Backup/Experiments/rlbinancetrader/save')
@@ -66,17 +68,18 @@ if __name__ == '__main__':
     # _end_datetime = '2024-12-10 01:00:00'
 
     _start_datetime = '2023-07-20 01:00:00'
-    _end_datetime = '2024-07-30 01:00:00'
+    # _end_datetime = '2024-05-30 01:00:00'
+    _end_datetime = '2024-09-20 01:00:00'
 
     # _start_datetime = '2023-03-20 01:00:00'
     # _end_datetime = '2024-10-30 01:00:00'
 
     _timeframe = '15m'
     _discretization = '15m'
-    total_timesteps = 300_000_000
+    total_timesteps = 900_000_000
 
-    agents_n_env = int(720)
-    n_steps = 200
+    agents_n_env = 1920
+    n_steps = 192
     warmup_timesteps = (agents_n_env * n_steps) * 100
     indicators_sign = True
 
@@ -86,10 +89,10 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=320,
-                                 maximum_train_size=325,
-                                 minimum_test_size=320,
-                                 maximum_test_size=325,
+                                 minimum_train_size=321,
+                                 maximum_train_size=328,
+                                 minimum_test_size=321,
+                                 maximum_test_size=328,
                                  test_size=0.1,
                                  verbose=1,
                                  indicators_sign=indicators_sign,
@@ -129,26 +132,26 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
 
         rllab.loaded_learn(
-            filename=48_960_000,
+            filename=299_335_680,
             # filename='best_model',
             reset_num_timesteps=True,
             total_timesteps=total_timesteps,
             env_kwargs_update={
                 'data_processor_kwargs': data_processor_kwargs,
-                'stable_cache_data_n': int(agents_n_env // 3),
+                'stable_cache_data_n': 240,
                 'reuse_data_prob': 1.0,
                 'verbose': 0,
                 'render_mode': 'human',
-                'gamma': 0.93,
+                'gamma': 0.95,
             },
 
             agent_kwargs_update={
                 'n_steps': n_steps,
-                'batch_size': int(agents_n_env * n_steps // 40),
+                'batch_size': int(agents_n_env * n_steps // 80),
                 'n_epochs': 10,
                 'stats_window_size': 100,
-                'clip_range': 0.08,
-                'clip_range_vf': 0.08,
+                'clip_range': 0.1,
+                'clip_range_vf': 0.1,
                 'ent_coef': 0.01,
                 'vf_coef': 0.5,
                 # 'max_grad_norm': 0.5,
@@ -156,11 +159,11 @@ if __name__ == '__main__':
                 'learning_rate': {'CoScheduler': dict(warmup=warmup_timesteps,
                                                       stable_warmup=False,
                                                       floor_learning_rate=1e-6,
-                                                      min_learning_rate=8e-6,
+                                                      min_learning_rate=5e-6,
                                                       learning_rate=1e-5,
                                                       total_epochs=total_timesteps,
                                                       epsilon=1,
-                                                      pre_warmup_coef=0.03)
+                                                      pre_warmup_coef=0.04)
                                   },
                 'seed': 543,
             },
@@ -169,7 +172,7 @@ if __name__ == '__main__':
                                        'use_fakelock': False},
             n_envs=agents_n_env,
             n_eval_episodes=100,
-            eval_freq=n_steps * 2,
+            eval_freq=n_steps * 4,
             verbose=1,
         )
 

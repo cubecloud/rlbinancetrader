@@ -98,7 +98,7 @@ class AnyPeriod:
         self.exit_price = None
         self.size: float = 0.0
         self.reward: List[float] = []
-        self.sigmoid_results: np.array = get_sigmoid_results(max_len=1800,
+        self.sigmoid_results: np.array = get_sigmoid_results(max_len=10000,
                                                              normalization_window=normalization_window)
         self.gamma_reward: float = 0.0
 
@@ -151,6 +151,7 @@ class RewardsBase(ABC):
         self.term_cond = TerminalConditions()
         self.term_cond.stop = False
         self.term_cond.win_rate = False
+        self.zero_trade_reward: float = 0.0
         # Local initialization of TALib, for multiprocessing
         # self.talib = None
         self.current_wait_period = WaitPeriod(self.window_size)
@@ -208,34 +209,72 @@ class RewardsBase(ABC):
         #   start working from window_size (usually qty of current timeframe for 24h)
         if len(self.raw_rewards) > self.window_size:
             self.term_cond.stop = self.episode_relative_pnl < pnl_stop
-            self.term_cond.win_rate = (self.__asset.trades.trades_qty > 2 and self.__asset.trades.win_rate < 60)
         return self.term_cond.stop or self.term_cond.win_rate
 
     def final_reward(self, buy_and_hold_pnl) -> float:
         _final_reward = 0.0
 
         if self.use_final_reward:
+
+            # self.term_cond.win_rate = (self.__asset.trades.trades_qty > 2 and self.__asset.trades.win_rate < 60)
             """
-            if no trades and B&H PNL <=0 
-            we return penalized reward 
+            if stop signal cos of pnl_stop -> return small penalty as final reward
+            """
+            if self.term_cond.stop:
+                _final_reward += -self.reward_constant * 2
+                self.raw_rewards[-1] = _final_reward
+                # return self.get_normalized_reward()
+                return self.raw_rewards[-1]
+
+            """
+            if no trades and B&H PNL <=0 we return big penalty incremented overtime in each environment locally 
             """
             if len(self.raw_rewards) > self.window_size and self.__trades.trades_qty < 2:
-                self.raw_rewards[-1] += -self.reward_constant * 12000   # 0.12 = 12% increased from 0.01 = 1%
-                return self.get_normalized_reward()
+                # increment zero_trade_reward each time then we don't have any trade
+                self.zero_trade_reward += -self.reward_constant
+                self.raw_rewards[-1] += self.zero_trade_reward
+                return self.raw_rewards[-1]
 
-            if self.term_cond.stop:
-                _final_reward += -self.reward_constant * 50
+            if self.__asset.trades.trades_qty > 2:
+                if self.__asset.trades.win_rate > 90:
+                    _final_reward += self.reward_constant * 8
+                elif self.__asset.trades.win_rate > 80:
+                    _final_reward += self.reward_constant * 4
+                # elif self.__asset.trades.win_rate > 70:
+                #     _final_reward += self.reward_constant * 2
+            # else:
+            #     _final_reward += -self.reward_constant
 
-            if self.term_cond.win_rate:
-                _final_reward += -self.reward_constant * 50
-            else:
-                _final_reward += self.reward_constant * 100
+            # if self.__asset.trades.trades_qty > 2:
+            #     if self.__asset.trades.win_rate < 60:
+            #         _final_reward += -self.reward_constant
+            #     elif self.__asset.trades.win_rate > 90:
+            #         _final_reward += self.reward_constant * 8
+            #     elif self.__asset.trades.win_rate > 80:
+            #         _final_reward += self.reward_constant * 6
+            #     elif self.__asset.trades.win_rate > 70:
+            #         _final_reward += self.reward_constant * 4
+            #     elif self.__asset.trades.win_rate >= 60:
+            #         _final_reward += self.reward_constant * 2
+            # else:
+            #     _final_reward += -self.reward_constant * 4
 
             if self.episode_relative_pnl > .0:
-                _final_reward += self.reward_constant * 1000
+                _final_reward += self.reward_constant * 8
+                if self.episode_relative_pnl > buy_and_hold_pnl:
+                    _final_reward += self.reward_constant * 8
+            #     else:
+            #         _final_reward += -self.reward_constant
+            # else:
+            #     _final_reward += -self.reward_constant
+            #     if self.episode_relative_pnl > buy_and_hold_pnl:
+            #         _final_reward += self.reward_constant * 4
+            #     else:
+            #         _final_reward += -self.reward_constant
 
             self.raw_rewards[-1] += _final_reward
-        return self.get_normalized_reward()
+        # return self.get_normalized_reward()
+        return _final_reward
 
     def size(self, price, cash) -> float:
         """
@@ -287,7 +326,8 @@ class RewardsBase(ABC):
         # Multiply drawdown by (1 + penalty_amount) to increase it proportionally
         increased_drawdown = drawdown * (1 + penalty_amount)
 
-        return max(0.0, increased_drawdown - self.loss_threshold)
+        # return max(0.0, increased_drawdown - self.loss_threshold)
+        return max(0.0, increased_drawdown)
 
     def wait_potential_loss(self, prices: pd.Series) -> float:
         """Calculates the potential maximum loss relative to the highest achieved price.
@@ -300,7 +340,8 @@ class RewardsBase(ABC):
          """
         max_price = prices.max()
         potential_loss = (max_price - prices[-1]) / max_price  # Potential loss considering current price as highest
-        return max(0, potential_loss - self.loss_threshold)  # Ensure non-negative weight
+        # return max(0, potential_loss - self.loss_threshold)  # Ensure non-negative weight
+        return max(0, potential_loss)  # Ensure non-negative weight
 
     def trade_period_weight(self) -> float:
         """
@@ -384,8 +425,8 @@ class RewardsBase(ABC):
 
         self.raw_rewards.append(action_reward)
 
-        # return action_reward
-        return self.get_normalized_reward()
+        return action_reward
+        # return self.get_normalized_reward()
 
     def hold_action_reward(self, timecount) -> float:
         #   if current_hold_period empty -> add starting data to object
@@ -406,7 +447,8 @@ class RewardsBase(ABC):
         self.raw_rewards.append(action_reward)
 
         # return action_reward
-        return self.get_normalized_reward()
+        return 0.0
+        # return self.get_normalized_reward()
         # return self.current_hold_period.gamma_reward
 
     def buy_action_reward(self, timecount) -> float:
@@ -446,8 +488,8 @@ class RewardsBase(ABC):
         self.raw_rewards.append(action_reward)
         self.current_wait_period.reset()
 
-        # return action_reward
-        return self.get_normalized_reward()
+        return action_reward
+        # return self.get_normalized_reward()
 
     def _wait_action_reward(self,
                             timecount: int,
@@ -494,8 +536,8 @@ class RewardsBase(ABC):
         # self.current_wait_period.gamma_reward = self.current_wait_period.gamma_reward * self.gamma + action_reward
 
         self.raw_rewards.append(action_reward)
-        # return action_reward
-        return self.get_normalized_reward()
+        return action_reward
+        # return self.get_normalized_reward()
         # return self.current_wait_period.gamma_reward
 
     def wait_action_reward(self,
@@ -513,8 +555,8 @@ class RewardsBase(ABC):
             float
         """
         action_reward = self._wait_action_reward(timecount, momentum_threshold, perc_threshold)
-        return action_reward
-        # return 0.
+        # return action_reward
+        return 0.0
 
     def reset(self, ohlcv_df):
         # self._init_lib()

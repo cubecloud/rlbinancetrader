@@ -88,9 +88,9 @@ if __name__ == '__main__':
 
     total_timesteps = 300_000_000
 
-    agents_n_env = int(1920)
+    agents_n_env = int(720)
     # agents_n_env = int(1)
-    n_steps = 192
+    n_steps = 200
     warmup_timesteps = (agents_n_env * n_steps) * 100
     index_type = 'target_time'
     # index_type = 'prediction_time'
@@ -106,10 +106,10 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=426,
-                                 maximum_train_size=431,
-                                 minimum_test_size=426,
-                                 maximum_test_size=431,
+                                 minimum_train_size=321,
+                                 maximum_train_size=325,
+                                 minimum_test_size=321,
+                                 maximum_test_size=325,
                                  test_size=0.1,
                                  verbose=1,
                                  indicators_sign=indicators_sign,
@@ -160,7 +160,7 @@ if __name__ == '__main__':
                                # observation_type='assets_close_indicators',
                                observation_type='lookback_norm_assets_close_action_indicators_hybrid',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=240,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=int(agents_n_env // 2),  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -199,10 +199,10 @@ if __name__ == '__main__':
 
     ppo_policy_kwargs = dict(
         features_extractor_class='HybridFeatureExtractor',
-        features_extractor_kwargs=dict(assets_features=6,
+        features_extractor_kwargs=dict(features_dim=256,
+                                       assets_features=6,
                                        actions_features=4 * 2 + 2,
-                                       indicators_sign=indicators_sign,
-                                       final_dropout=0.21),
+                                       indicators_sign=indicators_sign),
         share_features_extractor=True,
         net_arch=dict(pi=[256, 256, 256],
                       vf=[256, 256, 256])
@@ -217,17 +217,17 @@ if __name__ == '__main__':
         n_epochs=10,
         stats_window_size=100,
         normalize_advantage=True,
-        clip_range=0.075,
-        clip_range_vf=0.075,
-        ent_coef=0.01,
+        clip_range=0.1,
+        clip_range_vf=0.1,
+        ent_coef=0.03,
         vf_coef=0.5,
         # max_grad_norm=0.25,
         gamma=0.93,
         learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
                                            stable_warmup=False,
                                            floor_learning_rate=1e-6,
-                                           min_learning_rate=5e-6,
-                                           learning_rate=7e-6,
+                                           min_learning_rate=3e-6,
+                                           learning_rate=5e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
                                            pre_warmup_coef=0.03)
