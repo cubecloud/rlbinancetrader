@@ -4,7 +4,7 @@ import math
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from gymnasium.spaces import Box
 
-__version__ = 0.015  # Version with positional encoding and tailored activations
+__version__ = 0.017  # Version with positional encoding and tailored activations
 
 
 class PositionalEncoding(nn.Module):
@@ -63,9 +63,6 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
             nn.BatchNorm1d(self.asset_features * 4),
             nn.ReLU(),
             nn.MaxPool1d(2),
-            nn.Conv1d(self.asset_features * 4, self.asset_features * 8, kernel_size=3, padding=1),
-            nn.BatchNorm1d(self.asset_features * 8),
-            nn.ReLU(),
             nn.AdaptiveAvgPool1d(1)
         )
 
@@ -75,9 +72,6 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
             nn.BatchNorm1d(self.action_features * 4),
             nn.ReLU(),
             nn.MaxPool1d(2),
-            nn.Conv1d(self.action_features * 4, self.action_features * 8, kernel_size=3, padding=1),
-            nn.BatchNorm1d(self.action_features * 8),
-            nn.ReLU(),
             nn.AdaptiveAvgPool1d(1)
         )
 
@@ -111,10 +105,13 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
         with torch.no_grad():
             # Asset branch
             dummy_asset = torch.randn(1, self.asset_features, self.lookback)
+            last_asset_out = torch.Tensor(dummy_asset[:, :self.asset_features, -1]).flatten(1)
             asset_out = self.asset_net(dummy_asset).flatten(1)
 
             # Action branch
             dummy_action = torch.randn(1, self.action_features, self.lookback)
+            last_actions_out = torch.Tensor(
+                dummy_action[:, self.asset_features:self.asset_features + self.action_features, -1]).flatten(1)
             action_out = self.action_net(dummy_action).flatten(1)
 
             # Indicator branch
@@ -123,17 +120,14 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
             trans_out = self.indicator_transformer(dummy_ind).permute(0, 2, 1)
             ind_out = self.indicator_temporal(trans_out).flatten(1)
 
-            comb_out = torch.cat([asset_out, action_out, ind_out], dim=1)
+            comb_out = torch.cat([asset_out, last_asset_out, action_out, last_actions_out, ind_out], dim=1)
             total_concat = comb_out.shape[-1]
         print(f'Features extractor total_concat = {total_concat}')
 
         # Final layers
         self.final_layer = nn.Sequential(
-            nn.Linear(total_concat, total_concat),
             nn.LayerNorm(total_concat),
             nn.Dropout(self.final_dropout),
-            nn.GELU(),
-            nn.Linear(total_concat, total_concat)
         )
         with torch.no_grad():
             final_out = self.final_layer(comb_out)
@@ -144,7 +138,11 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
         # Split and permute inputs
         observations = observations.permute(0, 2, 1)  # (batch, features, lookback)
         asset_input = observations[:, :self.asset_features, :]
+        last_asset_out = torch.Tensor(asset_input[:, :self.asset_features, -1]).flatten(1)
         action_input = observations[:, self.asset_features:self.asset_features + self.action_features, :]
+        last_action_out = torch.Tensor(
+            action_input[:, self.asset_features:self.asset_features + self.action_features, -1]).flatten(1)
+
         indicator_input = observations[:, self.asset_features + self.action_features:, :]
 
         # Process assets
@@ -160,6 +158,8 @@ class HybridFeatureExtractor(BaseFeaturesExtractor):
         indicator_features = self.indicator_temporal(transformed).flatten(1)
 
         # Combine all features
-        combined = torch.cat([asset_features, action_features, indicator_features], dim=1)
+        combined = torch.cat([asset_features, last_asset_out,
+                              action_features, last_action_out,
+                              indicator_features],
+                             dim=1)
         return self.final_layer(combined)
-

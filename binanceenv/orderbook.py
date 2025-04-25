@@ -85,7 +85,7 @@ class Balance:
         return np.clip(np.array([_scaled_size,
                                  _scaled_cost,
                                  _scaled_price],
-                                dtype=np.float32),
+                                dtype=np.float64),
                        a_min=0.,
                        a_max=np.inf)
 
@@ -114,7 +114,7 @@ class Asset:
         self.trades = self.orders.trades
         self.initial_total_in_cash = self.target.initial_cash + (self.initial_balance.size * self.initial_balance.price)
 
-    def simple_scaler(self, value) -> np.float32:
+    def simple_scaler(self, value) -> np.float64:
         return value / self.scale_decay
 
     def set_scaler(self, ref):

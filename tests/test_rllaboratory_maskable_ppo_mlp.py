@@ -86,7 +86,7 @@ if __name__ == '__main__':
     # '2024-06-30 04:35:00/2024-08-29 09:43:00'
     # '2024-06-12 03:21:00/2024-07-30 01:00:00'
 
-    total_timesteps = 300_000_000
+    total_timesteps = 600_000_000
 
     agents_n_env = int(1920)
     # agents_n_env = int(1)
@@ -106,10 +106,10 @@ if __name__ == '__main__':
                                  discretization=_discretization,
                                  symbol_pair='BTCUSDT',
                                  market='spot',
-                                 minimum_train_size=426,
-                                 maximum_train_size=431,
-                                 minimum_test_size=426,
-                                 maximum_test_size=431,
+                                 minimum_train_size=321,
+                                 maximum_train_size=328,
+                                 minimum_test_size=321,
+                                 maximum_test_size=328,
                                  test_size=0.1,
                                  verbose=1,
                                  indicators_sign=indicators_sign,
@@ -148,7 +148,7 @@ if __name__ == '__main__':
     #                              )
 
     env_discrete_kwargs = dict(data_processor_kwargs=data_processor_kwargs,
-                               pnl_stop=-0.06,
+                               pnl_stop=-0.15,
                                verbose=0,
                                log_interval=1,
                                seed=seed,
@@ -202,10 +202,10 @@ if __name__ == '__main__':
         features_extractor_kwargs=dict(assets_features=6,
                                        actions_features=4 * 2 + 2,
                                        indicators_sign=indicators_sign,
-                                       final_dropout=0.21),
+                                       final_dropout=0.1),
         share_features_extractor=True,
-        net_arch=dict(pi=[256, 256, 256],
-                      vf=[256, 256, 256])
+        net_arch=dict(pi=[256, 256],
+                      vf=[256, 256])
     )
 
     ppo_kwargs = dict(

@@ -94,8 +94,8 @@ if __name__ == '__main__':
                                  market='spot',
                                  minimum_train_size=200,
                                  maximum_train_size=205,
-                                 minimum_test_size=4250,
-                                 maximum_test_size=4400,
+                                 minimum_test_size=1062,
+                                 maximum_test_size=1100,
                                  test_size=0.8,
                                  verbose=1,
                                  indicators_sign=True,
@@ -135,20 +135,24 @@ if __name__ == '__main__':
     # json_cfg = './save/BinanceEnvCash/RecurrentPPO/exp-1203-114139/RecurrentPPO_BinanceEnvCash_50000000_cfg.json'
     # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-2103-093747/MaskablePPO_BinanceEnvCash_3000000000_cfg.json'
     # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-002315/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
-    json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-193243/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-193243/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
+    # json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
+    #             'exp-1304-002928/MaskablePPO_BinanceEnvCash_600000000_cfg.json')
+    json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
+                'exp-2404-235624/MaskablePPO_BinanceEnvCash_1500000000_cfg.json')
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab = LabBase.load_agent(json_cfg, '/home/cubecloud/Backup/Experiments/rlbinancetrader/save')
     # rllab.test_agent(filename='best_model', verbose=1)
     # rllab.test_agent(filename=750_000, n_tests=15, verbose=1)
     """ Sell action reward """
-    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
-    #                         use_period='test')
+    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
+                            use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='train')
-    # rllab.backtesting_agent(filename=203489280, render_mode='human', n_tests=20, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=330301440, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
-    rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=1, verbose=1, seed=443,
-                            use_period='check',
-                            data_processor_kwargs=data_processor_kwargs)
+    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=4, verbose=1, seed=443,
+    #                         use_period='check',
+    #                         data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)

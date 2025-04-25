@@ -9,7 +9,7 @@ def calculate_steps(gamma_values, num_steps, lr_rate=1e-3):
     for gamma in gamma_values:
         regress_reward = 0
         steps = 0
-        rewards = np.round(np.linspace(2e-1, 5e-4, num_steps), 10)  # Round rewards to 5 decimal places
+        rewards = np.round(np.linspace(5e-5, 2e-1, num_steps), 10)  # Round rewards to 5 decimal places
         for reward in rewards:
             regress_reward = reward
             steps = 0
@@ -20,7 +20,7 @@ def calculate_steps(gamma_values, num_steps, lr_rate=1e-3):
     return steps_to_disappearance
 
 
-gamma_values = [0.70, 0.75, 0.8, 0.85, 0.9, 0.91, 0.92, 0.93, 0.956, 0.99]  # Test gamma values from 0 to 1
+gamma_values = [0.5, 0.70, 0.75, 0.8, 0.85, 0.9, 0.91, 0.92, 0.93, 0.95]  # Test gamma values from 0 to 1
 num_steps = 10
 
 steps_to_disappearance = calculate_steps(gamma_values, num_steps, lr_rate=1.)

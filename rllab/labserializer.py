@@ -8,7 +8,7 @@ from customnn import MlpExtractorNN
 from customnn import HybridFeatureExtractor
 from customnn import SeparatedCNNFeatureExtractor
 from customnn.multiextractor import MultiExtractorNN
-from customnn.lstmextractor import LSTMExtractorNN
+from customnn.lstmextractor import LSTMExtractorNN, LANLSTMExtractorNN
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from stable_baselines3 import A2C, PPO, DQN, TD3, DDPG, SAC, HerReplayBuffer
 from sb3_contrib import MaskablePPO
@@ -29,6 +29,7 @@ lab_serializer: dict = {'learning_rate': {'CoScheduler_': CoScheduler},
                         'SeparatedCNNFeatureExtractor': SeparatedCNNFeatureExtractor,
                         'HybridFeatureExtractor': HybridFeatureExtractor,
                         'LSTMExtractorNN': LSTMExtractorNN,
+                        'LANLSTMExtractorNN': LANLSTMExtractorNN,
                         'MultiExtractorNN': MultiExtractorNN,
                         'ReLU': ReLU,
                         'LeakyReLU': LeakyReLU,

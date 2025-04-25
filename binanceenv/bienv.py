@@ -268,7 +268,8 @@ class BinanceEnvBase(gymnasium.Env):
                                    # loss_threshold=0.0087,
                                    # profit_threshold=0.011,
                                    normalization_window=self.timeframes_24h,
-                                   use_final_reward=self.use_final_reward)
+                                   use_final_reward=self.use_final_reward,
+                                   timeframes_24h=self.timeframes_24h)
 
         self.observation_space = self.get_observation_space(observation_type=observation_type)
 
@@ -581,19 +582,19 @@ class BinanceEnvBase(gymnasium.Env):
         # coin_orders_cost = logarithmic10_scaler(self.coin_orders_cost)
         return np.asarray(
             np.concatenate([[target, coin], self.indicators_df.iloc[self.timecount].values]),
-            dtype=np.float32)
+            dtype=np.float64)
 
     def _get_assets_close_indicators_obs(self) -> np.ndarray:
         scaled_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
                               self.asset.balance.scaled_arr,
                               [self.asset.balance.scaled_arr[0] * scaled_price, scaled_price]],
-                             dtype=np.float32)
-        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
+                             dtype=np.float64)
+        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float64)
 
     def _get_lookback_assets_close_indicators_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_assets_close_indicators_obs())
-        return np.asarray(self.obs_lookback).astype(np.float32).flatten()
+        return np.asarray(self.obs_lookback).astype(np.float64).flatten()
 
     def _get_norm_assets_close_indicators_obs(self) -> np.ndarray:
         _scaled_current_price = self.target.scaler(self.price)
@@ -604,17 +605,17 @@ class BinanceEnvBase(gymnasium.Env):
                               # scaled_cost (current_cost) = scaled_current_price * scaled_balance_size
                               [_scaled_current_price * self.asset.balance.scaled_arr[0],
                                _scaled_current_price]],
-                             dtype=np.float32)
-        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float32)
+                             dtype=np.float64)
+        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values]).astype(np.float64)
 
     def _get_lookback_norm_assets_close_indicators_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
-        obs = np.array(self.obs_lookback).astype(np.float32)
+        obs = np.array(self.obs_lookback).astype(np.float64)
         return obs.flatten()
 
     def _get_lookback_norm_assets_close_indicators_conv1d_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_indicators_obs())
-        obs = np.array(self.obs_lookback).astype(np.float32)
+        obs = np.array(self.obs_lookback).astype(np.float64)
         # obs[:, 3:6] = minmax_normalization(obs[:, 3:6])
         # obs[:, 2] = obs[:, 3] * obs[:, 1]  # balance.cost = balance.price * balance.size
         # obs[:, 4] = obs[:, 4] * obs[:, 1]  # scaled_cost (current_cost) = price (current_price) * balance.size
@@ -626,63 +627,63 @@ class BinanceEnvBase(gymnasium.Env):
                               self.asset.balance.scaled_arr,
                               [_scaled_current_price * self.asset.balance.scaled_arr[0],
                                _scaled_current_price]],
-                             dtype=np.float32)
-        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float32)
+                             dtype=np.float64)
+        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float64)
         one_hot_action[self.actions_lst[-1]] = 1.0
         h_w_steps = np.array([self.rewards_obj.current_hold_period.normalized_steps,
-                              self.rewards_obj.current_wait_period.normalized_steps], dtype=np.float32)
-        one_hot_actions_mask = self._get_action_masks().astype(dtype=np.float32)
+                              self.rewards_obj.current_wait_period.normalized_steps], dtype=np.float64)
+        one_hot_actions_mask = self._get_action_masks().astype(dtype=np.float64)
         return np.concatenate([obs,
                                one_hot_action,
                                h_w_steps,
                                one_hot_actions_mask,
-                               self.indicators_df.iloc[self.timecount].values]).astype(dtype=np.float32)
+                               self.indicators_df.iloc[self.timecount].values]).astype(dtype=np.float64)
 
     def _get_lookback_norm_assets_close_action_indicators_hybrid_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_norm_assets_close_action_indicators_obs())
-        # obs = np.array(self.obs_lookback).astype(np.float32)
-        return np.array(self.obs_lookback).astype(np.float32)
+        # obs = np.array(self.obs_lookback).astype(np.float64)
+        return np.array(self.obs_lookback).astype(np.float64)
 
     def _get_assets_close_indicators_action_obs(self) -> np.ndarray:
         scaled_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
                               self.asset.balance.scaled_arr,
                               [self.asset.balance.scaled_arr[0] * scaled_price, scaled_price]],
-                             dtype=np.float32)
-        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float32)
+                             dtype=np.float64)
+        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float64)
         one_hot_action[self.actions_lst[-1]] = 1.
-        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values, one_hot_action]).astype(np.float32)
+        return np.concatenate([obs, self.indicators_df.iloc[self.timecount].values, one_hot_action]).astype(np.float64)
 
     def _get_lookback_assets_close_indicators_action_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_assets_close_indicators_action_obs())
-        return np.asarray(self.obs_lookback).astype(np.float32)
+        return np.asarray(self.obs_lookback).astype(np.float64)
 
     def _get_assets_close_indicators_action_ret_obs(self) -> np.ndarray:
         scaled_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
                               self.asset.balance.scaled_arr,
                               [self.asset.balance.scaled_arr[0] * scaled_price, scaled_price]],
-                             dtype=np.float32)
-        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float32)
+                             dtype=np.float64)
+        one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float64)
         one_hot_action[self.actions_lst[-1]] = 1.
         return np.concatenate(
             [obs, self.indicators_df.iloc[self.timecount].values, self.ret_obs_df.iloc[self.timecount].values,
-             one_hot_action]).astype(np.float32)
+             one_hot_action]).astype(np.float64)
 
     def _get_lookback_assets_close_indicators_action_ret_obs(self) -> np.ndarray:
         self.obs_lookback.append(self._get_assets_close_indicators_action_ret_obs())
-        return np.asarray(self.obs_lookback).astype(np.float32)
+        return np.asarray(self.obs_lookback).astype(np.float64)
 
     def _get_dict_assets_close_indicators_obs(self) -> np.ndarray:
         scaled_ohlc = self.target.scaler(
-            self.ohlcv_df.iloc[self.timecount][['open', 'high', 'low', 'close']].values).astype(np.float32)
+            self.ohlcv_df.iloc[self.timecount][['open', 'high', 'low', 'close']].values).astype(np.float64)
         assets = np.concatenate(
             [np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
              self.asset.balance.scaled_arr,
              [self.asset.balance.scaled_arr[0] * scaled_ohlc[3]]],
-            dtype=np.float32)
-        indicators = self.indicators_df.iloc[self.timecount].values.astype(np.float32)
-        return np.concatenate([assets, scaled_ohlc, indicators]).astype(np.float32)
+            dtype=np.float64)
+        indicators = self.indicators_df.iloc[self.timecount].values.astype(np.float64)
+        return np.concatenate([assets, scaled_ohlc, indicators]).astype(np.float64)
 
     def _get_lookback_dict_obs(self) -> dict:
         self.obs_lookback.append(self._get_dict_assets_close_indicators_obs())
@@ -691,15 +692,15 @@ class BinanceEnvBase(gymnasium.Env):
 
     def _get_pnl_indicators_obs(self) -> np.ndarray:
         return np.asarray(np.concatenate([[self.pnl], self.indicators_df.iloc[self.timecount].values]),
-                          dtype=np.float32)
+                          dtype=np.float64)
 
     def _get_indicators_close_obs(self) -> np.ndarray:
         close = new_logarithmic_scaler(self.price)
         return np.asarray(np.concatenate([self.indicators_df.iloc[self.timecount].values, [close]]),
-                          dtype=np.float32)
+                          dtype=np.float64)
 
     def _get_indicators_obs(self) -> np.ndarray:
-        return np.asarray(self.indicators_df.iloc[self.timecount].values, dtype=np.float32)
+        return np.asarray(self.indicators_df.iloc[self.timecount].values, dtype=np.float64)
 
     def _get_action_masks(self) -> np.ndarray:
         return np.array(
