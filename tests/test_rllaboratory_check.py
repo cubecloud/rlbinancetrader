@@ -139,7 +139,7 @@ if __name__ == '__main__':
     # json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
     #             'exp-1304-002928/MaskablePPO_BinanceEnvCash_600000000_cfg.json')
     json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
-                'exp-2404-235624/MaskablePPO_BinanceEnvCash_1500000000_cfg.json')
+                'exp-2904-074505/MaskablePPO_BinanceEnvCash_1500000000_cfg.json')
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab = LabBase.load_agent(json_cfg, '/home/cubecloud/Backup/Experiments/rlbinancetrader/save')
@@ -150,7 +150,7 @@ if __name__ == '__main__':
                             use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='train')
-    # rllab.backtesting_agent(filename=330301440, render_mode='human', n_tests=20, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=197591040, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=4, verbose=1, seed=443,
     #                         use_period='check',

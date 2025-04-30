@@ -85,7 +85,7 @@ def get_sigmoid_results(max_len: int = 3000, normalization_window: int = 96) -> 
     """
 
     x_values = np.arange(0, max_len + 1, dtype=np.float64)
-    sigmoid_results = (1 / (1 + np.exp(-x_values / normalization_window))) - 0.5
+    sigmoid_results = (1 / (1 + np.exp(-x_values / normalization_window)))
     return sigmoid_results
 
 
@@ -105,7 +105,7 @@ class AnyPeriod:
 
     @property
     def normalized_steps(self) -> float:
-        return -self.sigmoid_results[self.period_len]
+        return self.sigmoid_results[self.period_len]
 
     @property
     def period_len(self):
@@ -114,11 +114,19 @@ class AnyPeriod:
     def __len__(self):
         return self.reward.__len__()
 
-    def calc_timecounted_gamma_reward(self, reward: float, timecount: int, timeframes_24h: int = 96,
-                                      gamma: float = 0.92) -> float:
+    def calc_timecounted_gamma_reward(self, reward: float, gamma: float = 0.92, end_period: bool = False) -> float:
         self.gamma_reward = self.gamma_reward * gamma + reward
-        return self.gamma_reward * self.theta ** (self.period_len / timeframes_24h)
-        # return self.gamma_reward
+        # accumulating reward for 4 steps with current period
+        if end_period:
+            return reward
+        else:
+            return self.gamma_reward
+        # if self.period_len % 4 == 0:
+        #     # return self.gamma_reward * self.theta ** (self.period_len / timeframes_24h)
+        #     return self.gamma_reward
+        # else:
+        #     return 1e-7
+        # # return self.gamma_reward
 
     def reset(self):
         self.entry_datetime = None
@@ -429,19 +437,17 @@ class RewardsBase(ABC):
             # TODO rewrite for multi assets trading (must updates each timestep)
             self.current_hold_period.size = self.__asset.orders.last_order.size
 
-        price = self.ohlcv_df.iloc[timecount]['close'] + 1e-8
-        previous_price = self.ohlcv_df.iloc[timecount - 1]['close']
-        # action_reward = -((previous_price - price) * size) / self.__asset.initial_total_in_cashS
-
-        action_reward = ((
-                                 price - previous_price) * self.__asset.orders.last_order.size) / self.__asset.initial_total_in_cash
+        # price = self.ohlcv_df.iloc[timecount]['close'] + 1e-8
+        # previous_price = self.ohlcv_df.iloc[timecount - 1]['close']
+        # action_reward = ((
+        #                          price - previous_price) * self.__asset.orders.last_order.size) / self.__asset.initial_total_in_cash
 
         # Get the trade weight from the trade_weight method
         # weight = self.trade_period_weight()
 
         # Get the PnL of the last closed trade
         # relative_pnl = self.pnl(self.__trades.last_trade.profit)  # PnL can be positive or negative
-        # action_reward = self.pnl(self.__trades.last_trade.profit)  # PnL can be positive or negative
+        action_reward = self.pnl(self.__trades.last_trade.profit)  # PnL can be positive or negative
 
         # if relative_pnl >= 0:
         #     action_reward = relative_pnl * (1 - weight)
@@ -450,11 +456,10 @@ class RewardsBase(ABC):
 
         self.raw_rewards.append(action_reward)
         timecounted_close_reward = self.current_hold_period.calc_timecounted_gamma_reward(action_reward,
-                                                                                          timecount,
-                                                                                          self.timeframes_24,
-                                                                                          self.gamma)
+                                                                                          gamma=self.gamma,
+                                                                                          end_period=True)
         self.current_hold_period.reset()
-        assert timecounted_close_reward != 0., 'Error: "Close" reward equal zero'
+        # assert timecounted_close_reward != 0., 'Error: "Close" reward equal zero'
         return timecounted_close_reward
 
         # return action_reward
@@ -479,10 +484,7 @@ class RewardsBase(ABC):
         # return action_reward
         # return 0.0
         # return self.get_normalized_reward()
-        return self.current_hold_period.calc_timecounted_gamma_reward(action_reward,
-                                                                      timecount,
-                                                                      self.timeframes_24,
-                                                                      self.gamma)
+        return self.current_hold_period.calc_timecounted_gamma_reward(action_reward, gamma=self.gamma)
 
     def buy_action_reward(self, timecount) -> float:
         #   if current_wait_period reward NOT empty -> add exit data to object
@@ -490,8 +492,8 @@ class RewardsBase(ABC):
             self.current_wait_period.exit_datetime = self.__asset.orders.last_order.order_datetime
             self.current_wait_period.exit_price = self.__asset.orders.last_order.price
             # self.current_wait_period.size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
-            # start_price = self.current_wait_period.entry_price
-            # end_price = self.current_wait_period.exit_price
+            previous_price = self.current_wait_period.entry_price
+            price = self.current_wait_period.exit_price
             # action_reward = -((
             #                          start_price - end_price) * self.current_wait_period.size) / self.__asset.initial_total_in_cash
             # action_reward = ((
@@ -499,10 +501,11 @@ class RewardsBase(ABC):
         else:
             # penalize buy action w/o wait period
             self.current_wait_period.size = self.size(self.ohlcv_df.iloc[timecount]['close'], self.__asset.target.cash)
-
-        price = self.ohlcv_df.iloc[timecount]['close']
-        previous_price = self.ohlcv_df.iloc[timecount - 1]['close'] + 1e-8
-        # action_reward = -((previous_price - price) * size) / self.__asset.initial_total_in_cashS
+            price = self.ohlcv_df.iloc[timecount]['close']
+            previous_price = self.ohlcv_df.iloc[timecount - 1]['close'] + 1e-8
+        # price = self.ohlcv_df.iloc[timecount]['close']
+        # previous_price = self.ohlcv_df.iloc[timecount - 1]['close'] + 1e-8
+        # # action_reward = -((previous_price - price) * size) / self.__asset.initial_total_in_cashS
 
         size = self.current_wait_period.size
         action_reward = ((previous_price - price) * size) / self.__asset.initial_total_in_cash
@@ -530,11 +533,10 @@ class RewardsBase(ABC):
         self.raw_rewards.append(action_reward)
 
         timecounted_buy_reward = self.current_wait_period.calc_timecounted_gamma_reward(action_reward,
-                                                                                        timecount,
-                                                                                        self.timeframes_24,
-                                                                                        self.gamma)
+                                                                                        gamma=self.gamma,
+                                                                                        end_period=True)
         self.current_wait_period.reset()
-        assert timecounted_buy_reward != 0., 'Error: "BUY" reward equal zero'
+        # assert timecounted_buy_reward != 0., 'Error: "BUY" reward equal zero'
         return timecounted_buy_reward
         # return action_reward
         # return self.get_normalized_reward()
@@ -586,10 +588,7 @@ class RewardsBase(ABC):
 
         # return action_reward
         # return self.get_normalized_reward()
-        return self.current_wait_period.calc_timecounted_gamma_reward(action_reward,
-                                                                      timecount,
-                                                                      self.timeframes_24,
-                                                                      self.gamma)
+        return self.current_wait_period.calc_timecounted_gamma_reward(action_reward, gamma=self.gamma)
 
     def wait_action_reward(self,
                            timecount: int,

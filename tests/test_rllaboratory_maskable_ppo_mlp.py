@@ -37,7 +37,7 @@ import warnings
 
 # import torch
 
-__version__ = 0.140
+__version__ = 0.145
 
 logger = get_logger()
 # logger = logging.getLogger()
@@ -86,9 +86,9 @@ if __name__ == '__main__':
     # '2024-06-30 04:35:00/2024-08-29 09:43:00'
     # '2024-06-12 03:21:00/2024-07-30 01:00:00'
 
-    total_timesteps = 600_000_000
+    total_timesteps = 1_500_000_000
 
-    agents_n_env = int(1920)
+    agents_n_env = int(3840)
     # agents_n_env = int(1)
     n_steps = 192
     warmup_timesteps = (agents_n_env * n_steps) * 100
@@ -98,23 +98,7 @@ if __name__ == '__main__':
     lookback_window = '4h'
     indicators_sign = True
     seed = 42  # start with 443 -> bad
-    reward_scaler = 1
-
-    data_processor_kwargs = dict(start_datetime=_start_datetime,
-                                 end_datetime=_end_datetime,
-                                 timeframe=_timeframe,
-                                 discretization=_discretization,
-                                 symbol_pair='BTCUSDT',
-                                 market='spot',
-                                 minimum_train_size=321,
-                                 maximum_train_size=328,
-                                 minimum_test_size=321,
-                                 maximum_test_size=328,
-                                 test_size=0.1,
-                                 verbose=1,
-                                 indicators_sign=indicators_sign,
-                                 use_shifts_num=2,
-                                 )
+    reward_scaler = 10
 
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
@@ -122,15 +106,47 @@ if __name__ == '__main__':
     #                              discretization=_discretization,
     #                              symbol_pair='BTCUSDT',
     #                              market='spot',
-    #                              minimum_train_size=640,
-    #                              maximum_train_size=645,
-    #                              minimum_test_size=640,
-    #                              maximum_test_size=645,
+    #                              minimum_train_size=0.0267,
+    #                              maximum_train_size=0.031,
+    #                              minimum_test_size=0.168,
+    #                              maximum_test_size=0.188,
+    #                              test_size=0.13,
+    #                              verbose=0,
+    #                              indicators_sign=True,
+    #                              use_shifts_num=4,
+    #                              )
+
+    # data_processor_kwargs = dict(start_datetime=_start_datetime,
+    #                              end_datetime=_end_datetime,
+    #                              timeframe=_timeframe,
+    #                              discretization=_discretization,
+    #                              symbol_pair='BTCUSDT',
+    #                              market='spot',
+    #                              minimum_train_size=321,
+    #                              maximum_train_size=328,
+    #                              minimum_test_size=321,
+    #                              maximum_test_size=328,
     #                              test_size=0.1,
     #                              verbose=1,
     #                              indicators_sign=indicators_sign,
-    #                              use_shifts_num=4
+    #                              use_shifts_num=2,
     #                              )
+
+    data_processor_kwargs = dict(start_datetime=_start_datetime,
+                                 end_datetime=_end_datetime,
+                                 timeframe=_timeframe,
+                                 discretization=_discretization,
+                                 symbol_pair='BTCUSDT',
+                                 market='spot',
+                                 minimum_train_size=640,
+                                 maximum_train_size=645,
+                                 minimum_test_size=640,
+                                 maximum_test_size=645,
+                                 test_size=0.1,
+                                 verbose=1,
+                                 indicators_sign=indicators_sign,
+                                 use_shifts_num=8
+                                 )
 
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
     #                              end_datetime=_end_datetime,
@@ -160,7 +176,8 @@ if __name__ == '__main__':
                                # observation_type='assets_close_indicators',
                                observation_type='lookback_norm_assets_close_action_indicators_hybrid',
                                # observation_type='indicators_close',
-                               stable_cache_data_n=240,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               stable_cache_data_n=720,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
+                               # stable_cache_data_n=agents_n_env,  # 3780 * 2, # 630*5 = 3150, 630*6 = 3780
                                reuse_data_prob=1.0,
                                eval_reuse_prob=1.0,
                                # lookback_window=None,
@@ -170,7 +187,7 @@ if __name__ == '__main__':
                                # eps_start=0.99,
                                # eps_end=0.01,
                                # eps_decay=0.2,
-                               gamma=0.93,
+                               gamma=0.85,
                                # invalid_actions=15_000,
                                # penalty_value=1e-7,  # 10 cents equivalent for current asset scale
                                action_type='discrete_4',
@@ -178,7 +195,7 @@ if __name__ == '__main__':
                                index_type=index_type,
                                render_mode='human',
                                reward_scaler=reward_scaler,
-                               use_final_reward=True,
+                               use_final_reward=False,
                                chunk_size=None,
                                )
 
@@ -202,10 +219,12 @@ if __name__ == '__main__':
         features_extractor_kwargs=dict(assets_features=6,
                                        actions_features=4 * 2 + 2,
                                        indicators_sign=indicators_sign,
-                                       final_dropout=0.1),
+                                       final_dropout=0.03),
         share_features_extractor=True,
-        net_arch=dict(pi=[256, 256],
-                      vf=[256, 256])
+        net_arch=dict(pi=[362, 256, 128],
+                      vf=[362, 256, 128]),
+        normalize_images=False,
+        # activation_fn='ReLU'
     )
 
     ppo_kwargs = dict(
@@ -217,20 +236,21 @@ if __name__ == '__main__':
         n_epochs=10,
         stats_window_size=100,
         normalize_advantage=True,
-        clip_range=0.075,
-        clip_range_vf=0.075,
+        gae_lambda=0.8,
+        clip_range=0.2,
+        clip_range_vf=0.2,
         ent_coef=0.01,
         vf_coef=0.5,
         # max_grad_norm=0.25,
-        gamma=0.93,
+        gamma=0.85,
         learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
                                            stable_warmup=False,
                                            floor_learning_rate=1e-6,
-                                           min_learning_rate=5e-6,
-                                           learning_rate=7e-6,
+                                           min_learning_rate=1e-6,
+                                           learning_rate=1.5e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
-                                           pre_warmup_coef=0.03)
+                                           pre_warmup_coef=0.04)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
         device='auto',

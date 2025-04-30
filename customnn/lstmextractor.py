@@ -97,9 +97,9 @@ class LANLSTMExtractorNN(BaseFeaturesExtractor):
 
 
 if __name__ == "__main__":
-    _observation_space = Box(low=0, high=1, shape=(48, 21))
-    feature_extractor = LANLSTMExtractorNN(_observation_space, features_dim=256)
-    _observations = torch.randn(10, 48, 21)
+    _observation_space = Box(low=0, high=1, shape=(8 * 4, 28))
+    feature_extractor = LANLSTMExtractorNN(_observation_space, features_dim=512)
+    _observations = torch.randn(10, 8 * 4, 28)
     _x = feature_extractor(_observations)
     print(_x)
     print(_x.shape)

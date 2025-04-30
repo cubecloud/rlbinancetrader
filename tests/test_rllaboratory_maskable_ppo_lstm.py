@@ -79,14 +79,14 @@ if __name__ == '__main__':
     # buffer_size = 1_500_000
     # learning_start = (3780 * 2 * 300)
     n_steps = 192
-    warmup_timesteps = (agents_n_env * n_steps) * 100
+    warmup_timesteps = (agents_n_env * n_steps) * 200
     # batch_size = 660 * agents_n_env
-    lookback_window = '4h'
-    # lookback_window = '8h'
+    # lookback_window = '4h'
+    lookback_window = '8h'
     # index_type = 'target_time'
     index_type = 'prediction_time'
     indicators_sign = True
-    seed = 663
+    seed = 42
     reward_scaler = 10
 
     # data_processor_kwargs = dict(start_datetime=_start_datetime,
@@ -181,7 +181,7 @@ if __name__ == '__main__':
     #     normalize_images=False,
     # )
 
-    features_dim = 512
+    features_dim = int(8 * 4 * 28 // 2)
     ppo_policy_kwargs = dict(
         features_extractor_class='LANLSTMExtractorNN',
         features_extractor_kwargs=dict(features_dim=features_dim),
@@ -195,7 +195,7 @@ if __name__ == '__main__':
         # policy="MultiInputPolicy",
         policy_kwargs=ppo_policy_kwargs,
         n_steps=n_steps,
-        batch_size=int(agents_n_env * n_steps // 30),
+        batch_size=int(agents_n_env * n_steps // 40),
         n_epochs=10,
         stats_window_size=100,
         ent_coef=0.01,
@@ -206,13 +206,13 @@ if __name__ == '__main__':
         # max_grad_norm=0.25,
         gamma=0.85,
         learning_rate={'CoScheduler': dict(warmup=warmup_timesteps,
-                                           stable_warmup=False,
+                                           stable_warmup=True,
                                            floor_learning_rate=1e-6,
                                            min_learning_rate=1e-6,
                                            learning_rate=1.5e-6,
                                            total_epochs=total_timesteps,
                                            epsilon=1,
-                                           pre_warmup_coef=0.04)
+                                           pre_warmup_coef=0.1)
                        },
         # lookback window (timesteps) / 100 -> 12h * 4 = 48
         device='auto',

@@ -15,29 +15,6 @@ from binanceenv.actionspace import (actions_dict,
 __version__ = 0.016
 
 
-def get_action_space_obj(action_type='discrete'):
-    if action_type == 'discrete':
-        action_space_obj = DiscreteActionSpace(n_action=3)
-    elif action_type == 'discrete_4':
-        action_space_obj = DiscreteActionSpaceSpot(n_action=4)
-    elif action_type == 'box':
-        action_space_obj = BoxActionSpace(n_action=3)
-    elif action_type == 'box_4':
-        action_space_obj = BoxActionSpace(n_action=4)
-    elif action_type == 'box1_1_3':
-        action_space_obj = BoxExtActionSpace(n_action=3)
-    elif action_type == 'box1_1_4':
-        action_space_obj = BoxExtActionSpace(n_action=4)
-    elif action_type == 'binbox':
-        action_space_obj = BinBoxActionSpace(n_action=3, low=-1, high=1)
-    elif action_type == 'sell_buy_hold_amount':
-        action_space_obj = SellBuyHoldAmount()
-    else:
-        sys.exit(f'Error: Unknown action type {action_type}!')
-
-    return action_space_obj
-
-
 class IndicatorsSpace:
     def __init__(self, ind_num):
         self.__observation_space = spaces.Box(low=0.0, high=1.0, shape=(ind_num,), dtype=np.float64, seed=42)
@@ -94,7 +71,7 @@ class AssetsCloseActionIndicatorsSpace:
     def __init__(self, ind_num, assets_data, actions, low=0.0, high=1.0):
         self.__observation_space = spaces.Box(low=low,
                                               high=high,
-                                              shape=(assets_data + actions + ind_num, ),
+                                              shape=(assets_data + actions + ind_num,),
                                               dtype=np.float64,
                                               seed=42)
         self.name = 'assets_close_action_indicators'
@@ -387,3 +364,27 @@ class BinBoxActionSpace:
     @action_space.setter
     def action_space(self, value):
         self.__action_space = value
+
+
+def get_action_space_obj(action_type='discrete') -> Union[
+    DiscreteActionSpace, DiscreteActionSpaceSpot, BoxActionSpace, BoxExtActionSpace, BinBoxActionSpace, SellBuyHoldAmount]:
+    if action_type == 'discrete':
+        action_space_obj = DiscreteActionSpace(n_action=3)
+    elif action_type == 'discrete_4':
+        action_space_obj = DiscreteActionSpaceSpot(n_action=4)
+    elif action_type == 'box':
+        action_space_obj = BoxActionSpace(n_action=3)
+    elif action_type == 'box_4':
+        action_space_obj = BoxActionSpace(n_action=4)
+    elif action_type == 'box1_1_3':
+        action_space_obj = BoxExtActionSpace(n_action=3)
+    elif action_type == 'box1_1_4':
+        action_space_obj = BoxExtActionSpace(n_action=4)
+    elif action_type == 'binbox':
+        action_space_obj = BinBoxActionSpace(n_action=3, low=-1, high=1)
+    elif action_type == 'sell_buy_hold_amount':
+        action_space_obj = SellBuyHoldAmount()
+    else:
+        sys.exit(f'Error: Unknown action type {action_type}!')
+
+    return action_space_obj
