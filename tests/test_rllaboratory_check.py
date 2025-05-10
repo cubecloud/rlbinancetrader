@@ -94,12 +94,12 @@ if __name__ == '__main__':
                                  market='spot',
                                  minimum_train_size=200,
                                  maximum_train_size=205,
-                                 minimum_test_size=1062,
-                                 maximum_test_size=1100,
-                                 test_size=0.8,
+                                 minimum_test_size=640,
+                                 maximum_test_size=645,
+                                 test_size=0.85,
                                  verbose=1,
                                  indicators_sign=True,
-                                 use_shifts_num=1,
+                                 use_shifts_num=8,
                                  )
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-1011-230816/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
     # json_cfg = './save/BinanceEnvCash/MaskablePPO/exp-2311-021257/MaskablePPO_BinanceEnvCash_300000000_cfg.json'
@@ -138,8 +138,10 @@ if __name__ == '__main__':
     # json_cfg = '/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/exp-1004-193243/MaskablePPO_BinanceEnvCash_900000000_cfg.json'
     # json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
     #             'exp-1304-002928/MaskablePPO_BinanceEnvCash_600000000_cfg.json')
+    # json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
+    #             'exp-2904-074505/MaskablePPO_BinanceEnvCash_1500000000_cfg.json')
     json_cfg = ('/home/cubecloud/Backup/Experiments/rlbinancetrader/save/BinanceEnvCash/MaskablePPO/'
-                'exp-2904-074505/MaskablePPO_BinanceEnvCash_1500000000_cfg.json')
+                'exp-0605-075328/MaskablePPO_BinanceEnvCash_6000000000_cfg.json')
 
     rllab = LabBase.load_agent(json_cfg)
     # rllab = LabBase.load_agent(json_cfg, '/home/cubecloud/Backup/Experiments/rlbinancetrader/save')
@@ -150,9 +152,9 @@ if __name__ == '__main__':
                             use_period='test')
     # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='train')
-    # rllab.backtesting_agent(filename=197591040, render_mode='human', n_tests=20, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename=1742929920, render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='test')
-    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=4, verbose=1, seed=443,
+    # rllab.backtesting_agent(filename='best_model', render_mode='human', n_tests=20, verbose=1, seed=443,
     #                         use_period='check',
     #                         data_processor_kwargs=data_processor_kwargs)
     # rllab.evaluate_agent(0)
