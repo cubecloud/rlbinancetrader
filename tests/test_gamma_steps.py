@@ -7,9 +7,7 @@ import numpy as np
 def calculate_steps(gamma_values, num_steps, lr_rate=1e-3):
     steps_to_disappearance = []
     for gamma in gamma_values:
-        regress_reward = 0
-        steps = 0
-        rewards = np.round(np.linspace(5e-5, 2e-1, num_steps), 10)  # Round rewards to 5 decimal places
+        rewards = np.round(np.linspace(5e-5, 2e-1, num_steps), 8)  # Round rewards to 5 decimal places
         for reward in rewards:
             regress_reward = reward
             steps = 0
@@ -20,7 +18,7 @@ def calculate_steps(gamma_values, num_steps, lr_rate=1e-3):
     return steps_to_disappearance
 
 
-gamma_values = [0.5, 0.70, 0.75, 0.8, 0.85, 0.9, 0.91, 0.92, 0.93, 0.95]  # Test gamma values from 0 to 1
+gamma_values = [0.75, 0.85, 0.86, 0.9, 0.91, 0.92, 0.93, 0.95]  # Test gamma values from 0 to 1
 num_steps = 10
 
 steps_to_disappearance = calculate_steps(gamma_values, num_steps, lr_rate=1.)
@@ -31,7 +29,7 @@ df = pd.DataFrame(steps_to_disappearance, columns=['Reward', 'Gamma', 'Steps'])
 # Plot the results
 sns.set_context("paper")
 sns.set_style("whitegrid")
-plt.figure(figsize=(24, 16))
+plt.figure(figsize=(24, 15))
 ax = sns.barplot(x='Reward', y='Steps', hue='Gamma', data=df)
 for i, p in enumerate(ax.patches):
     ax.text(p.get_x() + p.get_width() / 2., p.get_height(), str(int(p.get_height())),
@@ -45,7 +43,7 @@ plt.xlabel('Reward Value')
 plt.ylabel('Steps to Disappearance')
 plt.title('Steps to Disappearance vs Reward Value')
 plt.grid(True)
-plt.legend(loc='upper center', ncol=3, bbox_to_anchor=(0.5, -0.1))
-plt.xticks(rotation=90)
+plt.legend(loc='upper center', ncol=len(gamma_values), bbox_to_anchor=(0.5, -0.1))
+plt.xticks(rotation=45)
 plt.tight_layout()
 plt.show()

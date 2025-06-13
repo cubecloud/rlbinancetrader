@@ -1,19 +1,21 @@
 # import multiprocessing
-import sys
+# import sys
 import math
 import copy
-import random
-import logging
-import time
+# import random
+# import logging
+# import time
 from binascii import Error
 import datetime
 
 import gymnasium
-import numpy as np
-import numba
+# import numpy as np
+# import numba
 import pandas as pd
 from numba import jit
-from typing import Any, Union, Optional, List, Callable
+# from typing import Any, Union, Optional, List, Callable
+from typing import List
+from typing import Callable
 
 # from gymnasium.spaces import Discrete
 # from gymnasium.spaces import Box
@@ -26,7 +28,7 @@ from gymnasium.utils import seeding
 
 from dbbinance.fetcher.datautils import get_timeframe_bins
 from dbbinance.fetcher.datautils import get_nearest_timeframe
-from sb3_rllab import SThLock, SMpLock
+# from sb3_rllab import SThLock, SMpLock
 
 import multiprocessing as mp
 from dbbinance.fetcher import CacheManager
@@ -42,12 +44,12 @@ from binanceenv.spaces import *
 from binanceenv.orderbook import TargetCash
 from binanceenv.orderbook import Asset
 from binanceenv.orderbook import Bal
-from binanceenv.scalers import minmax_normalization
+# from binanceenv.scalers import minmax_normalization
 from binanceenv.actionspace import (actions_reversed_dict,
-                                    actions_4_reversed_dict,
+                                    # actions_4_reversed_dict,
                                     actions_4_spot_dict,
                                     actions_4_spot_reversed_dict)
-from binanceenv.observations import prepare_vwap
+# from binanceenv.observations import prepare_vwap
 from binanceenv.observations import prepare_ret_obs
 from binanceenv.rewards import Rewards
 from binanceenv.visualization import visualize_episode
@@ -241,8 +243,8 @@ class BinanceEnvBase(gymnasium.Env):
         self.min_coin_trade = self.asset.orders.minimum_trade + (
                 self.asset.orders.commission * self.asset.orders.minimum_trade)
 
-        self.action_space_obj: [
-            Union[DiscreteActionSpace, DiscreteActionSpaceSpot, BoxActionSpace, BoxExtActionSpace, None]] = None
+        self.action_space_obj: Union[
+            Union[DiscreteActionSpace, DiscreteActionSpaceSpot, BoxActionSpace, BoxExtActionSpace, None], None] = None
 
         self.obs_lookback = deque(maxlen=self.lookback_timeframes)
         self._warmup_func: Union[Callable, None] = lambda *args: None
@@ -625,7 +627,7 @@ class BinanceEnvBase(gymnasium.Env):
         _scaled_current_price = self.target.scaler(self.price)
         obs = np.concatenate([np.clip([self.target.scaled_cash], a_min=0., a_max=1.),
                               self.asset.balance.scaled_arr,
-                              [_scaled_current_price * self.asset.balance.scaled_arr[0],
+                              [_scaled_current_price * self.asset.balance.scaled_arr[0],    # price*scaled_balance_size
                                _scaled_current_price]],
                              dtype=np.float64)
         one_hot_action = np.zeros(self.action_space_obj.n_action, dtype=np.float64)

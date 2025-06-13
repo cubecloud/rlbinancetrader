@@ -101,8 +101,10 @@ def get_trade_metrics(trades_book, df: pd.DataFrame) -> Dict:
     if not all_trades:
         return metrics
 
-    start = min(t.entry_datetime for t in all_trades)
-    end = max(t.exit_datetime for t in all_trades)
+    # start = min(t.entry_datetime for t in all_trades)
+    # end = max(t.exit_datetime for t in all_trades)
+    start = df.index[0]
+    end = df.index[-1]
     total_duration = end - start
 
     metrics.update({
