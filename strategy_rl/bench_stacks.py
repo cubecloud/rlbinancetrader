@@ -23,7 +23,7 @@ CACHE_DIR = os.environ.get("RLBENCH_CACHE",
                            os.path.expanduser("~/Data/rlbinancetrader/state_cache"))
 RESULTS = os.environ.get("RLBENCH_RESULTS",
                          os.path.join(os.path.dirname(__file__), "bench_results.json"))
-N_ENVS = 8
+N_ENVS = int(os.environ.get("RLBENCH_NENVS", 8))
 
 
 def load_features(key: str) -> np.ndarray:
@@ -135,6 +135,22 @@ def bench_puffer_vec(env_cls, n_steps: int, backend: str) -> float:
     return iters * N_ENVS / dt
 
 
+def bench_lab_vec(env_cls, n_steps: int, n_envs: int, n_processes: int) -> float:
+    """LabSubprocVecEnv (sb3-rllab): K сред на процесс, IPC пачкой на процесс."""
+    from sb3_rllab import LabSubprocVecEnv
+    vec = LabSubprocVecEnv([env_cls for _ in range(n_envs)],
+                           n_processes=n_processes)
+    vec.reset()
+    acts = np.zeros(n_envs, dtype=np.int64)
+    iters = max(1, n_steps // n_envs)
+    t0 = time.perf_counter()
+    for _ in range(iters):
+        vec.step(acts)
+    dt = time.perf_counter() - t0
+    vec.close()
+    return iters * n_envs / dt
+
+
 def bench_ppo(env_cls, total: int, lib: str) -> float:
     from stable_baselines3.common.vec_env import DummyVecEnv
     vec = DummyVecEnv([env_cls for _ in range(N_ENVS)])
@@ -161,6 +177,8 @@ def main():
     ap.add_argument("--ppo-steps", type=int, default=100_000)
     ap.add_argument("--only", default="",
                     help="запятая-список тестов (напр. raw_single,ppo_sb3)")
+    ap.add_argument("--lab", default="",
+                    help="конфиги LabSubprocVecEnv: 'PxK[,PxK...]' — P процессов, K сред на процесс")
     args = ap.parse_args()
     only = set(filter(None, args.only.split(",")))
 
@@ -178,6 +196,10 @@ def main():
         ("ppo_sb3", lambda: bench_ppo(env_cls, args.ppo_steps, "sb3")),
         ("ppo_sbx", lambda: bench_ppo(env_cls, args.ppo_steps, "sbx")),
     ]
+    for cfg in filter(None, args.lab.split(",")):
+        p, k = (int(x) for x in cfg.split("x"))
+        tests.append((f"lab_{p}x{k}",
+                      lambda p=p, k=k: bench_lab_vec(env_cls, args.steps, p * k, p)))
     for name, fn in tests:
         if only and name not in only:
             continue
