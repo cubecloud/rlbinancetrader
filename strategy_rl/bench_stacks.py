@@ -116,8 +116,9 @@ def bench_puffer_vec(env_cls, n_steps: int, backend: str) -> float:
     import pufferlib.emulation
     import pufferlib.vector as pv
 
-    def creator():
-        return pufferlib.emulation.GymnasiumPufferEnv(env_creator=env_cls)
+    def creator(buf=None):
+        # pufferlib.vector передаёт shared-memory buf в env_creator
+        return pufferlib.emulation.GymnasiumPufferEnv(env_creator=env_cls, buf=buf)
 
     vec_backend = {"serial": pv.Serial, "mp": pv.Multiprocessing}[backend]
     vec = pv.make(creator, num_envs=N_ENVS, backend=vec_backend)
