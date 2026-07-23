@@ -157,12 +157,33 @@ def bench_ppo(env_cls, total: int, lib: str) -> float:
     kw = dict(n_steps=256, batch_size=512, n_epochs=4, verbose=0)
     if lib == "sb3":
         from stable_baselines3 import PPO
-        model = PPO("MlpPolicy", vec, device="cpu", **kw)
+        model = PPO("MlpPolicy", vec, device=os.environ.get("RLBENCH_DEVICE", "cpu"), **kw)
     elif lib == "sbx":
         from sbx import PPO
         model = PPO("MlpPolicy", vec, **kw)
     else:
         raise ValueError(lib)
+    t0 = time.perf_counter()
+    model.learn(total_timesteps=total, progress_bar=False)
+    dt = time.perf_counter() - t0
+    vec.close()
+    return total / dt
+
+
+def bench_ppo_lab(env_cls, p: int, k: int) -> float:
+    """PPO (SB3) поверх LabSubprocVecEnv PxK — боевая конфигурация сбора.
+
+    Гиперпараметры те же, что в bench_ppo (n_steps=256, batch=512, 4 эпохи);
+    длительность — 2 полных rollout'а (2*256*P*K шагов), чтобы замер включал
+    и сбор, и update. Устройство — RLBENCH_DEVICE (cpu | cuda).
+    """
+    from sb3_rllab import LabSubprocVecEnv
+    from stable_baselines3 import PPO
+    n_envs = p * k
+    vec = LabSubprocVecEnv([env_cls for _ in range(n_envs)], n_processes=p)
+    model = PPO("MlpPolicy", vec, device=os.environ.get("RLBENCH_DEVICE", "cpu"),
+                n_steps=256, batch_size=512, n_epochs=4, verbose=0)
+    total = 2 * 256 * n_envs
     t0 = time.perf_counter()
     model.learn(total_timesteps=total, progress_bar=False)
     dt = time.perf_counter() - t0
@@ -179,6 +200,8 @@ def main():
                     help="запятая-список тестов (напр. raw_single,ppo_sb3)")
     ap.add_argument("--lab", default="",
                     help="конфиги LabSubprocVecEnv: 'PxK[,PxK...]' — P процессов, K сред на процесс")
+    ap.add_argument("--ppo-lab", default="",
+                    help="PPO поверх LabSubprocVecEnv: 'PxK[,PxK...]'")
     args = ap.parse_args()
     only = set(filter(None, args.only.split(",")))
 
@@ -200,6 +223,10 @@ def main():
         p, k = (int(x) for x in cfg.split("x"))
         tests.append((f"lab_{p}x{k}",
                       lambda p=p, k=k: bench_lab_vec(env_cls, args.steps, p * k, p)))
+    for cfg in filter(None, args.ppo_lab.split(",")):
+        p, k = (int(x) for x in cfg.split("x"))
+        tests.append((f"ppo_lab_{p}x{k}",
+                      lambda p=p, k=k: bench_ppo_lab(env_cls, p, k)))
     for name, fn in tests:
         if only and name not in only:
             continue
