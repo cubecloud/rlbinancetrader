@@ -19,8 +19,10 @@ import time
 
 import numpy as np
 
-CACHE_DIR = os.path.expanduser("~/Data/rlbinancetrader/state_cache")
-RESULTS = os.path.join(os.path.dirname(__file__), "bench_results.json")
+CACHE_DIR = os.environ.get("RLBENCH_CACHE",
+                           os.path.expanduser("~/Data/rlbinancetrader/state_cache"))
+RESULTS = os.environ.get("RLBENCH_RESULTS",
+                         os.path.join(os.path.dirname(__file__), "bench_results.json"))
 N_ENVS = 8
 
 
@@ -157,7 +159,10 @@ def main():
     ap.add_argument("key")
     ap.add_argument("--steps", type=int, default=200_000)
     ap.add_argument("--ppo-steps", type=int, default=100_000)
+    ap.add_argument("--only", default="",
+                    help="запятая-список тестов (напр. raw_single,ppo_sb3)")
     args = ap.parse_args()
+    only = set(filter(None, args.only.split(",")))
 
     data = load_features(args.key)
     print(f"data: {data.shape} float32 ({data.nbytes / 1e6:.0f}MB)")
@@ -174,6 +179,8 @@ def main():
         ("ppo_sbx", lambda: bench_ppo(env_cls, args.ppo_steps, "sbx")),
     ]
     for name, fn in tests:
+        if only and name not in only:
+            continue
         try:
             sps = fn()
             res[name] = round(sps)
