@@ -64,6 +64,11 @@ def load_bt_df(state_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     df["leg_dn"] = st["leg_dn"].to_numpy().astype(bool)   # каузальный, НЕ пересчитываем
     df["tradeable"] = np.arange(len(df)) >= ROLL_WARMUP_MIN
     df = df.dropna(subset=["raw_buy", "raw_sell"])
+    # коррекция критики №3: пока dropna ничего не выкидывает, позиционный
+    # bar-индекс лога == строке STATE; если это сломается — джойны по bar
+    # недействительны, нужно осознанное решение (джойн по времени)
+    assert len(df) == len(st), \
+        f"dropna удалил {len(st) - len(df)} строк — сверь джойны разметки!"
     return df, st
 
 
@@ -97,11 +102,20 @@ def run_v7(state_path: str, exit_policy=None, collect_expert: bool = False):
         "exit_time": idx[np.minimum(tr["ExitBar"].astype(int).to_numpy(), len(idx) - 1)],
         "return_pct": tr["ReturnPct"].astype(float).to_numpy(),
         "duration_min": (tr["ExitBar"].astype(int) - tr["EntryBar"].astype(int)).to_numpy(),
+        "entry_bar": tr["EntryBar"].astype(int).to_numpy(),
+        "exit_bar": tr["ExitBar"].astype(int).to_numpy(),
+        "entry_price": tr["EntryPrice"].astype(float).to_numpy(),
+        "exit_price": tr["ExitPrice"].astype(float).to_numpy(),
+        "size": tr["Size"].astype(float).to_numpy(),
     })
     expert = None
     if collect_expert:
         expert = pd.DataFrame(log, columns=EXPERT_LOG_COLS)
         expert["time"] = idx[expert["bar"].to_numpy()]
+        # фиксация покрытия лога (коррекция критики №3): движок стартует
+        # с бара 1, лог обязан покрыть все бары без дыр
+        assert int(expert["bar"].min()) == 1 and len(expert) == len(df) - 1, \
+            f"expert log coverage broken: {expert['bar'].min()}..{len(expert)} vs {len(df) - 1}"
     return stats, trades, expert
 
 
@@ -124,6 +138,12 @@ def parity_check(trades: pd.DataFrame, stats, ref_csv: str) -> list[str]:
                         - ref["return_pct"].to_numpy()[:n]).max()) if n else 0.0
     if dret > 1e-9:
         problems.append(f"return_pct: max |diff| {dret:.2e}")
+    for col in ("duration_min", "size"):
+        if col in ref.columns:
+            d = float(np.abs(trades[col].to_numpy()[:n]
+                             - ref[col].to_numpy()[:n]).max()) if n else 0.0
+            if d > 1e-6:
+                problems.append(f"{col}: max |diff| {d:.2e}")
     # Движковые метрики (Return/MaxDD/WinRate) сверяются с ЧИСЛАМИ, которые
     # sunday получил своим прогоном (--expect "162,267.5,-30.1,53.7").
     # Наивный компаунд посделочных return_pct движок НЕ воспроизводит
