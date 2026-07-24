@@ -9,7 +9,7 @@ channels:
 dependencies:
   - pip>=21.0.1
   - setuptools>=51.0.0
-  - numpy>=1.19.2
+  - numpy>=1.19.2,<1.30.0
   - pandas>=1.1.5,<2.0.0
   - python-binance==1.0.19
   - ta-lib>=0.4.19
@@ -27,7 +27,8 @@ dependencies:
   - pytz>=2020.4
   - requests
   - websockets==9.1
-  - psycopg2>=2.9.3
+  - psycopg2>=2.9.3,<3.0.0
+  - asyncpg<=0.31.0
   - apscheduler
   - scipy
   - plotly
@@ -45,15 +46,18 @@ dependencies:
   - tensorboard
   - objsize
   - mplfinance>=0.12.9b7
+  - pyarrow>=15.0.0
+  - pytest>=8.0.0
+  - pytest-cov>=5.0.0
+  - pycodestyle>=2.11.0
   - pip:
       - git+https://github.com/mementum/backtrader.git
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git
-      - git+https://github.com/cubecloud/dbbinance-storage.git
+      - git+https://github.com/cubecloud/dbbinance-storage.git@v1.0.10
       - git+https://github.com/cubecloud/ensembletools.git
       - git+https://github.com/cubecloud/backtesting_optuna.git
       - git+https://github.com/cubecloud/sb3-rllab.git
       - json-numpy
       - backtrader_plotting>=2.0.0
 prefix: /home/cubecloud/anaconda3/envs/rlbinancetrader
-

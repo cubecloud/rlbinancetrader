@@ -49,7 +49,7 @@ dependencies:
       - git+https://github.com/mementum/backtrader.git
       - git+https://github.com/cubecloud/secureapikey.git
       - git+https://github.com/cubecloud/mlthread-tools.git
-      - git+https://github.com/cubecloud/dbbinance-storage.git
+      - git+https://github.com/cubecloud/dbbinance-storage.git@v1.0.10
       - git+https://github.com/cubecloud/ensembletools.git
       - git+https://github.com/cubecloud/backtesting_optuna.git
       - git+https://github.com/cubecloud/sb3-rllab.git
