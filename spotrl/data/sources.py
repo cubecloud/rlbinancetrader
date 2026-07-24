@@ -3,20 +3,22 @@
 Два источника за одним интерфейсом :class:`DataSource` отдают ОДИНАКОВЫЙ
 плотный numpy-результат :class:`WindowData` на окне ``[start, end]``.
 
-Разделение источников (принцип П1: источник истины — база, parquet — ускоритель):
+Ключевая идея (уточнение пользователя 2026-07-25): набор колонок — ПАРАМЕТР
+источника, а не хардкод. База содержит все нужные СЫРЫЕ колонки; их надо просто
+запросить. Производные признаки стратегии v7 (q_buy/q_sell/regime_code/leg_dn) —
+НЕ сырьё, их в базе нет и не должно быть: они нужны только на этапе копирования
+v7 и приходят из parquet-снимка.
 
-* :class:`ParquetSource` — обёртка над :mod:`spotrl.data.state_dataset`.
-  Отдаёт OHLCV И предвычисленные признаки (q_buy/q_sell/regime_code/leg_dn),
-  потому что снимок собран билдером sunday (``state_v0_builder.py``).
-  Не импортирует ``dbbinance`` — работает вообще без базы.
-* :class:`PgSource` — база через ``dbbinance-storage``. Отдаёт ТОЛЬКО сырой
-  OHLCV: сигнальные признаки в сырой базе отсутствуют, их считает билдер
-  стратегии. Импорт ``dbbinance`` — ЛЕНИВЫЙ, внутри метода, чтобы импорт
-  этого модуля не дёргал ``secureapikey`` (интерактивный SALT-ввод повесил бы
-  headless-прогон, см. handoff/for_sunday_dbbinance_1_0_10).
+* :class:`PgSource` — база через ``dbbinance-storage``. По умолчанию отдаёт
+  расширенный набор Binance-kline (OHLCV + поток ордеров) через
+  ``use_extended_cols=True``; можно задать явный ``columns``. Импорт
+  ``dbbinance`` — ЛЕНИВЫЙ, ключи PG грузятся из ``sunday/*.env`` перед импортом,
+  чтобы ``secureapikey`` не требовал интерактивного SALT-ввода (headless).
+* :class:`ParquetSource` — обёртка над снимком: отдаёт любые колонки, что в нём
+  есть (включая v7-производные). Не импортирует ``dbbinance``.
 
-Гейт эквивалентности :func:`ohlcv_bitwise_gate` сравнивает OHLCV двух
-источников на общем окне ПОБИТОВО (порог — ноль различающихся элементов).
+Гейт эквивалентности :func:`bitwise_gate` сравнивает ПЕРЕСЕЧЕНИЕ колонок двух
+источников по имени, побитово (порог — ноль различающихся элементов).
 """
 from __future__ import annotations
 
@@ -24,57 +26,60 @@ import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
-from spotrl.data.state_dataset import (REQUIRED_COLUMNS, StateDataset,
-                                       from_frame, load_state)
+from spotrl.data.state_dataset import StateDataset
 
 # Параметры чтения OHLCV, ТОЧНО как в билдере снимка
 # (sunday/tooling/audit/state_v0_builder.py:79-85). Любое расхождение здесь
-# ломает побитовую эквивалентность OHLCV, поэтому значения зафиксированы.
+# ломает побитовую эквивалентность, поэтому значения зафиксированы.
 PG_TABLE = "spot_data_btcusdt_1m"
 PG_TIMEFRAME = "1m"
 PG_ORIGIN = "start"
 
-# Каталог с *.env-ключами PostgreSQL (проект sunday). Внутри — SALT-фраза и
-# зашифрованные логин/пароль; их значения НИКОГДА не логируются. Путь можно
-# переопределить переменной окружения SPOTRL_PG_ENV_DIR или параметром PgSource.
+# Каталог с *.env-ключами PostgreSQL (проект sunday). Значения ключей НИКОГДА не
+# логируются. Путь переопределяется параметром PgSource или $SPOTRL_PG_ENV_DIR.
 DEFAULT_PG_ENV_DIR = "~/Python/projects/sunday"
 PG_ENV_FILES = ("PSGSQL_KEY.env", "PSGSQLKEYS.env")
 
-_OHLCV_NAMES = ("open", "high", "low", "close", "volume")
+# Наборы колонок.
+OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
+# Расширенный kline из базы (Constants.binance_extended_cols без open_time):
+# OHLCV + поток ордеров / микроструктура. Это то, что реально есть в PG.
+PG_EXTENDED_COLUMNS = OHLCV_COLUMNS + (
+    "quote_asset_volume", "trades", "taker_buy_base", "taker_buy_quote")
+# Производные признаки стратегии v7 (только в снимке, в сырой базе их НЕТ).
+V7_FEATURE_COLUMNS = ("q_buy", "q_sell", "regime_code", "leg_dn")
+# Полный state-набор снимка sunday (нужен пути копирования v7 и StateDataset).
+SUNDAY_STATE_COLUMNS = OHLCV_COLUMNS + V7_FEATURE_COLUMNS
 
-# Идентификатор билдера признаков снимка (sunday state_v0_builder). У билдера нет
-# __version__; фиксируем строкой — попадает в манифест прогона (требование 4).
+# Идентификатор билдера признаков снимка. У билдера нет __version__; фиксируем
+# строкой — попадает в манифест прогона (требование 4).
 FEATURE_BUILDER_VERSION = "state_v0"
 
 
 @dataclass(frozen=True)
 class WindowData:
-    """Плотный результат чтения окна одним источником.
+    """Плотный результат чтения окна одним источником — именованная матрица.
 
     Индекс — tz-naive UTC (как в снимке: билдер делает
-    ``tz_convert("UTC").tz_localize(None)``). OHLCV присутствует всегда;
-    признаки могут отсутствовать (``None``), если источник их не отдаёт.
+    ``tz_convert("UTC").tz_localize(None)``). Колонки хранятся по именам; форма
+    источника (sunday vs сырьё) не зашита в поля.
 
     Attributes:
         index: моменты баров, tz-naive UTC, строго возрастающие.
-        ohlcv: массив (n, 5) float64 — open, high, low, close, volume.
-        signals: массив (n, 2) float64 (q_buy, q_sell) либо ``None``.
-        regime_code: массив (n,) int32 либо ``None``.
-        leg_dn: массив (n,) bool либо ``None``.
+        columns: имена колонок в порядке столбцов ``data``.
+        data: массив (n, k) float64 — значения колонок.
         source: человекочитаемое имя источника (для манифеста).
         meta: параметры чтения (таблица, окно, версии) для манифеста.
     """
 
     index: pd.DatetimeIndex
-    ohlcv: np.ndarray
-    signals: Optional[np.ndarray]
-    regime_code: Optional[np.ndarray]
-    leg_dn: Optional[np.ndarray]
+    columns: tuple
+    data: np.ndarray
     source: str
     meta: dict = field(default_factory=dict)
 
@@ -82,28 +87,56 @@ class WindowData:
         """Число баров в окне."""
         return len(self.index)
 
-    def has_features(self) -> bool:
-        """Есть ли сигнальные признаки (True только у полного снимка)."""
-        return self.signals is not None
+    def has(self, name: str) -> bool:
+        """Есть ли колонка ``name``."""
+        return name in self.columns
 
-    def ohlcv_hash(self) -> str:
-        """sha256 массива OHLCV — для манифеста и быстрого сравнения окон."""
-        return hashlib.sha256(np.ascontiguousarray(self.ohlcv)).hexdigest()
-
-    def to_state_dataset(self) -> StateDataset:
-        """Собрать :class:`StateDataset` для среды.
+    def column(self, name: str) -> np.ndarray:
+        """Одна колонка по имени, массив (n,).
 
         Raises:
-            ValueError: если признаки отсутствуют (сырой PG без билдера).
+            KeyError: если колонки нет в источнике.
+        """
+        if name not in self.columns:
+            raise KeyError(f"нет колонки {name!r}; есть: {self.columns}")
+        return self.data[:, self.columns.index(name)]
+
+    def select(self, names: Sequence[str]) -> np.ndarray:
+        """Подматрица (n, len(names)) в порядке ``names``."""
+        idx = [self.columns.index(n) for n in names]
+        return self.data[:, idx]
+
+    @property
+    def ohlcv(self) -> np.ndarray:
+        """Удобный срез (n, 5): open, high, low, close, volume."""
+        return self.select(OHLCV_COLUMNS)
+
+    def has_features(self) -> bool:
+        """Есть ли ВСЕ производные признаки v7 (True только у полного снимка)."""
+        return all(self.has(c) for c in V7_FEATURE_COLUMNS)
+
+    def data_hash(self) -> str:
+        """sha256 матрицы данных — для манифеста и быстрого сравнения окон."""
+        return hashlib.sha256(np.ascontiguousarray(self.data)).hexdigest()
+
+    def to_state_dataset(self) -> StateDataset:
+        """Собрать :class:`StateDataset` для среды (путь копирования v7).
+
+        Требует полный state-набор снимка (OHLCV + v7-признаки).
+
+        Raises:
+            ValueError: если производных признаков нет (сырой PG).
         """
         if not self.has_features():
             raise ValueError(
-                "источник отдал только OHLCV без сигнальных признаков "
-                "(q_buy/q_sell/regime_code/leg_dn); для среды нужен снимок "
-                "или прогон билдера признаков поверх OHLCV")
-        return StateDataset(index=self.index, ohlcv=self.ohlcv,
-                            signals=self.signals, regime_code=self.regime_code,
-                            leg_dn=self.leg_dn, source=self.source)
+                "источник без производных признаков v7 "
+                "(q_buy/q_sell/regime_code/leg_dn); StateDataset для среды "
+                "строится только из снимка state_v0, а не из сырой базы")
+        signals = np.column_stack([self.column("q_buy"), self.column("q_sell")])
+        return StateDataset(
+            index=self.index, ohlcv=self.ohlcv, signals=signals,
+            regime_code=self.column("regime_code").astype(np.int32),
+            leg_dn=self.column("leg_dn").astype(bool), source=self.source)
 
 
 class DataSource(ABC):
@@ -130,60 +163,80 @@ def _as_naive_utc(ts) -> pd.Timestamp:
 
 
 class ParquetSource(DataSource):
-    """Источник поверх parquet-снимка (обучение, воспроизводимость)."""
+    """Источник поверх parquet-снимка (обучение, воспроизводимость).
+
+    Args:
+        path: путь к parquet каузального state (снимок билдера).
+        columns: какие колонки отдавать; по умолчанию полный state-набор
+            снимка (OHLCV + производные v7).
+    """
 
     name = "parquet"
 
-    def __init__(self, path: str | Path):
-        """Args: path — путь к parquet каузального state (снимок билдера)."""
+    def __init__(self, path: str | Path,
+                 columns: Sequence[str] = SUNDAY_STATE_COLUMNS):
+        """См. docstring класса."""
         self._path = str(Path(path).expanduser())
-        self._state: Optional[StateDataset] = None
+        self._columns = tuple(columns)
+        self._frame: Optional[pd.DataFrame] = None
 
-    def _load(self) -> StateDataset:
-        if self._state is None:
-            self._state = load_state(self._path)
-        return self._state
+    def _load(self) -> pd.DataFrame:
+        if self._frame is None:
+            frame = pd.read_parquet(self._path)
+            idx = pd.DatetimeIndex(frame.index)
+            if not idx.is_monotonic_increasing:
+                raise ValueError("индекс снимка должен возрастать по времени")
+            missing = [c for c in self._columns if c not in frame.columns]
+            if missing:
+                raise KeyError(f"в снимке нет запрошенных колонок: {missing}")
+            self._frame = frame
+        return self._frame
 
     def load_window(self, start, end) -> WindowData:
-        """Срез снимка на окне; признаки отдаются полностью."""
-        st = self._load()
+        """Срез снимка на окне; отдаются запрошенные колонки."""
+        frame = self._load()
         lo, hi = _as_naive_utc(start), _as_naive_utc(end)
-        idx = pd.DatetimeIndex(st.index)
-        mask = (idx >= lo) & (idx <= hi)
-        pos = np.flatnonzero(mask)
+        idx = pd.DatetimeIndex(frame.index)
+        pos = np.flatnonzero((idx >= lo) & (idx <= hi))
+        data = np.column_stack([
+            frame[c].to_numpy(dtype=np.float64)[pos] for c in self._columns])
         meta = {"source_kind": "parquet", "path": self._path,
-                "window_start": str(lo), "window_end": str(hi),
-                "n_bars": int(pos.size)}
-        return WindowData(
-            index=idx[pos], ohlcv=st.ohlcv[pos], signals=st.signals[pos],
-            regime_code=st.regime_code[pos], leg_dn=st.leg_dn[pos],
-            source=self._path, meta=meta)
+                "columns": list(self._columns), "window_start": str(lo),
+                "window_end": str(hi), "n_bars": int(pos.size)}
+        return WindowData(index=idx[pos], columns=self._columns, data=data,
+                          source=self._path, meta=meta)
 
 
 class PgSource(DataSource):
     """Источник поверх PostgreSQL через ``dbbinance-storage`` (paper/live).
 
-    Отдаёт ТОЛЬКО сырой OHLCV. Импорт ``dbbinance`` ленивый: он тянет
-    ``secureapikey`` (интерактивный SALT-ввод), поэтому происходит внутри
-    :meth:`_get_fetcher`, а не на уровне модуля.
+    По умолчанию отдаёт расширенный kline (OHLCV + поток ордеров) через
+    ``use_extended_cols=True``. Импорт ``dbbinance`` ленивый; ключи PG грузятся
+    из ``sunday/*.env`` до импорта, поэтому интерактивного SALT-ввода нет.
+
+    Args:
+        table_name: имя таблицы 1m-баров в базе.
+        timeframe: целевой таймфрейм ресемпла (снимок собран на ``1m``).
+        columns: явный набор колонок; если задан — ``use_extended_cols=False``
+            и запрашиваются именно эти колонки. Если ``None`` — берётся
+            расширенный набор (:data:`PG_EXTENDED_COLUMNS`).
+        fetcher: готовый DataFetcher (для тестов/инъекции); если ``None`` —
+            создаётся лениво через ``dbbinance`` при первом чтении.
+        env_dir: каталог с ``*.env``-ключами PG.
     """
 
     name = "pg"
 
     def __init__(self, table_name: str = PG_TABLE, timeframe: str = PG_TIMEFRAME,
-                 fetcher=None, env_dir: Optional[str] = None):
-        """Args:
-
-        table_name: имя таблицы 1m-баров в базе.
-        timeframe: целевой таймфрейм ресемпла (снимок собран на ``1m``).
-        fetcher: уже готовый объект DataFetcher (для тестов/инъекции); если
-            ``None`` — создаётся лениво через ``dbbinance`` при первом чтении.
-        env_dir: каталог с ``*.env``-ключами PG; по умолчанию
-            ``$SPOTRL_PG_ENV_DIR`` или :data:`DEFAULT_PG_ENV_DIR`.
-        """
+                 columns: Optional[Sequence[str]] = None, fetcher=None,
+                 env_dir: Optional[str] = None):
+        """См. docstring класса."""
         import os
         self._table = table_name
         self._timeframe = timeframe
+        self._extended = columns is None
+        self._columns = (PG_EXTENDED_COLUMNS if columns is None
+                         else tuple(columns))
         self._fetcher = fetcher
         self._injected = fetcher is not None
         self._env_dir = (env_dir or os.getenv("SPOTRL_PG_ENV_DIR")
@@ -192,15 +245,13 @@ class PgSource(DataSource):
     def _load_secrets(self) -> None:
         """Загрузить ключи PG из ``*.env`` в окружение ДО импорта dbbinance.
 
-        Так ``secureapikey`` расшифровывает доступ без интерактивного SALT-ввода.
         Значения ключей не логируются. Отсутствие файлов не ошибка — тогда
         сработает штатный путь dbbinance (env/интерактив).
         """
-        import os
         from dotenv import load_dotenv
         base = Path(self._env_dir).expanduser()
-        for name in PG_ENV_FILES:
-            path = base / name
+        for fname in PG_ENV_FILES:
+            path = base / fname
             if path.exists():
                 load_dotenv(str(path), override=False)
 
@@ -212,28 +263,20 @@ class PgSource(DataSource):
             self._fetcher = get_datafetcher()
         return self._fetcher
 
-    def _use_cols(self):
-        """Колонки/типы билдера; импорт констант ленивый."""
-        from dbbinance.fetcher.constants import Constants
-        return Constants.binance_extended_cols, Constants.binance_extended_dtypes
-
     def _fetch_raw(self, start, end, last_full_bar: bool) -> pd.DataFrame:
         """Ресемпл базы теми же параметрами, что и билдер снимка."""
         fetcher = self._get_fetcher()
-        # Константы dbbinance берём ТОЛЬКО на реальном пути: их импорт тянет
-        # пакет dbbinance.fetcher (SALT-ввод). При инъекции fetcher (тесты)
-        # не импортируем ничего из dbbinance.
-        if self._injected:
-            use_cols, use_dtypes = None, None
-        else:
-            use_cols, use_dtypes = self._use_cols()
         kwargs = dict(table_name=self._table,
                       start=_as_naive_utc(start).to_pydatetime(),
                       end=_as_naive_utc(end).to_pydatetime(),
                       to_timeframe=self._timeframe, origin=PG_ORIGIN,
                       open_time_index=True, last_full_bar=last_full_bar)
-        if use_cols is not None:
-            kwargs.update(use_cols=use_cols, use_dtypes=use_dtypes)
+        if self._extended:
+            # На реальном пути указываем extended-набор колонок базы.
+            if not self._injected:
+                kwargs.update(use_extended_cols=True)
+        else:
+            kwargs.update(use_cols=("open_time",) + self._columns)
         return fetcher.pg_resample_to_timeframe(**kwargs)
 
     @staticmethod
@@ -248,7 +291,7 @@ class PgSource(DataSource):
         return df
 
     def load_window(self, start, end, last_full_bar: bool = True) -> WindowData:
-        """Прочитать окно ``[start, end]``; отдаётся только OHLCV.
+        """Прочитать окно ``[start, end]``; отдаются выбранные колонки.
 
         ``last_full_bar=True`` (по умолчанию) отбрасывает неполный последний бар
         живого края — гарантия «последнего ЗАКРЫТОГО бара» (П7, NaT-guard).
@@ -256,16 +299,22 @@ class PgSource(DataSource):
         df = self._normalize(self._fetch_raw(start, end, last_full_bar))
         lo, hi = _as_naive_utc(start), _as_naive_utc(end)
         df = df[(df.index >= lo) & (df.index <= hi)]
-        if df[list(_OHLCV_NAMES)].isna().to_numpy().any():
-            raise ValueError("PgSource: NaN в OHLCV окна (пропуск баров в базе)")
-        ohlcv = np.column_stack([df[c].to_numpy(dtype=np.float64)
-                                 for c in _OHLCV_NAMES])
+        cols = [c for c in self._columns if c in df.columns]
+        if not cols:
+            raise ValueError(
+                f"база не вернула ни одной запрошенной колонки: {self._columns}")
+        block = df[cols]
+        if block.isna().to_numpy().any():
+            raise ValueError("PgSource: NaN в данных окна (пропуск баров в базе)")
+        data = np.column_stack([block[c].to_numpy(dtype=np.float64)
+                                for c in cols])
         meta = {"source_kind": "pg", "table": self._table,
                 "timeframe": self._timeframe, "origin": PG_ORIGIN,
+                "use_extended_cols": self._extended, "columns": cols,
                 "last_full_bar": last_full_bar, "window_start": str(lo),
                 "window_end": str(hi), "n_bars": int(len(df))}
-        return WindowData(index=pd.DatetimeIndex(df.index), ohlcv=ohlcv,
-                          signals=None, regime_code=None, leg_dn=None,
+        return WindowData(index=pd.DatetimeIndex(df.index),
+                          columns=tuple(cols), data=data,
                           source=f"pg://{self._table}", meta=meta)
 
     def load_latest_closed(self, now, lookback_bars: int,
@@ -287,86 +336,91 @@ class PgSource(DataSource):
             f"(метка+{freq} > now)")
         keep = min(lookback_bars, len(win))
         sl = slice(len(win) - keep, len(win))
-        return WindowData(index=win.index[sl], ohlcv=win.ohlcv[sl],
-                          signals=None, regime_code=None, leg_dn=None,
-                          source=win.source, meta={**win.meta, "n_bars": keep})
+        return WindowData(index=win.index[sl], columns=win.columns,
+                          data=win.data[sl], source=win.source,
+                          meta={**win.meta, "n_bars": keep})
 
 
 @dataclass(frozen=True)
 class GateResult:
-    """Результат побитового гейта OHLCV двух источников.
+    """Результат побитового гейта двух источников по общим колонкам.
 
     Attributes:
-        n_bars: число сравнённых баров (после выравнивания индекса).
-        index_equal: совпал ли индекс побитово.
-        diff_elements: число различающихся элементов OHLCV (гейт: 0).
-        max_abs_diff: максимум |a-b| по OHLCV (диагностика dtype).
-        per_column: число различий по каждой колонке.
-        first_mismatch: (row, col, a, b) первого расхождения либо ``None``.
-        features_reproducible: список признаков, воспроизводимых из сырого PG.
-        features_missing: список признаков, которых в сыром PG нет.
+        n_bars: число сравнённых баров (пересечение меток).
+        index_equal: совпал ли индекс полностью (строгая сверка).
+        columns_compared: колонки, сравнённые по имени (пересечение).
+        columns_only_a: колонки только у первого источника.
+        columns_only_b: колонки только у второго источника.
+        diff_elements: число различающихся элементов (гейт: 0).
+        max_abs_diff: максимум |a-b| по общим колонкам (диагностика dtype).
+        per_column: число различий по каждой сравнённой колонке.
+        first_mismatch: (row, column, a, b) первого расхождения либо ``None``.
+        n_only_a: бары только у первого источника (эффект last_full_bar).
+        n_only_b: бары только у второго источника.
     """
 
     n_bars: int
     index_equal: bool
+    columns_compared: tuple
+    columns_only_a: tuple
+    columns_only_b: tuple
     diff_elements: int
     max_abs_diff: float
     per_column: dict
     first_mismatch: Optional[tuple]
-    features_reproducible: tuple
-    features_missing: tuple
     n_only_a: int = 0
     n_only_b: int = 0
 
     @property
     def passed(self) -> bool:
-        """Гейт пройден: есть общие бары и ноль различий OHLCV на пересечении.
+        """Гейт пройден: есть общие бары И колонки И ноль различий значений.
 
-        Граничные бары, присутствующие только у одного источника (эффект
-        ``last_full_bar`` на живом крае), гейт OHLCV не проваливают — они
-        учтены в ``n_only_a``/``n_only_b`` как диагностика, а не как расхождение
-        значений.
+        Граничные бары, уникальные для одного источника (эффект
+        ``last_full_bar``), гейт не проваливают — они в ``n_only_*``.
         """
-        return self.n_bars > 0 and self.diff_elements == 0
+        return (self.n_bars > 0 and len(self.columns_compared) > 0
+                and self.diff_elements == 0)
 
 
-# Признаки снимка: OHLCV воспроизводимы из сырого PG побитово; сигнальные —
-# нет (их считает билдер стратегии, в сырой базе их не существует).
-_FEATURES_REPRODUCIBLE = _OHLCV_NAMES
-_FEATURES_MISSING = tuple(c for c in REQUIRED_COLUMNS if c not in _OHLCV_NAMES)
+def bitwise_gate(a: WindowData, b: WindowData) -> GateResult:
+    """Сравнить два окна ПОБИТОВО на ПЕРЕСЕЧЕНИИ колонок (train/serve-гейт).
 
-
-def ohlcv_bitwise_gate(a: WindowData, b: WindowData) -> GateResult:
-    """Сравнить OHLCV двух окон ПОБИТОВО (гейт train/serve-эквивалентности).
-
-    Сначала выравнивается индекс (assert равенства как первая линия обороны):
-    рассинхрон окна/таймзоны должен падать громко, а не выглядеть «шумом».
-    Затем OHLCV сравнивается элемент-в-элемент; порог — ноль различий.
+    Сравниваются только колонки с общим именем и только на пересечении меток:
+    рассинхрон края (``last_full_bar``) или разный набор колонок не должны
+    маскироваться под расхождение значений. Порог по значениям — ноль различий.
     """
     ia, ib = pd.DatetimeIndex(a.index), pd.DatetimeIndex(b.index)
     index_equal = ia.equals(ib)
-    # Сравниваем на ПЕРЕСЕЧЕНИИ меток: рассинхрон края (last_full_bar) не должен
-    # маскироваться под расхождение значений. Бары, уникальные для одной
-    # стороны, идут в n_only_* как диагностика.
-    common = ia.intersection(ib)
-    pa = ia.get_indexer(common)
-    pb = ib.get_indexer(common)
-    n = len(common)
-    xa, xb = a.ohlcv[pa], b.ohlcv[pb]
-    neq = xa != xb
-    diff_elements = int(neq.sum())
-    max_abs = float(np.max(np.abs(xa - xb))) if n else 0.0
-    per_col = {name: int(neq[:, j].sum()) for j, name in enumerate(_OHLCV_NAMES)}
+    common_cols = tuple(c for c in a.columns if c in b.columns)
+    only_a_cols = tuple(c for c in a.columns if c not in b.columns)
+    only_b_cols = tuple(c for c in b.columns if c not in a.columns)
+
+    common_idx = ia.intersection(ib)
+    pa = ia.get_indexer(common_idx)
+    pb = ib.get_indexer(common_idx)
+    n = len(common_idx)
+
+    per_col: dict = {}
+    diff_elements = 0
+    max_abs = 0.0
     first = None
-    if diff_elements:
-        r, c = (int(x) for x in np.argwhere(neq)[0])
-        first = (r, _OHLCV_NAMES[c], float(xa[r, c]), float(xb[r, c]))
+    for name in common_cols:
+        xa = a.data[pa, a.columns.index(name)]
+        xb = b.data[pb, b.columns.index(name)]
+        neq = xa != xb
+        c = int(neq.sum())
+        per_col[name] = c
+        diff_elements += c
+        if n:
+            max_abs = max(max_abs, float(np.max(np.abs(xa - xb))))
+        if c and first is None:
+            r = int(np.argmax(neq))
+            first = (r, name, float(xa[r]), float(xb[r]))
     return GateResult(
-        n_bars=n, index_equal=index_equal, diff_elements=diff_elements,
-        max_abs_diff=max_abs, per_column=per_col, first_mismatch=first,
-        features_reproducible=_FEATURES_REPRODUCIBLE,
-        features_missing=_FEATURES_MISSING,
-        n_only_a=int(len(ia.difference(ib))),
+        n_bars=n, index_equal=index_equal, columns_compared=common_cols,
+        columns_only_a=only_a_cols, columns_only_b=only_b_cols,
+        diff_elements=diff_elements, max_abs_diff=max_abs, per_column=per_col,
+        first_mismatch=first, n_only_a=int(len(ia.difference(ib))),
         n_only_b=int(len(ib.difference(ia))))
 
 
@@ -386,11 +440,11 @@ def dbbinance_version() -> str:
 def source_manifest(win: WindowData) -> dict:
     """Паспорт источника окна для манифеста прогона.
 
-    Включает версию dbbinance, параметры чтения, границы окна и хэш OHLCV.
+    Включает версию dbbinance, версию билдера признаков, список выбранных
+    колонок и их источник, параметры чтения, границы окна и хэш данных.
     """
-    return {"source": win.source, "has_features": win.has_features(),
-            "n_bars": len(win), "ohlcv_sha256": win.ohlcv_hash(),
+    return {"source": win.source, "columns": list(win.columns),
+            "has_v7_features": win.has_features(), "n_bars": len(win),
+            "data_sha256": win.data_hash(),
             "dbbinance_version": dbbinance_version(),
-            "feature_builder_version": FEATURE_BUILDER_VERSION,
-            "features_missing_in_raw_pg": list(_FEATURES_MISSING),
-            **win.meta}
+            "feature_builder_version": FEATURE_BUILDER_VERSION, **win.meta}
