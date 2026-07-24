@@ -192,6 +192,26 @@ class ParquetSource(DataSource):
             self._frame = frame
         return self._frame
 
+    def cache_key_fields(self) -> dict:
+        """Идентифицирующие параметры источника для ключа кэша (без окна).
+
+        Для снимка добавляем ``st_mtime``+``size`` файла: если снимок
+        пересоберут по тому же ``path`` без смены версии билдера, ключ всё
+        равно изменится и устаревший кэш промахнётся (закрытие «тихой дыры»
+        ручной версии билдера).
+        """
+        import os
+        try:
+            stat = os.stat(self._path)
+            file_sig = {"st_size": int(stat.st_size),
+                        "st_mtime_ns": int(stat.st_mtime_ns)}
+        except OSError:
+            file_sig = {"st_size": None, "st_mtime_ns": None}
+        return {"source_kind": "parquet", "path": self._path,
+                "columns": list(self._columns), "timeframe": None,
+                "origin": None, "extended": None, "last_full_bar": None,
+                **file_sig}
+
     def load_window(self, start, end) -> WindowData:
         """Срез снимка на окне; отдаются запрошенные колонки."""
         frame = self._load()
@@ -241,6 +261,20 @@ class PgSource(DataSource):
         self._injected = fetcher is not None
         self._env_dir = (env_dir or os.getenv("SPOTRL_PG_ENV_DIR")
                          or DEFAULT_PG_ENV_DIR)
+
+    def cache_key_fields(self) -> dict:
+        """Идентифицирующие параметры источника для ключа кэша (без окна).
+
+        ``last_full_bar`` НЕ входит сюда — он параметр вызова ``load_window`` и
+        добавляется в ключ кэшем отдельно (меняет набор баров). Версия данных
+        базы аппроксимируется ``dbbinance_version()`` (единственный доступный
+        прокси; задокументированное ограничение — ревизия строк в самой базе
+        без смены версии пакета кэшем не отлавливается).
+        """
+        return {"source_kind": "pg", "table": self._table,
+                "columns": list(self._columns), "timeframe": self._timeframe,
+                "origin": PG_ORIGIN, "extended": bool(self._extended),
+                "path": None}
 
     def _load_secrets(self) -> None:
         """Загрузить ключи PG из ``*.env`` в окружение ДО импорта dbbinance.

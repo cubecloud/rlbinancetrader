@@ -1,0 +1,158 @@
+[
+  {
+    "epoch": "A_2024-26",
+    "anchor_inflated": true,
+    "base": {
+      "n_trades": 162,
+      "return_pct": 267.46307708890333,
+      "n_dip": 146,
+      "n_dip_sl": 9,
+      "parity": {
+        "n_ours": 162,
+        "n_ref": 162,
+        "entry_mismatch": 0
+      }
+    },
+    "frozen": {
+      "reserve_total_pp": 292.69634008532,
+      "reserve_per_dip_pct": 2.004769452639178,
+      "by_reason_pp": {
+        "legflip": 125.26195252730342,
+        "signal": 93.8962238539401,
+        "sl": 73.53816370407642,
+        "tp": 0.0
+      },
+      "component_b_sum_pp": 73.53816370407642,
+      "component_b_per_dip_pct": 0.5036860527676468,
+      "component_b_per_sl_pct": 8.170907078230714,
+      "tails": {
+        "leave_top_k": {
+          "leave_top_1": 282.2310300202035,
+          "leave_top_1_frac_kept": 0.9642451625392175,
+          "leave_top_2": 273.2438589147496,
+          "leave_top_2_frac_kept": 0.9335404017525464,
+          "leave_top_3": 264.55711904692976,
+          "leave_top_3_frac_kept": 0.9038620673214166
+        },
+        "tail_capture_ratio": 0.9658848084467557,
+        "n_tp": 2,
+        "tp_preserved_frac": 1.0,
+        "reserve_total_pp": 292.69634008532,
+        "ideal_high_pp": 303.0344172779842
+      },
+      "new_cooldowns": 126,
+      "sl_bucket_fragility": {
+        "n_sl": 9,
+        "sl_sum_pp": 73.53816370407644,
+        "dead_line_pp": 73.0,
+        "margin_pp": 0.5381637040764389,
+        "verdict_base": "ALIVE",
+        "drops_to_dead": 1,
+        "dead_after_dropping_one": true
+      }
+    },
+    "engine": {
+      "return_v7_pct": 267.46307708890333,
+      "return_oracle_cd_pct": 3069.0439430929205,
+      "return_oracle_nocd_pct": 2071.6009818200164,
+      "reserve_b_cd_pp": 2801.580866004017,
+      "reserve_b_nocd_pp": 1804.137904731113,
+      "cooldown_price_pp_compound": -997.4429612729041,
+      "cooldown_share_of_reserve_b_compound": -0.5528640347598939,
+      "compound_note": "компаунд движка с предвидением взрывается и path-chaotic; НЕ основа вердикта, только справка",
+      "sum_return_pct_v7": 143.32837800060133,
+      "sum_return_pct_oracle_cd": 361.22058980565885,
+      "sum_return_pct_oracle_nocd": 324.41949634080396,
+      "cooldown_price_pp_sumspace": -36.80109346485489,
+      "cooldown_share_of_component_b_sumspace": -0.500435306121397,
+      "n_trades_v7": 162,
+      "n_trades_oracle_cd": 209,
+      "n_trades_oracle_nocd": 233
+    },
+    "gate_pending_approval": {
+      "gate_b_threshold_pct_per_trade": 0.5,
+      "component_b_per_dip_pct": 0.5036860527676468,
+      "verdict_if_denominator_n_dip": "ALIVE",
+      "cooldown_escalate_threshold_frac": 0.5,
+      "cooldown_escalate": false
+    }
+  },
+  {
+    "epoch": "B_2021-24",
+    "anchor_inflated": false,
+    "base": {
+      "n_trades": 272,
+      "return_pct": 98.11089866320424,
+      "n_dip": 245,
+      "n_dip_sl": 37,
+      "parity": {
+        "n_ours": 272,
+        "n_ref": 272,
+        "entry_mismatch": 0
+      }
+    },
+    "frozen": {
+      "reserve_total_pp": 628.0233367246765,
+      "reserve_per_dip_pct": 2.563360558059904,
+      "by_reason_pp": {
+        "legflip": 183.16267349170826,
+        "signal": 130.45998776830658,
+        "sl": 314.4006754646617,
+        "tp": 0.0
+      },
+      "component_b_sum_pp": 314.4006754646617,
+      "component_b_per_dip_pct": 1.283268063121068,
+      "component_b_per_sl_pct": 8.497315553098964,
+      "tails": {
+        "leave_top_k": {
+          "leave_top_1": 615.016933129968,
+          "leave_top_1_frac_kept": 0.9792899358445172,
+          "leave_top_2": 602.1474711895808,
+          "leave_top_2_frac_kept": 0.9587979235452525,
+          "leave_top_3": 589.9389712705981,
+          "leave_top_3_frac_kept": 0.9393583594318337
+        },
+        "tail_capture_ratio": 0.9603215557729062,
+        "n_tp": 10,
+        "tp_preserved_frac": 1.0,
+        "reserve_total_pp": 628.0233367246765,
+        "ideal_high_pp": 653.971925288314
+      },
+      "new_cooldowns": 169,
+      "sl_bucket_fragility": {
+        "n_sl": 37,
+        "sl_sum_pp": 314.4006754646617,
+        "dead_line_pp": 122.5,
+        "margin_pp": 191.90067546466167,
+        "verdict_base": "ALIVE",
+        "drops_to_dead": 20,
+        "dead_after_dropping_one": false
+      }
+    },
+    "engine": {
+      "return_v7_pct": 98.11089866320424,
+      "return_oracle_cd_pct": 22690.770499971357,
+      "return_oracle_nocd_pct": 4298.87800971336,
+      "reserve_b_cd_pp": 22592.659601308154,
+      "reserve_b_nocd_pp": 4200.767111050156,
+      "cooldown_price_pp_compound": -18391.892490257997,
+      "cooldown_share_of_reserve_b_compound": -4.3782223589301,
+      "compound_note": "компаунд движка с предвидением взрывается и path-chaotic; НЕ основа вердикта, только справка",
+      "sum_return_pct_v7": 102.32956122827856,
+      "sum_return_pct_oracle_cd": 579.2874303555965,
+      "sum_return_pct_oracle_nocd": 422.0188689722482,
+      "cooldown_price_pp_sumspace": -157.2685613833483,
+      "cooldown_share_of_component_b_sumspace": -0.5002169958792761,
+      "n_trades_v7": 272,
+      "n_trades_oracle_cd": 370,
+      "n_trades_oracle_nocd": 432
+    },
+    "gate_pending_approval": {
+      "gate_b_threshold_pct_per_trade": 0.5,
+      "component_b_per_dip_pct": 1.283268063121068,
+      "verdict_if_denominator_n_dip": "ALIVE",
+      "cooldown_escalate_threshold_frac": 0.5,
+      "cooldown_escalate": false
+    }
+  }
+]
