@@ -46,7 +46,7 @@ class WorldState:
     Attributes:
         data_age_bars: возраст последнего бара в барах (в backtest = 1).
         breaker_armed: circuit breaker сработал и вход запрещён.
-        equity_drawdown: текущая просадка эквити от пика, доля.
+        equity_drawdown: текущая просадка эквити от пика, доля (equity/пик − 1, ≤0).
     """
 
     data_age_bars: int = 1
@@ -132,7 +132,7 @@ def write_observation(out: np.ndarray, market_row: np.ndarray, in_position: floa
         dist_to_tp: расстояние до тейка в долях цены.
         data_age: возраст последнего бара в барах.
         breaker: 1.0 если circuit breaker сработал.
-        drawdown: просадка эквити от пика, доля.
+        drawdown: просадка эквити от пика, доля (equity/пик − 1, ≤0).
         layout: числовые смещения блоков.
         write_reserved: писать ли слоты-заглушки. Их значение — константа
             `RESERVED_SLOT_VALUE`, поэтому в постоянном буфере среды они

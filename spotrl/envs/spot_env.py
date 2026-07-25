@@ -184,7 +184,9 @@ class SpotFlipEnv(gym.Env):
 
         if equity > self._peak_equity:
             self._peak_equity = equity
-        drawdown = 1.0 - equity / self._peak_equity
+        # знаковая просадка (форма observation_design: equity/пик − 1, ≤0);
+        # breaker_armed принимает МОДУЛЬ просадки (≥0), поэтому передаём -drawdown
+        equity_drawdown = equity / self._peak_equity - 1.0
         reward = math.log(equity / equity_before)
         self._t = nxt
         truncated = is_last or (nxt - self._start) >= self._episode_len
@@ -195,8 +197,8 @@ class SpotFlipEnv(gym.Env):
         obs = write_observation(
             np.empty(layout.size, dtype=np.float32) if truncated else self._obs_buf,
             self._market[nxt], in_position, unreal, peak_unreal, bars_in_trade,
-            dist_to_sl, dist_to_tp, 1.0, float(drawdown >= self._breaker_dd),
-            drawdown, layout, truncated)
+            dist_to_sl, dist_to_tp, 1.0, float(-equity_drawdown >= self._breaker_dd),
+            equity_drawdown, layout, truncated)
         # terminated всегда False: эпизод не имеет поглощающего состояния,
         # обрыв по длине — это усечение (PLAN 5.2, тест Т5).
         return obs, reward, False, truncated, info
@@ -216,10 +218,10 @@ class SpotFlipEnv(gym.Env):
 
     def world_state(self) -> WorldState:
         """Наблюдаемая часть правил мира на текущем баре."""
-        drawdown = 1.0 - self._equity / self._peak_equity
+        equity_drawdown = self._equity / self._peak_equity - 1.0
         return WorldState(data_age_bars=1,
-                          breaker_armed=breaker_armed(drawdown, self.config.world),
-                          equity_drawdown=drawdown)
+                          breaker_armed=breaker_armed(-equity_drawdown, self.config.world),
+                          equity_drawdown=equity_drawdown)
 
     def observe(self) -> np.ndarray:
         """Наблюдение на текущем баре в НОВОМ массиве (буфер не задействован).
