@@ -40,13 +40,19 @@ def test_reserved_slots_are_constant(env):
 
 
 def test_equity_drawdown_signed_and_path_parity(env):
-    """Просадка эквити в obs — знаковая (≤0, форма дока) и совпадает у двух путей."""
+    """Просадка эквити в obs — знаковая (≤0) и совпадает у двух путей.
+
+    В v2 слот `w_equity_drawdown` = просадка МИРОВОЙ CB-эквити (по которой
+    блокируются входы) от `_cb_peak`, а НЕ наградной. Источник эквити — по
+    `cb_equity_mode` (дефолт v7_ledger → мировой кэш).
+    """
     env.reset(seed=3)
     idx = env.config.obs_spec.index_of("w_equity_drawdown")
     actions = [np.array([FLIP, 0, 0])] + [np.array([STAY, 0, 0])] * 50
     for a in actions:
         obs, *_ = env.step(a)
         assert obs[idx] <= 1e-7                              # форма дока: ≤0
-        expected = env._equity / env._peak_equity - 1.0
-        assert abs(obs[idx] - expected) < 1e-6               # obs = знаковая просадка
+        world_equity = env._world_cash if env._cb_uses_v7_ledger else env._equity
+        expected = world_equity / env._cb_peak - 1.0         # мировая CB-просадка
+        assert abs(obs[idx] - expected) < 1e-6
         assert np.array_equal(obs, env.observe())            # паритет step vs observe

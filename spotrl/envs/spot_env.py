@@ -68,11 +68,12 @@ from spotrl.config import EnvConfig
 from spotrl.data.state_dataset import StateDataset
 from spotrl.features.builder import (AgentState, ObservationLayout, WorldState,
                                      build_observation, precompute_market_features,
-                                     write_observation)
+                                     precompute_market_features_v2,
+                                     write_observation, write_observation_v2_flat)
 from spotrl.envs.tradebook import TradeBook
 from spotrl.envs.worldrules import breaker_armed
 from spotrl.spec.actions import FLIP
-from spotrl.spec.observation import RESERVED_SLOT_VALUE
+from spotrl.spec.observation import AGENT_FEATURES_V2, RESERVED_SLOT_VALUE
 
 
 class SpotFlipEnv(gym.Env):
@@ -91,7 +92,14 @@ class SpotFlipEnv(gym.Env):
         super().__init__()
         self.config = config or EnvConfig()
         self.state = state
-        self._market = precompute_market_features(state)
+        # Диспетч рыночного прекомпьюта по версии наблюдения: v2 (14 полей
+        # агента) — расширенный само-нормированный блок (18); v1 — прежний (8).
+        self._is_v2 = len(self.config.obs_spec.agent) == len(AGENT_FEATURES_V2)
+        self._v2_constants = self.config.obs_spec.constants or None
+        if self._is_v2:
+            self._market = precompute_market_features_v2(state, self._v2_constants)
+        else:
+            self._market = precompute_market_features(state)
         self._close = state.close
         self._open = state.open
         self._high = state.ohlcv[:, 1]
@@ -316,10 +324,17 @@ class SpotFlipEnv(gym.Env):
             bars_in_trade = float(nxt - trade.entry_bar)
             dist_to_sl = unreal + trade.sl_frac   # расстояние до цены стопа — валовое
             dist_to_tp = trade.tp_frac - unreal   # расстояние до цены тейка — валовое
+            # v2-скаляры агента (эталон — agent_state(); мутация peak_price уже
+            # сделана выше, поэтому close/peak согласован с чистым геттером).
+            price_drawdown = close_next / trade.peak_price - 1.0
+            entered_on_up_f = 1.0 if trade.entered_on_up else 0.0
+            pos_tag = trade.pos_tag
         else:
             equity = self._equity
             obs_unreal = obs_peak = dist_to_sl = dist_to_tp = 0.0
             in_position = bars_in_trade = 0.0
+            price_drawdown = entered_on_up_f = 0.0
+            pos_tag = "none"
 
         if equity > self._peak_equity:
             self._peak_equity = equity
@@ -369,11 +384,32 @@ class SpotFlipEnv(gym.Env):
                 "n_closed": len(book.closed)}
 
         layout = self._layout
-        obs = write_observation(
-            np.empty(layout.size, dtype=np.float32) if truncated else self._obs_buf,
-            self._market[nxt], in_position, obs_unreal, obs_peak, bars_in_trade,
-            dist_to_sl, dist_to_tp, 1.0, float(-equity_drawdown >= self._breaker_dd),
-            equity_drawdown, layout, truncated)
+        buf = np.empty(layout.size, dtype=np.float32) if truncated else self._obs_buf
+        if self._is_v2:
+            # Слот просадки эквити в v2 = просадка МИРОВОЙ CB-эквити (по которой
+            # блокируются входы), считанная ПОСЛЕ обновления _cb_peak в блоке CB
+            # выше. world_equity (снят до блока) блоком не меняется — двигается
+            # только _cb_peak; на баре в позиции/cooldown блок пропущен и оба
+            # пути (step и world_state) читают тот же застывший _cb_peak.
+            obs_world_dd = world_equity / self._cb_peak - 1.0
+            cb_cleared_today = (self._cb_cleared_date is not None
+                                and self._cb_cleared_date == now_date)
+            remaining = (self._cooldown_until - nxt + 1) if in_cooldown else 0
+            cd_norm = self._cooldown_bars if self._cooldown_bars > 0 else 1
+            obs = write_observation_v2_flat(
+                buf, self._market[nxt], in_position, obs_unreal, obs_peak,
+                price_drawdown, dist_to_sl, dist_to_tp, entered_on_up_f, pos_tag,
+                1.0 if self._cb_triggered else 0.0,
+                1.0 if cb_cleared_today else 0.0, remaining / cd_norm,
+                bars_in_trade, 1.0,
+                1.0 if -obs_world_dd >= self._breaker_dd else 0.0,
+                obs_world_dd, layout, self._v2_constants, truncated)
+        else:
+            obs = write_observation(
+                buf, self._market[nxt], in_position, obs_unreal, obs_peak,
+                bars_in_trade, dist_to_sl, dist_to_tp, 1.0,
+                float(-equity_drawdown >= self._breaker_dd),
+                equity_drawdown, layout, truncated)
         # terminated всегда False: эпизод не имеет поглощающего состояния,
         # обрыв по длине — это усечение (PLAN 5.2, тест Т5).
         return obs, reward, False, truncated, info
@@ -404,7 +440,15 @@ class SpotFlipEnv(gym.Env):
         cooldown/circuit breaker ведёт `step` (мутация только там); здесь
         значения лишь читаются и нормируются (гейт чистоты Т2).
         """
-        equity_drawdown = self._equity / self._peak_equity - 1.0
+        # Слот просадки эквити (реш. дизайна): в v2 — просадка МИРОВОЙ CB-эквити
+        # (по которой блокируются входы), источник эквити по cb_equity_mode
+        # (v7_ledger → мировой кэш; reward → наградная), просадка от _cb_peak.
+        # В v1 — прежняя наградная просадка от _peak_equity. Обе формы ≤0.
+        if self._is_v2:
+            world_equity = self._world_cash if self._cb_uses_v7_ledger else self._equity
+            equity_drawdown = world_equity / self._cb_peak - 1.0
+        else:
+            equity_drawdown = self._equity / self._peak_equity - 1.0
         # cooldown активен, пока текущий бар <= _cooldown_until включительно
         # (regimeb:306 `if i <= self._cooldown_until: return`).
         active = self._cooldown_until >= self._t

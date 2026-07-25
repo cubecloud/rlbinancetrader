@@ -18,7 +18,7 @@ from spotrl.config import ActionSpec, EnvConfig, FreedomConfig, WorldConfig
 from spotrl.envs.spot_env import SpotFlipEnv
 from spotrl.envs.tradebook import OpenTrade, TradeBook
 from spotrl.envs.worldrules import check_forced_exit
-from spotrl.features.builder import ObservationLayout, write_observation
+from spotrl.features.builder import ObservationLayout, write_observation_v2_flat
 from spotrl.spec.actions import FLIP, STAY
 from spotrl.spec.observation import RESERVED_SLOT_VALUE
 
@@ -111,27 +111,35 @@ def test_observe_returns_independent_arrays(env):
 
 
 def test_write_observation_two_buffers_are_bitwise_equal(env_config):
-    """Гейт Э1.2б в непустом виде: два РАЗНЫХ буфера от одних входов равны."""
+    """Гейт Э1.2б в непустом виде: два РАЗНЫХ буфера v2 от одних входов равны."""
     spec = env_config.obs_spec
     layout = ObservationLayout.from_spec(spec)
     market_row = np.arange(len(spec.market), dtype=np.float32) * 0.125
-    args = (market_row, 1.0, 0.031, 0.042, 17.0, 0.081, 0.059, 1.0, 0.0, 0.013)
-    left = write_observation(np.empty(layout.size, dtype=np.float32), *args, layout)
-    right = write_observation(np.empty(layout.size, dtype=np.float32), *args, layout)
+    # плоское ядро v2: in_position, unreal, peak, price_dd, dist_sl, dist_tp,
+    # entered_on_up, pos_tag, cb_active, cb_cleared, cooldown_remain, bars,
+    # data_age, breaker, equity_drawdown
+    args = (market_row, 1.0, 0.031, 0.042, -0.01, 0.081, 0.059, 1.0, "dip",
+            0.0, 0.0, 0.4, 17.0, 1.0, 0.0, -0.12)
+    left = write_observation_v2_flat(
+        np.empty(layout.size, dtype=np.float32), *args, layout, spec.constants)
+    right = write_observation_v2_flat(
+        np.empty(layout.size, dtype=np.float32), *args, layout, spec.constants)
     assert left is not right
     assert np.array_equal(left, right)
 
 
 def test_write_observation_can_skip_reserved_slots(env_config):
-    """С `write_reserved=False` слоты-заглушки не переписываются."""
-    layout = ObservationLayout.from_spec(env_config.obs_spec)
+    """С `write_reserved=False` слоты-заглушки v2 не переписываются."""
+    spec = env_config.obs_spec
+    layout = ObservationLayout.from_spec(spec)
     buffer = np.zeros(layout.size, dtype=np.float32)
     buffer[layout.reserved_at:] = 7.0
     args = (np.zeros(layout.n_market, dtype=np.float32),
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-    write_observation(buffer, *args, layout, False)
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "none",
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    write_observation_v2_flat(buffer, *args, layout, spec.constants, False)
     assert np.all(buffer[layout.reserved_at:] == 7.0)
-    write_observation(buffer, *args, layout, True)
+    write_observation_v2_flat(buffer, *args, layout, spec.constants, True)
     assert np.all(buffer[layout.reserved_at:] == RESERVED_SLOT_VALUE)
 
 

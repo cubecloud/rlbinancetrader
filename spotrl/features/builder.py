@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -353,32 +354,66 @@ def write_observation_v2(out: np.ndarray, market_row: np.ndarray,
     Returns:
         Тот же массив `out`.
     """
+    return write_observation_v2_flat(
+        out, market_row, float(agent.in_position), agent.unreal_pnl,
+        agent.peak_unreal, agent.price_drawdown, agent.dist_to_sl, agent.dist_to_tp,
+        float(agent.entered_on_up), agent.pos_tag, float(world.cb_active),
+        float(world.cb_cleared_today), world.cooldown_remain,
+        float(agent.bars_in_trade), float(world.data_age_bars),
+        float(world.breaker_armed), world.equity_drawdown, layout, constants, True)
+
+
+def write_observation_v2_flat(
+        out: np.ndarray, market_row: np.ndarray, in_position: float,
+        unreal_pnl: float, peak_unreal: float, price_drawdown: float,
+        dist_to_sl: float, dist_to_tp: float, entered_on_up: float, pos_tag: str,
+        cb_active: float, cb_cleared_today: float, cooldown_remain: float,
+        bars_in_trade: float, data_age: float, breaker: float,
+        equity_drawdown: float, layout: ObservationLayout,
+        constants: Optional[dict] = None,
+        write_reserved: bool = True) -> np.ndarray:
+    """Плоский (без объектов) писарь наблюдения v2 — ЕДИНСТВЕННАЯ арифметика v2.
+
+    `write_observation_v2` (объектная обёртка) и горячий путь `step` оба зовут
+    ровно это ядро, поэтому наблюдение из `step` побитово равно `observe()`
+    независимо от выбранных операций (гейт эквивалентности 100k шагов). Функция
+    ЧИСТАЯ: пишет только в `out`. Порядок полей = `AGENT_FEATURES_V2` +
+    `WORLD_RULE_FEATURES_V2` + резерв. Нормировки: чистый PnL clip ±clip_pnl
+    (ручной clamp, без np — не создаём объектов на бар), one-hot pos_tag по
+    `pos_tag_order`, tanh(bars/median_hold), cooldown_remain clamp ≤1.
+
+    ВАЖНО (реш. дизайна): `equity_drawdown` — просадка МИРОВОЙ CB-эквити (по
+    которой блокируются входы), а не наградной; передаётся вызывающей стороной.
+    """
     c = constants or SPEC_CONSTANTS_V2
     clip_pnl = float(c["clip_unreal_pnl"])
     median_hold = float(c["median_hold_bars"])
-    pos_order = tuple(c["pos_tag_order"])
+    pos_order = c["pos_tag_order"]
     cd_len = float(c["cooldown_len_bars"])
 
     out[:layout.n_market] = market_row
     j = layout.agent_at
-    out[j] = float(agent.in_position)
-    out[j + 1] = float(np.clip(agent.unreal_pnl, -clip_pnl, clip_pnl))
-    out[j + 2] = float(np.clip(agent.peak_unreal, -clip_pnl, clip_pnl))
-    out[j + 3] = agent.price_drawdown
-    out[j + 4] = agent.dist_to_sl
-    out[j + 5] = agent.dist_to_tp
-    out[j + 6] = float(agent.entered_on_up)
+    out[j] = in_position
+    out[j + 1] = (clip_pnl if unreal_pnl > clip_pnl
+                  else -clip_pnl if unreal_pnl < -clip_pnl else unreal_pnl)
+    out[j + 2] = (clip_pnl if peak_unreal > clip_pnl
+                  else -clip_pnl if peak_unreal < -clip_pnl else peak_unreal)
+    out[j + 3] = price_drawdown
+    out[j + 4] = dist_to_sl
+    out[j + 5] = dist_to_tp
+    out[j + 6] = entered_on_up
     # one-hot pos_tag в порядке POS_TAG_ORDER_V2 (none, dip, transition)
-    out[j + 7] = float(agent.pos_tag == pos_order[0])
-    out[j + 8] = float(agent.pos_tag == pos_order[1])
-    out[j + 9] = float(agent.pos_tag == pos_order[2])
-    out[j + 10] = float(world.cb_active)
-    out[j + 11] = float(world.cb_cleared_today)
-    out[j + 12] = (min(1.0, world.cooldown_remain) if cd_len > 0 else 0.0)
-    out[j + 13] = float(np.tanh(agent.bars_in_trade / median_hold))
+    out[j + 7] = 1.0 if pos_tag == pos_order[0] else 0.0
+    out[j + 8] = 1.0 if pos_tag == pos_order[1] else 0.0
+    out[j + 9] = 1.0 if pos_tag == pos_order[2] else 0.0
+    out[j + 10] = cb_active
+    out[j + 11] = cb_cleared_today
+    out[j + 12] = (1.0 if cooldown_remain > 1.0 else cooldown_remain) if cd_len > 0 else 0.0
+    out[j + 13] = math.tanh(bars_in_trade / median_hold)
     w = layout.world_at
-    out[w] = float(world.data_age_bars)
-    out[w + 1] = float(world.breaker_armed)
-    out[w + 2] = world.equity_drawdown
-    out[layout.reserved_at:] = RESERVED_SLOT_VALUE
+    out[w] = data_age
+    out[w + 1] = breaker
+    out[w + 2] = equity_drawdown
+    if write_reserved:
+        out[layout.reserved_at:] = RESERVED_SLOT_VALUE
     return out

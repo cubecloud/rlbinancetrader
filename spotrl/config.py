@@ -144,7 +144,7 @@ class EnvConfig:
     world: WorldConfig = field(default_factory=WorldConfig)
     freedom: FreedomConfig = field(default_factory=FreedomConfig)
     action_spec: ActionSpec = field(default_factory=ActionSpec)
-    obs_spec: ObservationSpec = field(default_factory=ObservationSpec)
+    obs_spec: ObservationSpec = field(default_factory=ObservationSpec.v2)
     episode_len: int = 34_738
     gamma: float = 1.0
 
