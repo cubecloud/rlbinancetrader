@@ -65,6 +65,7 @@
       "sum_return_pct_oracle_nocd": 324.41949634080396,
       "cooldown_price_pp_sumspace": -36.80109346485489,
       "cooldown_share_of_component_b_sumspace": -0.500435306121397,
+      "cooldown_share_note": "отношение ~-0.5 в обеих эпохах — ЭМПИРИЧЕСКОЕ совпадение полной oracle-политики, НЕ структурная связь. Доказано: при случайном подмножестве decision_bars отношение уходит от -0.5 (A: -0.03/+0.06/-0.19; B: -0.29/-0.42); общие сделки дают в разность ровно 0, значит (б) и cooldown_price считаются на непересекающихся множествах сделок. Знак цены cooldown (sum_nocd<sum_cd) от этого не зависит.",
       "n_trades_v7": 162,
       "n_trades_oracle_cd": 209,
       "n_trades_oracle_nocd": 233
@@ -143,6 +144,7 @@
       "sum_return_pct_oracle_nocd": 422.0188689722482,
       "cooldown_price_pp_sumspace": -157.2685613833483,
       "cooldown_share_of_component_b_sumspace": -0.5002169958792761,
+      "cooldown_share_note": "отношение ~-0.5 в обеих эпохах — ЭМПИРИЧЕСКОЕ совпадение полной oracle-политики, НЕ структурная связь. Доказано: при случайном подмножестве decision_bars отношение уходит от -0.5 (A: -0.03/+0.06/-0.19; B: -0.29/-0.42); общие сделки дают в разность ровно 0, значит (б) и cooldown_price считаются на непересекающихся множествах сделок. Знак цены cooldown (sum_nocd<sum_cd) от этого не зависит.",
       "n_trades_v7": 272,
       "n_trades_oracle_cd": 370,
       "n_trades_oracle_nocd": 432

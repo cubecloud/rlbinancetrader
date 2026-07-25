@@ -127,8 +127,16 @@ def run_epoch(ep: dict) -> dict:
                          if decomp.component_b_sum_pp else float("nan"))
     print(f"  СУММА return_pct (не компаунд): v7={sum_v7:.1f}  "
           f"oracle(cd)={sum_cd:.1f}  oracle(no-cd)={sum_nocd:.1f} п.п.")
+    # ВНИМАНИЕ: cd_share_of_b_sum ≈ -0.5 в обеих эпохах — ЭМПИРИЧЕСКОЕ
+    # совпадение полной oracle-политики, НЕ структурная связь. Диагностика:
+    # (1) при случайном подмножестве decision_bars отношение уходит от -0.5
+    #     (A: -0.03/+0.06/-0.19; B: -0.29/-0.42); (2) общие сделки (тот же
+    # entry_bar в cd и no-cd прогонах) дают в разность РОВНО 0 — резерв (б)
+    # живёт в них (SL-сделки идентичны в обоих прогонах), а cooldown_price —
+    # в сделках, уникальных для одного прогона. Множества НЕ пересекаются →
+    # величины независимы; -0.5 нельзя трактовать как «подтверждение».
     print(f"  ЦЕНА COOLDOWN (сумма-простр.)={cooldown_price_sum:+.1f} п.п.  "
-          f"= {cd_share_of_b_sum:+.2f} от резерва(б)")
+          f"(отношение к (б) {cd_share_of_b_sum:+.2f} — СОВПАДЕНИЕ, не связь)")
     print(f"ДВИЖОК: Return v7={ret_v7:.2f}%  oracle(cd)={ret_cd:.2f}%  "
           f"oracle(no-cd)={ret_nocd:.2f}%")
     print(f"  Reserve_B(cd)={reserve_b_cd:+.2f} п.п.  "
@@ -178,6 +186,16 @@ def run_epoch(ep: dict) -> dict:
             "sum_return_pct_oracle_nocd": sum_nocd,
             "cooldown_price_pp_sumspace": cooldown_price_sum,
             "cooldown_share_of_component_b_sumspace": cd_share_of_b_sum,
+            "cooldown_share_note": "отношение ~-0.5 в обеих эпохах — "
+                                   "ЭМПИРИЧЕСКОЕ совпадение полной oracle-"
+                                   "политики, НЕ структурная связь. Доказано: "
+                                   "при случайном подмножестве decision_bars "
+                                   "отношение уходит от -0.5 (A: -0.03/+0.06/"
+                                   "-0.19; B: -0.29/-0.42); общие сделки дают в "
+                                   "разность ровно 0, значит (б) и "
+                                   "cooldown_price считаются на непересекающихся "
+                                   "множествах сделок. Знак цены cooldown "
+                                   "(sum_nocd<sum_cd) от этого не зависит.",
             "n_trades_v7": n_v7, "n_trades_oracle_cd": int(len(trades_cd)),
             "n_trades_oracle_nocd": int(len(trades_nocd)),
         },
@@ -214,7 +232,7 @@ def main():
               f"{'  [anchor-inflated компаунд]' if r['anchor_inflated'] else ''}")
         print(f"    цена cooldown (сумма-простр.)="
               f"{r['engine']['cooldown_price_pp_sumspace']:+.1f} п.п. "
-              f"({r['engine']['cooldown_share_of_component_b_sumspace']:+.2f} от (б)); "
+              f"(знак<0 = не режет резерв; отношение к (б) -0.5 — совпадение); "
               f"эскалация правила={g['cooldown_escalate']}")
     if args.out:
         Path(os.path.expanduser(args.out)).write_text(
