@@ -93,6 +93,15 @@ class SpotFlipEnv(gym.Env):
         # Входы машины скрытого состояния мира (шаг 2 плана obs v2).
         self._breaker_cb_dd = world.breaker_drawdown_frac  # порог CB (в v7 = 0.15)
         self._cooldown_bars = world.cooldown_bars          # длина post-exit cooldown
+        # Мировой леджер эквити для правила circuit breaker (конвенция движка v7):
+        # стартовый капитал cb_equity_cash, сайзинг cb_position_pct целыми лотами
+        # (floor), комиссия ОДНОсторонняя (вход по adjusted = price*(1+fee), выход
+        # по сырой цене). Считается из СОБСТВЕННОЙ книги среды, поэтому корректен
+        # и в паритете (последовательность сделок = v7 → мировая эквити = v7), и
+        # под живым агентом (его сделки в ту же конвенцию — не прекомпьют-ложь).
+        # Наградная эквити (компаунд от 1.0, двусторонняя) — ОТДЕЛЬНО, не трогаем.
+        self._cb_cash = world.cb_equity_cash
+        self._cb_pos_pct = world.cb_position_pct
         self._entry_sig = state.entry_signal               # булев self._entry v7
         self._trans_sig = state.trans_entry_signal         # булев self._trans_entry v7
         self._leg_dn = state.leg_dn                         # каузальный leg_dn
@@ -136,14 +145,22 @@ class SpotFlipEnv(gym.Env):
             _cb_halt_date: календарная дата взведения CB (снятие — на следующий
                 день).
             _cb_cleared_date: дата, в которую CB был снят (для «снят сегодня»).
-            _cb_peak: пик эквити для расчёта просадки CB (переякоривается при
-                снятии CB, как в regimeb:245).
+            _cb_peak: пик МИРОВОЙ эквити для расчёта просадки CB (переякоривается
+                при снятии CB в мировых единицах, как regimeb:245).
+            _world_cash: мировая эквити CB (конвенция v7); на плоском баре равна
+                кэшу счёта движка. Меняется только при закрытии сделки.
+            _world_size: целые лоты открытой сделки в мировом леджере (floor).
+            _world_entry_adj: цена входа открытой сделки с односторонней комиссией
+                (adjusted_price движка = price*(1+fee_side)).
         """
         self._cooldown_until = -1
         self._cb_triggered = False
         self._cb_halt_date = None
         self._cb_cleared_date = None
-        self._cb_peak = self._equity
+        self._world_cash = self.config.world.cb_equity_cash
+        self._world_size = 0
+        self._world_entry_adj = 0.0
+        self._cb_peak = self._world_cash
         self._exit_is_signal = False
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, bool, dict]:
@@ -253,12 +270,15 @@ class SpotFlipEnv(gym.Env):
         equity_drawdown = equity / self._peak_equity - 1.0
         # Машина circuit breaker (мирроринг regimeb:232-256): проверяется на
         # ПЛОСКОМ баре (в v7 cb-проверка недостижима внутри позиции), halt по
-        # просадке cb-эквити ≥ порога, снятие — на СЛЕДУЮЩИЙ календарный день с
-        # переякориванием пика. ВНИМАНИЕ: cb-эквити среды (компаунд от 1.0,
-        # двусторонняя комиссия) НЕ совпадает с портфельной эквити v7 (0.9999,
-        # целые лоты, односторонняя комиссия) — числовой паритет cb относится к
-        # части 3 (паритет эквити/источников); здесь воспроизводится ЛОГИКА.
+        # просадке МИРОВОЙ эквити ≥ порога, снятие — на СЛЕДУЮЩИЙ календарный день
+        # с переякориванием пика. Мировая эквити (self._world_cash, конвенция v7:
+        # cash=10M, sizing 0.9999, целые лоты, односторонняя комиссия) на плоском
+        # баре равна кэшу счёта движка (equity = cash + Σ pl; вне позиции Σ=0,
+        # backtesting.py:790). Это ТА ЖЕ величина, что видит _check_circuit_breaker
+        # v7 (self.equity), поэтому cb срабатывает бар-в-бар. Наградная эквити
+        # (компаунд от 1.0, двусторонняя) для CB НЕ используется — она про reward.
         now_date = self._dates[nxt]
+        world_equity = self._world_cash
         # v7 оценивает cb ТОЛЬКО на плоском баре ВНЕ cooldown: в next() ранний
         # выход `if i <= _cooldown_until: return` (regimeb:306) стоит ДО проверки
         # cb (regimeb:318). Поэтому во время cooldown cb не трогаем.
@@ -270,11 +290,11 @@ class SpotFlipEnv(gym.Env):
                     self._cb_triggered = False
                     self._cb_halt_date = None
                     self._cb_cleared_date = now_date
-                    self._cb_peak = equity
+                    self._cb_peak = world_equity
             if not self._cb_triggered:
-                if equity > self._cb_peak:
-                    self._cb_peak = equity
-                dd = (self._cb_peak - equity) / self._cb_peak
+                if world_equity > self._cb_peak:
+                    self._cb_peak = world_equity
+                dd = (self._cb_peak - world_equity) / self._cb_peak
                 if dd >= self._breaker_cb_dd:
                     self._cb_triggered = True
                     self._cb_halt_date = now_date
@@ -363,6 +383,11 @@ class SpotFlipEnv(gym.Env):
         fee = self.config.world.fee_side
         self._qty = self._equity * (1.0 - fee) / float(price)
         self._equity = self._qty * float(price)
+        # Мировой леджер CB (конвенция v7): целые лоты по adjusted-цене входа.
+        # size = floor(cash*pct/adjusted); backtesting.py:898,937 (adjusted=892).
+        adjusted = float(price) * (1.0 + fee)
+        self._world_entry_adj = adjusted
+        self._world_size = int((self._world_cash * self._cb_pos_pct) // adjusted)
         self.book.open(bar, price, sl_frac=sl_frac, tp_frac=tp_frac,
                        entered_on_up=entered_on_up, pos_tag=pos_tag)
 
@@ -373,6 +398,11 @@ class SpotFlipEnv(gym.Env):
         fee = self.config.world.fee_side
         self._equity = self._qty * float(price) * (1.0 - fee)
         self._qty = 0.0
+        # Мировой леджер CB: выход по СЫРОЙ цене (комиссия односторонняя, взята
+        # на входе); pl = size*(exit − entry_adj), cash += pl (backtesting.py:
+        # 919 закрытие по сырой цене, 641 pl, 998 cash += pl).
+        self._world_cash += self._world_size * (float(price) - self._world_entry_adj)
+        self._world_size = 0
         self.book.close(bar, price, reason)
 
 

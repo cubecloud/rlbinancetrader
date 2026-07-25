@@ -2,10 +2,13 @@
 
 Помечен ``@pytest.mark.slow`` — в быстром наборе (addopts `-m "not slow"`) НЕ
 запускается: прогон идёт по полному ряду (1.24M/1.68M баров, десятки секунд).
-Пропускается, если артефактов v7 нет. Фиксирует главный результат части 1:
-пять эквити-НЕзависимых разделителей — 0 расхождений на обеих эпохах, cb=0 на
-2024 (после починки cooldown-зазора). Полная логика — в
-`spotrl/tests/parity_env_expert.py`.
+Пропускается, если артефактов v7 нет. Фиксирует ПОЛНЫЙ паритет 6/6: пять
+эквити-НЕзависимых разделителей и circuit breaker — 0 расхождений на ОБЕИХ
+эпохах. cb доведён до нуля мировым леджером эквити (конвенция v7: cash=10M,
+sizing 0.9999, целые лоты, односторонняя комиссия), считаемым из собственной
+книги среды; по-сделочный ассерт леджера (size/цены) против trades CSV
+подтверждает, что паритет получен из совпадения эквити-траектории, а не из
+компенсирующих ошибок. Полная логика — в `spotrl/tests/parity_env_expert.py`.
 """
 from __future__ import annotations
 
@@ -36,8 +39,15 @@ def _paths(tag: str):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("tag", ["2021", "2024"])
-def test_five_separators_have_zero_mismatch(tag):
-    """Пять эквити-НЕзависимых разделителей — 0 расхождений env↔expert."""
+def test_full_parity_six_of_six(tag):
+    """Полный паритет 6/6 env↔expert: пять разделителей + cb = 0 на обеих эпохах.
+
+    Плюс по-сделочный ассерт мирового леджера против trades CSV: целые лоты
+    (size) и цены (adjusted-вход, сырой выход) совпадают на всех сделках, кроме
+    терминального forced-end (исключён из ценовой сверки по конвенции клампа
+    exit_bar в v7). Это доказывает, что cb-паритет — из совпадения эквити, а не
+    из компенсирующих ошибок.
+    """
     paths = _paths(tag)
     if paths is None:
         pytest.skip(f"нет артефактов v7 для эпохи {tag}")
@@ -47,12 +57,7 @@ def test_five_separators_have_zero_mismatch(tag):
     assert counts.pos_tag == 0
     assert counts.cooldown == 0
     assert counts.entered_on_up == 0
-
-
-@pytest.mark.slow
-def test_cb_full_parity_on_2024():
-    """cb совпадает бит-в-бит на 2024 (cooldown-зазор устранён)."""
-    paths = _paths("2024")
-    if paths is None:
-        pytest.skip("нет артефактов v7 для эпохи 2024")
-    assert run_parity(*paths).cb == 0
+    assert counts.cb == 0
+    assert counts.trades_checked > 100
+    assert counts.ledger_size == 0
+    assert counts.ledger_price == 0

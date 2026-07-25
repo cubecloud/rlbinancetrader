@@ -36,6 +36,14 @@ class WorldConfig:
         max_data_age_bars: правило «свежесть данных» — при большем возрасте
             последнего бара решения не принимаются (PLAN 4.5.3, 4-е правило).
         fee_side: комиссия на сторону, входит в награду (не «прикручена потом»).
+        cb_equity_cash: стартовый капитал МИРОВОЙ эквити для правила circuit
+            breaker (конвенция движка v7: Backtest(cash=...)). Отдельно от
+            наградной эквити (компаунд от 1.0) — CB срабатывает по мировой
+            просадке, чтобы бар-в-бар повторять v7. См. spot_env, мировой леджер.
+        cb_position_pct: доля капитала в сделке при расчёте мировой эквити CB
+            (v7 P7 position_pct = 0.9999); целые лоты (floor). Комиссия мирового
+            леджера — ОДНОсторонняя (вход ×(1+fee_side), выход по сырой цене),
+            как движок backtesting.py (adjusted_price на входе, close по цене).
     """
 
     world_version: str = "w1"
@@ -46,6 +54,8 @@ class WorldConfig:
     close_at_end: bool = True
     max_data_age_bars: int = 5
     fee_side: float = FEE_SIDE
+    cb_equity_cash: float = 10_000_000.0
+    cb_position_pct: float = 0.9999
 
     def __post_init__(self) -> None:
         """Валидация на границе (PLAN 1.5.1, п.2)."""
@@ -61,6 +71,10 @@ class WorldConfig:
             raise ValueError("max_data_age_bars должен быть >= 1")
         if not 0.0 <= self.fee_side < 0.01:
             raise ValueError("fee_side вне разумного диапазона [0, 0.01)")
+        if self.cb_equity_cash <= 0.0:
+            raise ValueError("cb_equity_cash должен быть > 0")
+        if not 0.0 < self.cb_position_pct <= 1.0:
+            raise ValueError("cb_position_pct должен быть в (0, 1]")
 
     def describe(self) -> dict:
         """Сериализуемое описание для манифеста прогона."""

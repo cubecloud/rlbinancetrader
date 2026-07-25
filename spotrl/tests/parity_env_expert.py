@@ -67,6 +67,9 @@ class ParityCounts:
     cooldown: int = 0
     cb: int = 0
     entered_on_up: int = 0
+    ledger_size: int = 0
+    ledger_price: int = 0
+    trades_checked: int = 0
     first_mismatch: Dict[str, str] = field(default_factory=dict)
 
     def note(self, field_name: str, msg: str) -> None:
@@ -78,6 +81,8 @@ class ParityCounts:
         return {"compared": self.compared, "in_position": self.in_position,
                 "pos_tag": self.pos_tag, "cooldown": self.cooldown, "cb": self.cb,
                 "entered_on_up": self.entered_on_up,
+                "trades_checked": self.trades_checked,
+                "ledger_size": self.ledger_size, "ledger_price": self.ledger_price,
                 "first_mismatch": self.first_mismatch}
 
 
@@ -138,6 +143,12 @@ def run_parity(state_path: str, signals_path: str, expert_path: str,
     # entered_on_up эталон по сделкам: not leg_dn[entry_bar−1].
     ref_entered_on_up = {int(tr.entry_bar): (not bool(leg_dn[int(tr.entry_bar) - 1]))
                          for tr in trades.itertuples()}
+    # Эталон мирового леджера v7 по сделкам (для по-сделочного ассерта: size,
+    # adjusted-цена входа, сырая цена выхода). Индекс — entry_bar.
+    ref_ledger = {int(tr.entry_bar): (float(tr.size), float(tr.entry_price),
+                                      float(tr.exit_price))
+                  for tr in trades.itertuples()}
+    env_ledger: Dict[int, tuple] = {}   # entry_bar -> (world_size, world_entry_adj)
 
     counts = ParityCounts()
     env.reset(seed=0)
@@ -170,6 +181,9 @@ def run_parity(state_path: str, signals_path: str, expert_path: str,
         # entered_on_up на баре входа
         if trade is not None and trade.entry_bar not in seen_entry_bars:
             seen_entry_bars.add(trade.entry_bar)
+            # снимок мирового леджера на баре входа (size/adjusted-цена уже
+            # посчитаны средой в _open_position).
+            env_ledger[trade.entry_bar] = (env._world_size, env._world_entry_adj)
             ref = ref_entered_on_up.get(trade.entry_bar)
             if ref is not None and bool(trade.entered_on_up) != ref:
                 counts.entered_on_up += 1
@@ -191,6 +205,40 @@ def run_parity(state_path: str, signals_path: str, expert_path: str,
         _obs, _r, _term, trunc, _info = env.step(action)
         if trunc:
             break
+
+    # По-сделочный ассерт мирового леджера против trades CSV: это ПРЯМАЯ проверка
+    # того, что cb-паритет получен из совпадения эквити-траектории, а не из
+    # компенсирующих ошибок (совет ревьюера). Сверяем size (целые лоты),
+    # adjusted-цену входа (raw*(1+fee) ≈ CSV entry_price) и сырую цену выхода
+    # (≈ CSV exit_price). Порог по цене — относительный, 1e-6.
+    for closed in env.book.closed:
+        ref = ref_ledger.get(closed.entry_bar)
+        snap = env_ledger.get(closed.entry_bar)
+        if ref is None or snap is None:
+            continue
+        counts.trades_checked += 1
+        ref_size, ref_entry, ref_exit = ref
+        env_size, env_entry_adj = snap
+        if int(env_size) != int(ref_size):
+            counts.ledger_size += 1
+            counts.note("ledger_size",
+                        f"entry_bar {closed.entry_bar}: env {env_size} vs ref {ref_size}")
+        if abs(env_entry_adj - ref_entry) > 1e-6 * ref_entry:
+            counts.ledger_price += 1
+            counts.note("ledger_entry",
+                        f"entry_bar {closed.entry_bar}: env_adj {env_entry_adj} vs ref {ref_entry}")
+        # Терминальное принудительное закрытие ("end"): среда закрывает по CLOSE
+        # последнего бара, а движок v7 — рыночным trade.close() по OPEN последнего
+        # бара (backtesting.py:1221-1224 → :858, trade_on_close=False). Отсюда
+        # расхождение цены выхода единственной терминальной сделки. После
+        # последнего бара плоских баров нет — на CB это не влияет; из ценовой
+        # сверки терминальную сделку исключаем (в 2021 её и так 0).
+        if closed.exit_reason == "end":
+            continue
+        if abs(closed.exit_price - ref_exit) > 1e-6 * ref_exit:
+            counts.ledger_price += 1
+            counts.note("ledger_exit",
+                        f"entry_bar {closed.entry_bar}: env {closed.exit_price} vs ref {ref_exit}")
     return counts
 
 

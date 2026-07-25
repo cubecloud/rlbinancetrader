@@ -155,6 +155,29 @@ def test_price_drawdown_tracks_peak():
     assert abs(a.price_drawdown - (110.0 / 120.0 - 1.0)) < 1e-9
 
 
+def test_circuit_breaker_trips_on_world_equity_drawdown():
+    """CB взводится по просадке МИРОВОЙ эквити (леджер v7), не наградной.
+
+    Сценарий: вход по 100, обвал до 60, агентский выход. Мировой леджер
+    (cash=10M, sizing 0.9999, целые лоты, односторонняя комиссия) проседает на
+    ~40% > порога 30% -> на плоском баре выхода CB взводится. sl=0 (cooldown не
+    вооружается, CB оценивается сразу), cooldown_bars=0.
+    """
+    scen = [100., 100., 60., 60., 60.]
+    env = _env(_dataset(scen, entry_signal=[True] * len(scen)),
+               sl=0.0, cooldown_bars=0, cb_dd=0.30)
+    # мировой леджер стартует на конвенции v7, не на наградной 1.0
+    assert env._world_cash == 10_000_000.0
+    env.step(_FLIP)                           # вход по open(WARMUP+1)=100
+    assert env._world_size == int(10_000_000.0 * 0.9999 // 100.1)
+    assert env.world_state().cb_active is False
+    env.step(_STAY)                           # в позиции, close=60
+    env.step(_FLIP)                           # выход по 60 -> мировая эквити −40%
+    # мировая эквити просела, CB взведён; наградная эквити тут ни при чём
+    assert env._world_cash < 7_000_000.0
+    assert env.world_state().cb_active is True
+
+
 def test_circuit_breaker_clears_next_calendar_day():
     """CB держится в день halt и снимается на следующий календарный день.
 
