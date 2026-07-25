@@ -133,10 +133,22 @@ class WindowData:
                 "(q_buy/q_sell/regime_code/leg_dn); StateDataset для среды "
                 "строится только из снимка state_v0, а не из сырой базы")
         signals = np.column_stack([self.column("q_buy"), self.column("q_sell")])
+
+        def _opt(*names: str):
+            """Первая присутствующая колонка окна как float, иначе None."""
+            for name in names:
+                if self.has(name):
+                    return self.column(name).astype(np.float64)
+            return None
+
         return StateDataset(
             index=self.index, ohlcv=self.ohlcv, signals=signals,
             regime_code=self.column("regime_code").astype(np.int32),
-            leg_dn=self.column("leg_dn").astype(bool), source=self.source)
+            leg_dn=self.column("leg_dn").astype(bool), source=self.source,
+            quote_volume=_opt("quote_volume", "quote_asset_volume"),
+            trades=_opt("trades"), taker_buy_base=_opt("taker_buy_base"),
+            buy_margin=_opt("buy_margin"), sell_margin=_opt("sell_margin"),
+            bounce_pct=_opt("bounce_pct"), leg_age=_opt("leg_age", "leg_age_h"))
 
 
 class DataSource(ABC):

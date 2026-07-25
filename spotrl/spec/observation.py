@@ -34,7 +34,8 @@ MARKET_PRICE_FEATURES_V2: Tuple[str, ...] = (
     "m_ret_close",    # Δlog(close)
     "m_ret_high",     # Δlog(high)
     "m_ret_low",      # Δlog(low)
-    "m_vwap_ret",     # Δlog(vwap), vwap — скользящий, строго .shift(1)
+    "m_vwap_ret",     # Δlog(vwap), vwap побарный = quote/base
+                      # (vwap_mode="per_bar_quote_over_base"): без окна, без утечки
     "m_hi_close",     # (high − close) / close
     "m_close_lo",     # (close − low) / close
 )
@@ -107,17 +108,21 @@ SPEC_CONSTANTS_V2_VERIFIED: Dict[str, object] = {
                                      # (0 расхождений cooldown на обеих эпохах)
 }
 
-# ПРЕДВАРИТЕЛЬНО (НЕ подтверждено кодом среды) — потому версия помечена "-draft".
-# ВАЖНО: v7 имеет ДВА разных механизма: post-SL entry cooldown
-# (regimeb_bt_strategy.py:102-109, `cooldown_bars`, по умолчанию 376, срабатывает
-# ТОЛЬКО после SL) и circuit breaker `cb_active` (снятие по календарному дню).
-# Их НЕЛЬЗЯ сливать: гейт входа использует cooldown_active и cb_active как ОТДЕЛЬНЫЕ
-# разделители. Раньше здесь ошибочно стояло cooldown_len=1440 (= breaker cooldown) —
-# это неверно. Длину делителя a_cooldown_remain и окна vwap/avg_size фиксируем
-# ТОЛЬКО когда среда реализует соответствующую машину состояния (раздел 2.1 отчёта).
+# ВЫБОР РЕАЛИЗАЦИИ (НЕ зафиксировано доком дословно) — потому версия "-draft".
+# Эти числа задокументированы и ВХОДЯТ В ХЭШ (философия «хэшируем спецификацию»:
+# хэш обязан отражать реально посчитанные окна, иначе смена хардкода не сдвинет
+# хэш — молчаливая ложь). Промотировать в VERIFIED нельзя: источник их не фиксирует.
+# - vwap_mode="per_bar_quote_over_base": vwap = quote_asset_volume/base_volume —
+#   истинная средневзвешенная цена бара. Δlog бар-к-бару, БЕЗ скользящего окна,
+#   значит без утечки и без выдуманной константы окна. Тайбрейкер: дизайн-док
+#   (строка 33) трактует vwap как обычный Δlog рядом с close/high/low, а
+#   prepare_ret_obs использует rolling-vwap с ПАРАМЕТРОМ окна (не фикс. число).
+#   При отсутствии quote/base (vol=0) → нейтраль (типичная цена (H+L+C)/3).
+# - avg_size_median_window_bars=1440: окно скользящей медианы среднего размера
+#   сделки; взято равным окну относительного объёма (24h). Доком не зафиксировано.
 SPEC_CONSTANTS_V2_PROVISIONAL: Dict[str, object] = {
-    "vwap_window_bars": None,        # окно скользящего vwap — не зафикс. доком
-    "avg_size_median_window_bars": None,  # окно медианы среднего размера сделки — не зафикс.
+    "vwap_mode": "per_bar_quote_over_base",
+    "avg_size_median_window_bars": 24 * 60,
 }
 
 # Полный набор констант спецификации (проверенные + предварительные).

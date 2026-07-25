@@ -26,14 +26,29 @@ def make_synthetic_frame(n_bars: int = 5_000, seed: int = 0,
     close = start_price * np.exp(np.cumsum(steps))
     open_ = np.concatenate([[start_price], close[:-1]])
     spread = np.abs(rng.normal(0.0, 0.0005, size=n_bars)) * close
+    # Объём с широкой вариацией (лог-нормаль) — чтобы скользящие торговые
+    # признаки v2 (относительный объём, средний размер сделки) реально
+    # менялись, а гейт утечки имел что мерить.
+    base_volume = np.exp(rng.normal(1.5, 0.8, size=n_bars))
+    trades = np.maximum(1, rng.poisson(50.0, size=n_bars)).astype(np.float64)
+    # денежный объём ~ базовый объём × средняя цена бара
+    quote_volume = base_volume * close * rng.uniform(0.98, 1.02, size=n_bars)
+    taker_buy_base = base_volume * rng.uniform(0.2, 0.8, size=n_bars)
     frame = pd.DataFrame(
         {"open": open_,
          "high": np.maximum(open_, close) + spread,
          "low": np.minimum(open_, close) - spread,
          "close": close,
-         "volume": rng.uniform(1.0, 10.0, size=n_bars),
+         "volume": base_volume,
+         "quote_asset_volume": quote_volume,
+         "trades": trades,
+         "taker_buy_base": taker_buy_base,
          "q_buy": rng.uniform(0.0, 1.0, size=n_bars),
          "q_sell": rng.uniform(0.0, 1.0, size=n_bars),
+         "buy_margin": rng.normal(0.0, 0.1, size=n_bars),
+         "sell_margin": rng.normal(0.0, 0.1, size=n_bars),
+         "bounce_pct": rng.uniform(0.0, 0.05, size=n_bars),
+         "leg_age_h": rng.uniform(0.0, 48.0, size=n_bars),
          "regime_code": rng.integers(0, 3, size=n_bars),
          "leg_dn": rng.random(n_bars) < 0.2},
         index=pd.date_range("2024-03-01", periods=n_bars, freq="min"))

@@ -11,11 +11,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 from spotrl.data.state_dataset import StateDataset
-from spotrl.spec.observation import ObservationSpec, RESERVED_SLOT_VALUE
+from spotrl.spec.observation import (AGENT_FEATURES_V2, ObservationSpec,
+                                     RESERVED_SLOT_VALUE, SPEC_CONSTANTS_V2)
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,108 @@ def precompute_market_features(state: StateDataset) -> np.ndarray:
         state.signals[:, 0], state.signals[:, 1],
         state.regime_code.astype(np.float64),
         state.leg_dn.astype(np.float64),
+    ]).astype(np.float32)
+
+
+def _delta_log(x: np.ndarray) -> np.ndarray:
+    """Лог-доходность бар-к-бару Δlog(x); первый бар = 0 (warmup, БЕЗ bfill).
+
+    Каузально: значение на баре t использует только x[t] и x[t-1]. Утечки нет —
+    префикс [0:t] даёт тот же результат в точке t, что и полный ряд.
+    """
+    log_x = np.log(np.maximum(x, 1e-12))
+    return np.diff(log_x, prepend=log_x[0])
+
+
+def _causal_rolling_median(x: np.ndarray, window: int) -> np.ndarray:
+    """Скользящая медиана строго ПРОШЛОГО: out[t] = median(x[t-window:t]).
+
+    Текущий бар ИСКЛЮЧЁН (`.shift(1)`), поэтому признак на баре t не видит x[t]
+    и утечки нет (гейт утечки: префикс [0:t] == полный ряд в t). Прогрев
+    (min_periods=1) считает медиану по доступному прошлому; на баре 0 прошлого
+    нет → NaN (вызывающая сторона заменяет на нейтраль).
+    """
+    s = pd.Series(x, dtype="float64")
+    return s.rolling(window=window, min_periods=1).median().shift(1).to_numpy()
+
+
+def precompute_market_features_v2(
+        state: StateDataset,
+        constants: Optional[dict] = None) -> np.ndarray:
+    """Рыночный блок наблюдения v2 для всех баров сразу, массив (n, 18) float32.
+
+    Состав и порядок = `MARKET_FEATURES_V2` (spec): 6 цен (Δlog + внутрибарные),
+    3 безразмерных торговых числа, 9 сигналов v7. Все признаки КАУЗАЛЬНЫ и
+    само-нормированы (без замороженного скейлера). Скользящие окна — строго
+    прошлое (`.shift(1)`), пороги clip — фиксированные из spec.
+
+    Args:
+        state: источник данных (нужны quote_volume/trades/taker_buy_base и
+            непрерывные составляющие v7; их отсутствие деградирует к нейтрали).
+        constants: константы нормировки из spec (окна, пороги clip). По
+            умолчанию `SPEC_CONSTANTS_V2`.
+
+    Returns:
+        Массив (n, 18) float32 в порядке `ObservationSpec.v2().market`.
+    """
+    c = constants or SPEC_CONSTANTS_V2
+    clip_rv = float(c["clip_rel_volume"])
+    vol_neutral = float(c["vol_zero_neutral"])
+    rv_win = int(c["rel_volume_median_window_bars"])
+    as_win = int(c["avg_size_median_window_bars"])
+
+    close = state.close
+    high, low = state.ohlcv[:, 1], state.ohlcv[:, 2]
+    base_vol = state.base_volume
+    quote_vol = state.quote_volume
+    trades = state.trades
+    taker_base = state.taker_buy_base
+
+    # --- Цены (6) ---
+    ret_close = _delta_log(close)
+    ret_high = _delta_log(high)
+    ret_low = _delta_log(low)
+    # vwap побарный = quote/base (истинная средневзвешенная цена бара); при
+    # отсутствии денежного объёма/нулевом объёме — типичная цена (H+L+C)/3.
+    typical = (high + low + close) / 3.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vwap = quote_vol / base_vol
+    bad_vwap = ~np.isfinite(vwap) | (base_vol <= 0.0)
+    vwap = np.where(bad_vwap, typical, vwap)
+    vwap_ret = _delta_log(vwap)
+    hi_close = (high - close) / np.maximum(close, 1e-12)
+    close_lo = (close - low) / np.maximum(close, 1e-12)
+
+    # --- Торговые числа (3), безразмерные ---
+    # 1) доля агрессивных покупок; base_volume=0/NaN → нейтраль 0.5 (НЕ clip)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        aggr = taker_base / base_vol
+    aggr = np.where(np.isfinite(aggr) & (base_vol > 0.0), aggr, vol_neutral)
+    # 2) средний размер сделки = log(base/trades) − log(median_past(base/trades))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw_size = base_vol / trades
+    valid_size = np.isfinite(raw_size) & (trades > 0.0) & (base_vol > 0.0)
+    log_size = np.where(valid_size, np.log(np.where(valid_size, raw_size, 1.0)), np.nan)
+    med_size = _causal_rolling_median(np.where(valid_size, raw_size, np.nan), as_win)
+    avg_trade_size = log_size - np.log(np.maximum(med_size, 1e-12))
+    avg_trade_size = np.where(np.isfinite(avg_trade_size), avg_trade_size, 0.0)
+    # 3) относительный объём = log(quote / median_past_24h(quote)), clip ±3
+    med_q = _causal_rolling_median(quote_vol, rv_win)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel_vol = np.log(quote_vol / med_q)
+    rel_vol = np.where(np.isfinite(rel_vol), rel_vol, 0.0)
+    rel_vol = np.clip(rel_vol, -clip_rv, clip_rv)
+
+    # --- Сигналы v7 (9) ---
+    return np.column_stack([
+        ret_close, ret_high, ret_low, vwap_ret, hi_close, close_lo,
+        aggr, avg_trade_size, rel_vol,
+        state.entry_signal.astype(np.float64),
+        state.trans_entry_signal.astype(np.float64),
+        state.buy_margin, state.sell_margin, state.bounce_pct, state.leg_age,
+        state.exit_sig.astype(np.float64),
+        state.leg_dn.astype(np.float64),
+        state.regime_code.astype(np.float64),
     ]).astype(np.float32)
 
 
@@ -190,6 +295,9 @@ def build_observation(market_row: np.ndarray, agent: AgentState, world: WorldSta
                       spec: ObservationSpec) -> np.ndarray:
     """Собрать вектор наблюдения на одном баре в НОВОМ массиве.
 
+    Диспетчеризует по версии spec: v1 (6 полей агента) — прежний путь; v2 (14
+    полей агента) — расширенная упаковка `write_observation_v2`. Функция чистая.
+
     Args:
         market_row: строка предвычисленных рыночных признаков (spec.market).
         agent: состояние агента, посчитанное средой.
@@ -197,14 +305,80 @@ def build_observation(market_row: np.ndarray, agent: AgentState, world: WorldSta
         spec: версионированный состав наблюдения.
 
     Returns:
-        Вектор float32 длины `spec.size`. Функция чистая: одинаковые входы
-        дают побитово одинаковый выход, аргументы не изменяются.
+        Вектор float32 длины `spec.size`. Одинаковые входы → побитово одинаковый
+        выход, аргументы не изменяются.
     """
     if len(market_row) != len(spec.market):
         raise ValueError(f"market_row: ожидалось {len(spec.market)}, дано {len(market_row)}")
+    if len(spec.agent) == len(AGENT_FEATURES_V2):
+        return write_observation_v2(
+            np.empty(spec.size, dtype=np.float32), market_row, agent, world,
+            ObservationLayout.from_spec(spec), spec.constants)
     return write_observation(
         np.empty(spec.size, dtype=np.float32), market_row,
         float(agent.in_position), agent.unreal_pnl, agent.peak_unreal,
         float(agent.bars_in_trade), agent.dist_to_sl, agent.dist_to_tp,
         float(world.data_age_bars), float(world.breaker_armed), world.equity_drawdown,
         ObservationLayout.from_spec(spec))
+
+
+def write_observation_v2(out: np.ndarray, market_row: np.ndarray,
+                         agent: AgentState, world: WorldState,
+                         layout: ObservationLayout,
+                         constants: Optional[dict] = None) -> np.ndarray:
+    """Упаковать наблюдение v2 (18 рынок + 14 агент + 3 мир + 3 резерв) в `out`.
+
+    Порядок полей агента = `AGENT_FEATURES_V2`; нормировки по
+    observation_design: чистый PnL clip ±0.5, one-hot pos_tag (порядок
+    `POS_TAG_ORDER_V2`), tanh(bars/median_hold). Функция ЧИСТАЯ: пишет только в
+    `out`, состояние агента не мутирует.
+
+    ВАЖНО (решение дизайна, impl_state_machine 207-218): слот просадки эквити,
+    который видит агент (`w_equity_drawdown`), в режиме копирования = просадка
+    МИРОВОЙ CB-эквити (`world.equity_drawdown` заполняется средой мировой
+    просадкой), НЕ наградной. Свою открытую прибыль агент видит через
+    `a_unreal_pnl`/`a_peak_unreal`. Здесь упаковщик кладёт то, что передала
+    среда в `world.equity_drawdown` — обязанность подать мировую просадку лежит
+    на `world_state()` при v2-упаковке.
+
+    Args:
+        out: буфер float32 длины `layout.size`.
+        market_row: строка рыночных признаков v2 (18).
+        agent: состояние агента (все 14 полей v2).
+        world: наблюдаемая часть правил мира v2.
+        layout: числовые смещения блоков.
+        constants: константы нормировки spec (median_hold, clip PnL, порядок
+            one-hot). По умолчанию `SPEC_CONSTANTS_V2`.
+
+    Returns:
+        Тот же массив `out`.
+    """
+    c = constants or SPEC_CONSTANTS_V2
+    clip_pnl = float(c["clip_unreal_pnl"])
+    median_hold = float(c["median_hold_bars"])
+    pos_order = tuple(c["pos_tag_order"])
+    cd_len = float(c["cooldown_len_bars"])
+
+    out[:layout.n_market] = market_row
+    j = layout.agent_at
+    out[j] = float(agent.in_position)
+    out[j + 1] = float(np.clip(agent.unreal_pnl, -clip_pnl, clip_pnl))
+    out[j + 2] = float(np.clip(agent.peak_unreal, -clip_pnl, clip_pnl))
+    out[j + 3] = agent.price_drawdown
+    out[j + 4] = agent.dist_to_sl
+    out[j + 5] = agent.dist_to_tp
+    out[j + 6] = float(agent.entered_on_up)
+    # one-hot pos_tag в порядке POS_TAG_ORDER_V2 (none, dip, transition)
+    out[j + 7] = float(agent.pos_tag == pos_order[0])
+    out[j + 8] = float(agent.pos_tag == pos_order[1])
+    out[j + 9] = float(agent.pos_tag == pos_order[2])
+    out[j + 10] = float(world.cb_active)
+    out[j + 11] = float(world.cb_cleared_today)
+    out[j + 12] = (min(1.0, world.cooldown_remain) if cd_len > 0 else 0.0)
+    out[j + 13] = float(np.tanh(agent.bars_in_trade / median_hold))
+    w = layout.world_at
+    out[w] = float(world.data_age_bars)
+    out[w + 1] = float(world.breaker_armed)
+    out[w + 2] = world.equity_drawdown
+    out[layout.reserved_at:] = RESERVED_SLOT_VALUE
+    return out

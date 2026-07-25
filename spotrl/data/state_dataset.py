@@ -36,6 +36,17 @@ class StateDataset:
         trans_entry_signal: массив (n,) bool — сигнал transition-входа v7
             (self._trans_entry).
         exit_sig: массив (n,) bool — штатный сигнал выхода v7 (self._exit).
+        quote_volume: массив (n,) float — денежный объём бара (quote_asset_volume
+            расширенного kline). None → NaN (рыночный строитель v2 деградирует к
+            нейтрали).
+        trades: массив (n,) float — число сделок в баре. None → NaN.
+        taker_buy_base: массив (n,) float — базовый объём агрессивных покупок.
+            None → NaN.
+        buy_margin: массив (n,) float — непрерывная составляющая входа v7
+            (q_buy − thr_buy). None → 0.0.
+        sell_margin: массив (n,) float — непрерывная составляющая выхода v7. None → 0.0.
+        bounce_pct: массив (n,) float — bounce эксперта v7. None → 0.0.
+        leg_age: массив (n,) float — возраст ноги в часах (leg_age_h). None → 0.0.
         source: путь к исходному файлу (для манифеста прогона).
 
     Три булевых сигнала v7 нужны машине скрытого состояния среды: по ним на
@@ -43,6 +54,11 @@ class StateDataset:
     сигнальный выход. В каузальном state их нет — их выгружает из объекта v7
     `spotrl.data.dump_v7_signals` и подкладывает `attach_signals`. Если сигналы
     не приложены, поля = массивы False длины n (среда работает как без них).
+
+    Торговые колонки (quote_volume/trades/taker_buy_base) и непрерывные
+    составляющие v7 (buy_margin/sell_margin/bounce_pct/leg_age) нужны рыночному
+    строителю наблюдения v2. base_volume = ohlcv[:, 4] (volume). Их отсутствие не
+    ошибка — строитель v2 деградирует к задокументированной нейтрали.
     """
 
     index: pd.DatetimeIndex
@@ -54,15 +70,40 @@ class StateDataset:
     entry_signal: np.ndarray = None  # type: ignore[assignment]
     trans_entry_signal: np.ndarray = None  # type: ignore[assignment]
     exit_sig: np.ndarray = None  # type: ignore[assignment]
+    quote_volume: np.ndarray = None  # type: ignore[assignment]
+    trades: np.ndarray = None  # type: ignore[assignment]
+    taker_buy_base: np.ndarray = None  # type: ignore[assignment]
+    buy_margin: np.ndarray = None  # type: ignore[assignment]
+    sell_margin: np.ndarray = None  # type: ignore[assignment]
+    bounce_pct: np.ndarray = None  # type: ignore[assignment]
+    leg_age: np.ndarray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        """Заполнить отсутствующие булевы сигналы массивами False длины n."""
+        """Заполнить отсутствующие булевы сигналы и рыночные колонки v2.
+
+        Булевы сигналы v7 при отсутствии = массивы False длины n. Торговые
+        колонки при отсутствии = NaN (строитель v2 деградирует к нейтрали, не
+        придумывая объём). Непрерывные составляющие v7 при отсутствии = 0.0.
+        """
         n = len(self.index)
         for name in ("entry_signal", "trans_entry_signal", "exit_sig"):
             if getattr(self, name) is None:
                 object.__setattr__(self, name, np.zeros(n, dtype=bool))
             else:
                 arr = np.asarray(getattr(self, name)).astype(bool)
+                if len(arr) != n:
+                    raise ValueError(
+                        f"{name}: длина {len(arr)} != числу баров {n}")
+                object.__setattr__(self, name, arr)
+        nan_defaults = ("quote_volume", "trades", "taker_buy_base")
+        zero_defaults = ("buy_margin", "sell_margin", "bounce_pct", "leg_age")
+        for name in nan_defaults + zero_defaults:
+            val = getattr(self, name)
+            fill = np.nan if name in nan_defaults else 0.0
+            if val is None:
+                object.__setattr__(self, name, np.full(n, fill, dtype=np.float64))
+            else:
+                arr = np.asarray(val, dtype=np.float64)
                 if len(arr) != n:
                     raise ValueError(
                         f"{name}: длина {len(arr)} != числу баров {n}")
@@ -81,6 +122,11 @@ class StateDataset:
     def open(self) -> np.ndarray:
         """Цены открытия (исполнение решения бара t идёт по open(t+1))."""
         return self.ohlcv[:, 0]
+
+    @property
+    def base_volume(self) -> np.ndarray:
+        """Базовый объём бара = volume (5-й столбец ohlcv)."""
+        return self.ohlcv[:, 4]
 
     def describe(self) -> dict:
         """Сериализуемое описание для манифеста прогона."""
@@ -121,13 +167,32 @@ def from_frame(frame: pd.DataFrame, source: str = "<memory>",
         """Прочитать булев сигнал из кадра, если колонка есть, иначе None."""
         return frame[name].to_numpy().astype(bool) if name in frame.columns else None
 
+    def _opt_float(*names: str):
+        """Прочитать float-колонку по первому найденному имени, иначе None.
+
+        Имён несколько, потому что расширенный kline и снимок state зовут одну
+        величину по-разному (quote_asset_volume vs quote_volume, leg_age_h vs
+        leg_age).
+        """
+        for name in names:
+            if name in frame.columns:
+                return frame[name].to_numpy(dtype=np.float64)
+        return None
+
     return StateDataset(index=index, ohlcv=ohlcv, signals=signals,
                         regime_code=frame["regime_code"].to_numpy().astype(np.int32),
                         leg_dn=frame["leg_dn"].to_numpy().astype(bool),
                         source=source,
                         entry_signal=_opt_bool("entry_signal"),
                         trans_entry_signal=_opt_bool("trans_entry_signal"),
-                        exit_sig=_opt_bool("exit_sig"))
+                        exit_sig=_opt_bool("exit_sig"),
+                        quote_volume=_opt_float("quote_volume", "quote_asset_volume"),
+                        trades=_opt_float("trades"),
+                        taker_buy_base=_opt_float("taker_buy_base"),
+                        buy_margin=_opt_float("buy_margin"),
+                        sell_margin=_opt_float("sell_margin"),
+                        bounce_pct=_opt_float("bounce_pct"),
+                        leg_age=_opt_float("leg_age", "leg_age_h"))
 
 
 def attach_signals(dataset: StateDataset, signals_path: str | Path) -> StateDataset:
@@ -155,4 +220,8 @@ def attach_signals(dataset: StateDataset, signals_path: str | Path) -> StateData
         source=dataset.source,
         entry_signal=sig["entry_signal"].to_numpy().astype(bool),
         trans_entry_signal=sig["trans_entry_signal"].to_numpy().astype(bool),
-        exit_sig=sig["exit_sig"].to_numpy().astype(bool))
+        exit_sig=sig["exit_sig"].to_numpy().astype(bool),
+        quote_volume=dataset.quote_volume, trades=dataset.trades,
+        taker_buy_base=dataset.taker_buy_base, buy_margin=dataset.buy_margin,
+        sell_margin=dataset.sell_margin, bounce_pct=dataset.bounce_pct,
+        leg_age=dataset.leg_age)
