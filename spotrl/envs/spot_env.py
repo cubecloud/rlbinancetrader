@@ -70,6 +70,7 @@ class SpotFlipEnv(gym.Env):
         self._equity = 1.0
         self._peak_equity = 1.0
         self._qty = 0.0
+        self._init_world_machine()
         # Снимки конфигурации для горячего шага: цепочка `self.config.world.x`
         # стоит 0.043 мкс за обращение, а таких обращений на шаг больше десяти.
         world, freedom, spec = self.config.world, self.config.freedom, self.config.action_spec
@@ -89,6 +90,19 @@ class SpotFlipEnv(gym.Env):
         self._default_tp = spec.tp_buckets[spec.expert_tp_index]
         self._episode_len = self.config.episode_len
         self._last_bar = self._n_bars - 1
+        # Входы машины скрытого состояния мира (шаг 2 плана obs v2).
+        self._breaker_cb_dd = world.breaker_drawdown_frac  # порог CB (в v7 = 0.15)
+        self._cooldown_bars = world.cooldown_bars          # длина post-exit cooldown
+        self._entry_sig = state.entry_signal               # булев self._entry v7
+        self._trans_sig = state.trans_entry_signal         # булев self._trans_entry v7
+        self._leg_dn = state.leg_dn                         # каузальный leg_dn
+        # Календарные даты баров для снятия CB по смене дня (regimeb:240-245).
+        self._dates = np.array([ts.date() for ts in state.index], dtype=object)
+        # Директива драйвера паритета: пометить БЛИЖАЙШЕЕ агентское закрытие как
+        # сигнальное (штатный выход v7 → cooldown НЕ взводится). По умолчанию
+        # False: обычный агентский выход НЕсигнальный и взводит cooldown, как в v7
+        # (v7hook: агентский close не помечается сигнальным). Сбрасывается на шаге.
+        self._exit_is_signal = False
         self._layout = ObservationLayout.from_spec(self.config.obs_spec)
         self._obs_buf = np.zeros(self._layout.size, dtype=np.float32)
         # Слоты-заглушки константны: заполняются один раз, шаг их не трогает.
@@ -106,7 +120,31 @@ class SpotFlipEnv(gym.Env):
         self._equity = 1.0
         self._peak_equity = 1.0
         self._qty = 0.0
+        self._init_world_machine()
         return self._obs(), {"start_bar": self._start}
+
+    def _init_world_machine(self) -> None:
+        """Сбросить машину скрытого состояния мира (cooldown и circuit breaker).
+
+        Состояние машины мутируется ТОЛЬКО здесь и в `step`; геттеры
+        `agent_state`/`world_state` его лишь читают (гейт чистоты Т2).
+
+        Attributes машины:
+            _cooldown_until: бар, до которого включительно активен post-exit
+                cooldown (−1 = не активен).
+            _cb_triggered: circuit breaker сейчас держит halt.
+            _cb_halt_date: календарная дата взведения CB (снятие — на следующий
+                день).
+            _cb_cleared_date: дата, в которую CB был снят (для «снят сегодня»).
+            _cb_peak: пик эквити для расчёта просадки CB (переякоривается при
+                снятии CB, как в regimeb:245).
+        """
+        self._cooldown_until = -1
+        self._cb_triggered = False
+        self._cb_halt_date = None
+        self._cb_cleared_date = None
+        self._cb_peak = self._equity
+        self._exit_is_signal = False
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, bool, dict]:
         """Один бар: решение на t -> исполнение по open(t+1) -> награда.
@@ -144,8 +182,16 @@ class SpotFlipEnv(gym.Env):
                 else:
                     sl_frac = self._default_sl
                     tp_frac = self._default_tp
+                # Разделители сделки фиксируются на баре РЕШЕНИЯ t (= self._t):
+                # вход исполняется по open(t+1)=nxt, entry_bar−1 = t.
+                dec = self._t
+                entered_on_up = not bool(self._leg_dn[dec])
+                pos_tag = ("dip" if bool(self._entry_sig[dec])
+                           else "transition" if bool(self._trans_sig[dec])
+                           else "dip")
                 self._open_position(nxt, self._open.item(nxt),
-                                    sl_frac=sl_frac, tp_frac=tp_frac)
+                                    sl_frac=sl_frac, tp_frac=tp_frac,
+                                    entered_on_up=entered_on_up, pos_tag=pos_tag)
                 trade = book.open_trade
         elif pos != 0:
             raise ValueError(f"голова позиции: недопустимый индекс {pos}")
@@ -167,12 +213,24 @@ class SpotFlipEnv(gym.Env):
                 self._close_position(nxt, close_next, "end")
                 trade, exit_reason = None, "end"
 
+        # Машина cooldown: НЕсигнальное закрытие (SL или агентский выход)
+        # взводит cooldown на nxt+cooldown_bars (regimeb:276, условие
+        # sl_pct>0 и cooldown_bars>0). Сигнальное закрытие (в v7 — штатный
+        # выход; в паритет-драйвере помечается _exit_is_signal) НЕ взводит.
+        # TP/end не взводят (в v7 TP помечается сигнальным закрытием).
+        triggers_cooldown = (exit_reason == "sl"
+                             or (exit_reason == "agent" and not self._exit_is_signal))
+        if (triggers_cooldown and self._cooldown_bars > 0 and self._stop_loss_on):
+            self._cooldown_until = nxt + self._cooldown_bars
+
         fee = self.config.world.fee_side
         roundtrip = (1.0 - fee) ** 2  # двусторонняя комиссия (вход+выход)
         if trade is not None:
             unreal = close_next / trade.entry_price - 1.0   # валовое движение цены
             if unreal > trade.peak_unreal:
                 trade.peak_unreal = unreal
+            if close_next > trade.peak_price:
+                trade.peak_price = close_next
             equity = self._qty * close_next
             self._equity = equity
             in_position = 1.0
@@ -193,6 +251,34 @@ class SpotFlipEnv(gym.Env):
         # знаковая просадка (форма observation_design: equity/пик − 1, ≤0);
         # breaker_armed принимает МОДУЛЬ просадки (≥0), поэтому передаём -drawdown
         equity_drawdown = equity / self._peak_equity - 1.0
+        # Машина circuit breaker (мирроринг regimeb:232-256): проверяется на
+        # ПЛОСКОМ баре (в v7 cb-проверка недостижима внутри позиции), halt по
+        # просадке cb-эквити ≥ порога, снятие — на СЛЕДУЮЩИЙ календарный день с
+        # переякориванием пика. ВНИМАНИЕ: cb-эквити среды (компаунд от 1.0,
+        # двусторонняя комиссия) НЕ совпадает с портфельной эквити v7 (0.9999,
+        # целые лоты, односторонняя комиссия) — числовой паритет cb относится к
+        # части 3 (паритет эквити/источников); здесь воспроизводится ЛОГИКА.
+        now_date = self._dates[nxt]
+        # v7 оценивает cb ТОЛЬКО на плоском баре ВНЕ cooldown: в next() ранний
+        # выход `if i <= _cooldown_until: return` (regimeb:306) стоит ДО проверки
+        # cb (regimeb:318). Поэтому во время cooldown cb не трогаем.
+        in_cooldown = self._cooldown_until >= nxt
+        if trade is None and not in_cooldown:
+            if self._cb_triggered:
+                if (self._cb_halt_date is not None
+                        and now_date > self._cb_halt_date):
+                    self._cb_triggered = False
+                    self._cb_halt_date = None
+                    self._cb_cleared_date = now_date
+                    self._cb_peak = equity
+            if not self._cb_triggered:
+                if equity > self._cb_peak:
+                    self._cb_peak = equity
+                dd = (self._cb_peak - equity) / self._cb_peak
+                if dd >= self._breaker_cb_dd:
+                    self._cb_triggered = True
+                    self._cb_halt_date = now_date
+        self._exit_is_signal = False  # директива действует только на этот шаг
         reward = math.log(equity / equity_before)
         self._t = nxt
         truncated = is_last or (nxt - self._start) >= self._episode_len
@@ -217,20 +303,39 @@ class SpotFlipEnv(gym.Env):
         price = float(self._close[self._t])
         unreal = price / trade.entry_price - 1.0            # валовое движение цены
         roundtrip = (1.0 - self.config.world.fee_side) ** 2  # двусторонняя комиссия
+        peak_price = max(trade.peak_price, price)  # чистое чтение, книгу не мутируем
         return AgentState(in_position=True,
                           # ЧИСТАЯ нереализованная прибыль (реш. «а»), как в step
                           unreal_pnl=roundtrip * (1.0 + unreal) - 1.0,
                           peak_unreal=roundtrip * (1.0 + trade.peak_unreal) - 1.0,
                           bars_in_trade=self._t - trade.entry_bar,
                           dist_to_sl=unreal + trade.sl_frac,   # валовое расстояние до стопа
-                          dist_to_tp=trade.tp_frac - unreal)   # валовое расстояние до тейка
+                          dist_to_tp=trade.tp_frac - unreal,   # валовое расстояние до тейка
+                          entered_on_up=trade.entered_on_up,
+                          pos_tag=trade.pos_tag,
+                          price_drawdown=price / peak_price - 1.0)
 
     def world_state(self) -> WorldState:
-        """Наблюдаемая часть правил мира на текущем баре."""
+        """Наблюдаемая часть правил мира на текущем баре — чистое чтение машины.
+
+        cooldown/circuit breaker ведёт `step` (мутация только там); здесь
+        значения лишь читаются и нормируются (гейт чистоты Т2).
+        """
         equity_drawdown = self._equity / self._peak_equity - 1.0
+        # cooldown активен, пока текущий бар <= _cooldown_until включительно
+        # (regimeb:306 `if i <= self._cooldown_until: return`).
+        active = self._cooldown_until >= self._t
+        remaining = self._cooldown_until - self._t + 1 if active else 0
+        cd_len = self._cooldown_bars if self._cooldown_bars > 0 else 1
+        cooldown_remain = min(1.0, remaining / cd_len)
         return WorldState(data_age_bars=1,
                           breaker_armed=breaker_armed(-equity_drawdown, self.config.world),
-                          equity_drawdown=equity_drawdown)
+                          equity_drawdown=equity_drawdown,
+                          cb_active=self._cb_triggered,
+                          cb_cleared_today=(self._cb_cleared_date is not None
+                                            and self._cb_cleared_date == self._dates[self._t]),
+                          cooldown_active=active,
+                          cooldown_remain=cooldown_remain)
 
     def observe(self) -> np.ndarray:
         """Наблюдение на текущем баре в НОВОМ массиве (буфер не задействован).
@@ -247,16 +352,19 @@ class SpotFlipEnv(gym.Env):
         return self.observe()
 
     def _open_position(self, bar: int, price: float, sl_frac: float,
-                       tp_frac: float) -> None:
+                       tp_frac: float, entered_on_up: bool = False,
+                       pos_tag: str = "dip") -> None:
         """Купить на всю эквити по цене `price`; комиссия списывается сразу.
 
         Учёт через количество (`_qty`) делает сумму поминутных наград за
-        сделку тождественной `log(1 + Return)` (тест Т7).
+        сделку тождественной `log(1 + Return)` (тест Т7). Разделители сделки
+        (entered_on_up, pos_tag) фиксируются на баре входа и пишутся в книгу.
         """
         fee = self.config.world.fee_side
         self._qty = self._equity * (1.0 - fee) / float(price)
         self._equity = self._qty * float(price)
-        self.book.open(bar, price, sl_frac=sl_frac, tp_frac=tp_frac)
+        self.book.open(bar, price, sl_frac=sl_frac, tp_frac=tp_frac,
+                       entered_on_up=entered_on_up, pos_tag=pos_tag)
 
     def _close_position(self, bar: int, price: float, reason: str) -> None:
         """Продать позицию по цене `price`; комиссия списывается сразу."""

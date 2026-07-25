@@ -32,7 +32,17 @@ class StateDataset:
         signals: массив (n, 2) — q_buy, q_sell.
         regime_code: массив (n,) int32.
         leg_dn: массив (n,) bool.
+        entry_signal: массив (n,) bool — булев сигнал входа v7 (self._entry).
+        trans_entry_signal: массив (n,) bool — сигнал transition-входа v7
+            (self._trans_entry).
+        exit_sig: массив (n,) bool — штатный сигнал выхода v7 (self._exit).
         source: путь к исходному файлу (для манифеста прогона).
+
+    Три булевых сигнала v7 нужны машине скрытого состояния среды: по ним на
+    баре входа определяется pos_tag (dip vs transition) и отделяется штатный
+    сигнальный выход. В каузальном state их нет — их выгружает из объекта v7
+    `spotrl.data.dump_v7_signals` и подкладывает `attach_signals`. Если сигналы
+    не приложены, поля = массивы False длины n (среда работает как без них).
     """
 
     index: pd.DatetimeIndex
@@ -41,6 +51,22 @@ class StateDataset:
     regime_code: np.ndarray
     leg_dn: np.ndarray
     source: str
+    entry_signal: np.ndarray = None  # type: ignore[assignment]
+    trans_entry_signal: np.ndarray = None  # type: ignore[assignment]
+    exit_sig: np.ndarray = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        """Заполнить отсутствующие булевы сигналы массивами False длины n."""
+        n = len(self.index)
+        for name in ("entry_signal", "trans_entry_signal", "exit_sig"):
+            if getattr(self, name) is None:
+                object.__setattr__(self, name, np.zeros(n, dtype=bool))
+            else:
+                arr = np.asarray(getattr(self, name)).astype(bool)
+                if len(arr) != n:
+                    raise ValueError(
+                        f"{name}: длина {len(arr)} != числу баров {n}")
+                object.__setattr__(self, name, arr)
 
     def __len__(self) -> int:
         """Число баров."""
@@ -90,7 +116,43 @@ def from_frame(frame: pd.DataFrame, source: str = "<memory>",
                              for c in ("open", "high", "low", "close", "volume")])
     signals = np.column_stack([frame["q_buy"].to_numpy(dtype=np.float64),
                                frame["q_sell"].to_numpy(dtype=np.float64)])
+
+    def _opt_bool(name: str):
+        """Прочитать булев сигнал из кадра, если колонка есть, иначе None."""
+        return frame[name].to_numpy().astype(bool) if name in frame.columns else None
+
     return StateDataset(index=index, ohlcv=ohlcv, signals=signals,
                         regime_code=frame["regime_code"].to_numpy().astype(np.int32),
                         leg_dn=frame["leg_dn"].to_numpy().astype(bool),
-                        source=source)
+                        source=source,
+                        entry_signal=_opt_bool("entry_signal"),
+                        trans_entry_signal=_opt_bool("trans_entry_signal"),
+                        exit_sig=_opt_bool("exit_sig"))
+
+
+def attach_signals(dataset: StateDataset, signals_path: str | Path) -> StateDataset:
+    """Приложить булевы сигналы v7 из артефакта к готовому StateDataset.
+
+    Args:
+        dataset: набор, загруженный из каузального state.
+        signals_path: parquet-артефакт `dump_v7_signals` (колонки
+            entry_signal, trans_entry_signal, exit_sig; индекс = индекс state).
+
+    Returns:
+        Новый StateDataset с приложенными булевыми сигналами. Индекс артефакта
+        обязан совпасть с индексом набора бар-в-бар (иначе train/serve
+        разъедется — тот же мастер-инвариант «один прогон»).
+
+    Raises:
+        ValueError: если индекс артефакта не совпадает с индексом набора.
+    """
+    sig = pd.read_parquet(Path(signals_path).expanduser())
+    if len(sig) != len(dataset) or not sig.index.equals(dataset.index):
+        raise ValueError("индекс артефакта сигналов не совпадает с индексом state")
+    return StateDataset(
+        index=dataset.index, ohlcv=dataset.ohlcv, signals=dataset.signals,
+        regime_code=dataset.regime_code, leg_dn=dataset.leg_dn,
+        source=dataset.source,
+        entry_signal=sig["entry_signal"].to_numpy().astype(bool),
+        trans_entry_signal=sig["trans_entry_signal"].to_numpy().astype(bool),
+        exit_sig=sig["exit_sig"].to_numpy().astype(bool))

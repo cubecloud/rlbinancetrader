@@ -29,6 +29,16 @@ class AgentState:
         bars_in_trade: сколько баров позиция открыта.
         dist_to_sl: расстояние до стопа в долях цены (0 вне позиции).
         dist_to_tp: расстояние до тейка в долях цены (0 вне позиции).
+        entered_on_up: вход на растущей ноге (not leg_dn на баре решения);
+            False вне позиции.
+        pos_tag: тип открытой сделки — 'none' (вне позиции), 'dip' или
+            'transition'; определён на баре входа.
+        price_drawdown: откат от пика цены позиции = price/peak_price − 1 (≤0;
+            0 вне позиции).
+
+    Поля v2 (entered_on_up, pos_tag, price_drawdown) имеют дефолты и не влияют на
+    сборку v1-наблюдения: `build_observation` для spec v1 читает только первые
+    шесть полей.
     """
 
     in_position: bool = False
@@ -37,6 +47,9 @@ class AgentState:
     bars_in_trade: int = 0
     dist_to_sl: float = 0.0
     dist_to_tp: float = 0.0
+    entered_on_up: bool = False
+    pos_tag: str = "none"
+    price_drawdown: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -47,11 +60,24 @@ class WorldState:
         data_age_bars: возраст последнего бара в барах (в backtest = 1).
         breaker_armed: circuit breaker сработал и вход запрещён.
         equity_drawdown: текущая просадка эквити от пика, доля (equity/пик − 1, ≤0).
+        cb_active: circuit breaker v7 активен (halt по просадке, снятие по
+            календарному дню); отдельный разделитель гейта входа.
+        cb_cleared_today: CB был активен и снят в ТЕКУЩЕМ календарном дне.
+        cooldown_active: активен post-exit cooldown (вход запрещён N баров после
+            НЕсигнального закрытия — SL или агентского выхода).
+        cooldown_remain: остаток cooldown в долях его длины (0..1).
+
+    Поля v2 (cb_active, cb_cleared_today, cooldown_active, cooldown_remain) имеют
+    дефолты и не участвуют в сборке v1-наблюдения.
     """
 
     data_age_bars: int = 1
     breaker_armed: bool = False
     equity_drawdown: float = 0.0
+    cb_active: bool = False
+    cb_cleared_today: bool = False
+    cooldown_active: bool = False
+    cooldown_remain: float = 0.0
 
 
 def precompute_market_features(state: StateDataset) -> np.ndarray:

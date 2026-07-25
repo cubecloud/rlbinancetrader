@@ -102,6 +102,9 @@ SPEC_CONSTANTS_V2_VERIFIED: Dict[str, object] = {
     "pos_tag_order": list(POS_TAG_ORDER_V2),
     "rolling_shift": 1,              # все скользящие окна строго .shift(1) (док)
     "price_warmup_fill": 0.0,        # прогрев доходностей — ноль, НЕ bfill (док)
+    "cooldown_len_bars": 423,        # длина post-exit cooldown v7 (P7 cooldown_bars);
+                                     # подтверждена машиной среды и гейтом env↔expert
+                                     # (0 расхождений cooldown на обеих эпохах)
 }
 
 # ПРЕДВАРИТЕЛЬНО (НЕ подтверждено кодом среды) — потому версия помечена "-draft".
@@ -113,7 +116,6 @@ SPEC_CONSTANTS_V2_VERIFIED: Dict[str, object] = {
 # это неверно. Длину делителя a_cooldown_remain и окна vwap/avg_size фиксируем
 # ТОЛЬКО когда среда реализует соответствующую машину состояния (раздел 2.1 отчёта).
 SPEC_CONSTANTS_V2_PROVISIONAL: Dict[str, object] = {
-    "cooldown_len_bars": None,       # длина post-SL entry cooldown v7 — уточнить в среде
     "vwap_window_bars": None,        # окно скользящего vwap — не зафикс. доком
     "avg_size_median_window_bars": None,  # окно медианы среднего размера сделки — не зафикс.
 }

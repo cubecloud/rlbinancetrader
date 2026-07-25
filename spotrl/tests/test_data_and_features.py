@@ -34,6 +34,25 @@ def test_load_state_missing_file():
         load_state("/nonexistent/state.parquet")
 
 
+def test_state_signals_default_to_false():
+    """Без колонок сигналов v7 поля StateDataset = массивы False длины n."""
+    ds = from_frame(make_synthetic_frame(n_bars=20))
+    for name in ("entry_signal", "trans_entry_signal", "exit_sig"):
+        arr = getattr(ds, name)
+        assert arr.dtype == bool and len(arr) == 20 and not arr.any()
+
+
+def test_state_signals_loaded_from_columns():
+    """Булевы сигналы v7 читаются из кадра, если колонки присутствуют."""
+    frame = make_synthetic_frame(n_bars=12)
+    frame["entry_signal"] = ([True, False] * 6)
+    frame["trans_entry_signal"] = False
+    frame["exit_sig"] = ([False, True] * 6)
+    ds = from_frame(frame)
+    assert ds.entry_signal.sum() == 6 and ds.exit_sig.sum() == 6
+    assert not ds.trans_entry_signal.any()
+
+
 def test_market_features_are_causal(state):
     """Признак на баре t не меняется от данных после t."""
     full = precompute_market_features(state)

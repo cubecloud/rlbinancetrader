@@ -28,6 +28,9 @@ class WorldConfig:
         stop_loss_frac: стоп-лосс на сделку, доля цены входа (0 = выключен).
         breaker_drawdown_frac: circuit breaker по просадке эквити счёта.
         breaker_cooldown_bars: сколько баров после срабатывания вход запрещён.
+        cooldown_bars: post-exit cooldown v7 — сколько баров вход запрещён ПОСЛЕ
+            НЕсигнального закрытия (SL или агентский выход). ДРУГОЙ механизм, чем
+            circuit breaker. В v7 (P7) = 423. Разделитель гейта входа.
         close_at_end: принудительно закрывать позицию на конце данных, чтобы
             у каждой сделки был исход (PLAN 4.5.6).
         max_data_age_bars: правило «свежесть данных» — при большем возрасте
@@ -39,6 +42,7 @@ class WorldConfig:
     stop_loss_frac: float = 0.05
     breaker_drawdown_frac: float = 0.50
     breaker_cooldown_bars: int = 1440
+    cooldown_bars: int = 423
     close_at_end: bool = True
     max_data_age_bars: int = 5
     fee_side: float = FEE_SIDE
@@ -51,6 +55,8 @@ class WorldConfig:
             raise ValueError("breaker_drawdown_frac должен быть в (0, 1]")
         if self.breaker_cooldown_bars < 0:
             raise ValueError("breaker_cooldown_bars должен быть >= 0")
+        if self.cooldown_bars < 0:
+            raise ValueError("cooldown_bars должен быть >= 0")
         if self.max_data_age_bars < 1:
             raise ValueError("max_data_age_bars должен быть >= 1")
         if not 0.0 <= self.fee_side < 0.01:
