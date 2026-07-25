@@ -392,28 +392,36 @@ def write_observation_v2_flat(
     cd_len = float(c["cooldown_len_bars"])
 
     out[:layout.n_market] = market_row
-    j = layout.agent_at
-    out[j] = in_position
-    out[j + 1] = (clip_pnl if unreal_pnl > clip_pnl
-                  else -clip_pnl if unreal_pnl < -clip_pnl else unreal_pnl)
-    out[j + 2] = (clip_pnl if peak_unreal > clip_pnl
-                  else -clip_pnl if peak_unreal < -clip_pnl else peak_unreal)
-    out[j + 3] = price_drawdown
-    out[j + 4] = dist_to_sl
-    out[j + 5] = dist_to_tp
-    out[j + 6] = entered_on_up
-    # one-hot pos_tag в порядке POS_TAG_ORDER_V2 (none, dip, transition)
-    out[j + 7] = 1.0 if pos_tag == pos_order[0] else 0.0
-    out[j + 8] = 1.0 if pos_tag == pos_order[1] else 0.0
-    out[j + 9] = 1.0 if pos_tag == pos_order[2] else 0.0
-    out[j + 10] = cb_active
-    out[j + 11] = cb_cleared_today
-    out[j + 12] = (1.0 if cooldown_remain > 1.0 else cooldown_remain) if cd_len > 0 else 0.0
-    out[j + 13] = math.tanh(bars_in_trade / median_hold)
-    w = layout.world_at
-    out[w] = data_age
-    out[w + 1] = breaker
-    out[w + 2] = equity_drawdown
+    # Блоки агента (14) и мира (3) идут в векторе подряд (agent_at..reserved_at),
+    # поэтому пишутся ОДНИМ slice-присваиванием из кортежа — numpy конвертирует
+    # 17 питоновских float в float32 одним проходом. Это ~вдвое дешевле 17
+    # поэлементных __setitem__ (замер: 0.78 vs 1.77 мкс), и побитово идентично
+    # (та же поэлементная конверсия float→float32). Порядок значений в кортеже =
+    # AGENT_FEATURES_V2 + WORLD_RULE_FEATURES_V2; арифметика та же (ручной clamp
+    # PnL, one-hot pos_tag, tanh, cooldown clamp). Ядро остаётся ЕДИНСТВЕННЫМ —
+    # его зовут и step, и observe(), поэтому они по-прежнему побитово равны.
+    out[layout.agent_at:layout.reserved_at] = (
+        in_position,
+        (clip_pnl if unreal_pnl > clip_pnl
+         else -clip_pnl if unreal_pnl < -clip_pnl else unreal_pnl),
+        (clip_pnl if peak_unreal > clip_pnl
+         else -clip_pnl if peak_unreal < -clip_pnl else peak_unreal),
+        price_drawdown,
+        dist_to_sl,
+        dist_to_tp,
+        entered_on_up,
+        # one-hot pos_tag в порядке POS_TAG_ORDER_V2 (none, dip, transition)
+        1.0 if pos_tag == pos_order[0] else 0.0,
+        1.0 if pos_tag == pos_order[1] else 0.0,
+        1.0 if pos_tag == pos_order[2] else 0.0,
+        cb_active,
+        cb_cleared_today,
+        (1.0 if cooldown_remain > 1.0 else cooldown_remain) if cd_len > 0 else 0.0,
+        math.tanh(bars_in_trade / median_hold),
+        data_age,       # w_data_age
+        breaker,        # w_breaker_armed
+        equity_drawdown,  # w_equity_drawdown (мировая CB-просадка)
+    )
     if write_reserved:
         out[layout.reserved_at:] = RESERVED_SLOT_VALUE
     return out

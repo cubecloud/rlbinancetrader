@@ -113,6 +113,17 @@ def test_builder_v2_source_parity_real_pg():
     except Exception as exc:
         pytest.skip(f"PG недоступна: {exc!r}")
     common = win_pg.index.intersection(win_pq.index)
+    # Источники могут расходиться ТОЛЬКО на границе окна (конвенция last_full_bar:
+    # PgSource отдаёт полуоткрытый интервал и отбрасывает бар `end`, снимок хранит
+    # его закрытым) — это НЕ расхождение данных. Но ВНУТРИ окна дыр быть не должно,
+    # иначе diff по одному пересечению молча пропустил бы недостающий бар.
+    extra = set(win_pg.index) ^ set(win_pq.index)
+    boundary = {win_pg.index[0], win_pg.index[-1],
+                win_pq.index[0], win_pq.index[-1]}
+    assert extra <= boundary, f"расхождение НЕ на границе окна (дыра внутри): {sorted(extra)}"
+    # пересечение непрерывно по минутам (нет внутренних пропусков)
+    assert (common.max() - common.min()) == pd.Timedelta(minutes=len(common) - 1), (
+        "пересечение баров не непрерывно по минутам")
     core_pg = _core_from_window(win_pg)
     core_pq = _core_from_window(win_pq)
     pg_pos = pd.DatetimeIndex(win_pg.index).get_indexer(common)
@@ -120,3 +131,16 @@ def test_builder_v2_source_parity_real_pg():
     diff = int((core_pg[pg_pos] != core_pq[pq_pos]).sum())
     print(f"SOURCE-PARITY-V2 common_bars={len(common)} diff={diff}")
     assert diff == 0, f"парность источников (real PG): {diff} расхождений"
+    # ЗУБАСТОСТЬ (не «зелёный вхолостую»): сырые extended-колонки, из которых
+    # считаются торговые признаки, обязаны совпадать ПОБИТОВО на общих барах —
+    # иначе 0 расхождений признаков мог бы значить «обе стороны деградировали
+    # к нейтрали 0.5/0/0», а не «совпало по-настоящему».
+    for c in ("close", "high", "low", "volume", "quote_asset_volume",
+              "trades", "taker_buy_base"):
+        a = pd.Series(win_pg.column(c), index=win_pg.index).reindex(common).to_numpy()
+        b = pd.Series(win_pq.column(c), index=win_pq.index).reindex(common).to_numpy()
+        assert int((a != b).sum()) == 0, f"сырьё {c}: расхождение источников"
+    # и торговые признаки НЕ константны на окне (иначе побитовое равенство тривиально)
+    for k in (6, 7, 8):  # aggr, avg_trade_size, rel_volume
+        assert float(np.std(core_pg[pg_pos, k])) > 1e-3, (
+            f"торговый признак {k} константен — гейт не зубаст")

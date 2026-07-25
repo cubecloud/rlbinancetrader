@@ -52,13 +52,16 @@ def test_observation_spec_has_reserved_slots():
 def test_observation_spec_v2_composition():
     """Состав v2: блоки в порядке рынок→агент→мир→резерв, размер и хэш стабильны."""
     spec = ObservationSpec.v2()
-    assert spec.version == "v2-draft"      # provisional-константы ещё не зафиксированы
+    assert spec.version == "v2"            # финализирована: все константы зафиксированы
     assert len(spec.market) == 18          # 6 цен + 3 торговых числа + 9 сигналов v7
     assert len(spec.agent) == 14
     assert len(spec.world_rules) == 3
     assert len(spec.reserved) == 3
     assert spec.size == 38
     assert spec.constants["pos_tag_order"] == ["none", "dip", "transition"]
+    # финализированные (бывшие provisional) константы зафиксированы и в хэше
+    assert spec.constants["vwap_mode"] == "per_bar_quote_over_base"
+    assert spec.constants["avg_size_median_window_bars"] == 24 * 60
     # текущий leg_dn — определяющий разделитель гейта выхода — присутствует
     assert spec.index_of("m_leg_dn") >= 0
     names = spec.names
@@ -73,7 +76,7 @@ def test_observation_spec_v2_composition():
 def test_observation_spec_v2_constants_in_manifest():
     """Манифест v2 несёт константы нормировки и хэш спецификации (не μ/σ)."""
     d = ObservationSpec.v2().describe()
-    assert d["obs_spec_version"] == "v2-draft"
+    assert d["obs_spec_version"] == "v2"
     assert d["constants"]["median_hold_bars"] == 2442
     assert d["constants"]["clip_rel_volume"] == 3.0
     assert d["constants"]["rolling_shift"] == 1
