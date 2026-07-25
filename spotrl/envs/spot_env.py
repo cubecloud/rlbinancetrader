@@ -70,6 +70,12 @@ class SpotFlipEnv(gym.Env):
         self._equity = 1.0
         self._peak_equity = 1.0
         self._qty = 0.0
+        # ЛЕСА КОПИРОВАНИЯ (v7-clone scaffolding): режим эквити circuit breaker.
+        # v7_ledger — CB по МИРОВОЙ эквити конвенции v7 (для паритета 6/6);
+        # reward — CB по наградной эквити среды (самостоятельный режим, мировой
+        # леджер не ведётся). Флаг снимается ДО _init_world_machine (пик CB
+        # инициализируется по режиму). См. WorldConfig.cb_equity_mode.
+        self._cb_uses_v7_ledger = self.config.world.cb_equity_mode == "v7_ledger"
         self._init_world_machine()
         # Снимки конфигурации для горячего шага: цепочка `self.config.world.x`
         # стоит 0.043 мкс за обращение, а таких обращений на шаг больше десяти.
@@ -145,13 +151,21 @@ class SpotFlipEnv(gym.Env):
             _cb_halt_date: календарная дата взведения CB (снятие — на следующий
                 день).
             _cb_cleared_date: дата, в которую CB был снят (для «снят сегодня»).
-            _cb_peak: пик МИРОВОЙ эквити для расчёта просадки CB (переякоривается
-                при снятии CB в мировых единицах, как regimeb:245).
-            _world_cash: мировая эквити CB (конвенция v7); на плоском баре равна
-                кэшу счёта движка. Меняется только при закрытии сделки.
-            _world_size: целые лоты открытой сделки в мировом леджере (floor).
-            _world_entry_adj: цена входа открытой сделки с односторонней комиссией
-                (adjusted_price движка = price*(1+fee_side)).
+            _cb_peak: пик эквити для расчёта просадки CB (переякоривается при
+                снятии CB, как regimeb:245). Собственный пик машины CB, НЕ
+                `_peak_equity` (тот монотонен и обслуживает наблюдательный слот и
+                breaker_armed — переякоривать его на снятии CB нельзя). Стартовый
+                пик зависит от режима: v7_ledger → мировой кэш; reward → наградная
+                эквити (1.0 к моменту вызова и в __init__, и в reset).
+            _world_cash: ЛЕСА КОПИРОВАНИЯ — мировая эквити CB (конвенция v7); на
+                плоском баре равна кэшу счёта движка. Меняется только при закрытии
+                сделки. В режиме reward НЕ ведётся (замирает на старте) и CB не
+                читается.
+            _world_size: ЛЕСА КОПИРОВАНИЯ — целые лоты открытой сделки в мировом
+                леджере (floor). В режиме reward не ведётся.
+            _world_entry_adj: ЛЕСА КОПИРОВАНИЯ — цена входа открытой сделки с
+                односторонней комиссией (adjusted_price движка = price*(1+fee_side)).
+                В режиме reward не ведётся.
         """
         self._cooldown_until = -1
         self._cb_triggered = False
@@ -160,7 +174,12 @@ class SpotFlipEnv(gym.Env):
         self._world_cash = self.config.world.cb_equity_cash
         self._world_size = 0
         self._world_entry_adj = 0.0
-        self._cb_peak = self._world_cash
+        # Источник пика CB по режиму (см. WorldConfig.cb_equity_mode): в режиме
+        # копирования — мировой кэш конвенции v7; в самостоятельном — наградная
+        # эквити (компаунд от 1.0). Отклонение от буквального текста задачи
+        # («_peak_equity»): _peak_equity брать НЕЛЬЗЯ, он монотонный и его нельзя
+        # понизить при снятии CB — иначе CB мгновенно взводится обратно.
+        self._cb_peak = self._world_cash if self._cb_uses_v7_ledger else self._equity
         self._exit_is_signal = False
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, bool, dict]:
@@ -278,7 +297,12 @@ class SpotFlipEnv(gym.Env):
         # v7 (self.equity), поэтому cb срабатывает бар-в-бар. Наградная эквити
         # (компаунд от 1.0, двусторонняя) для CB НЕ используется — она про reward.
         now_date = self._dates[nxt]
-        world_equity = self._world_cash
+        # Источник эквити CB по режиму (ЛЕСА КОПИРОВАНИЯ, см. cb_equity_mode):
+        #   v7_ledger — мировая эквити конвенции v7 (`_world_cash`), для паритета;
+        #   reward     — наградная эквити среды (`_equity`, на плоском баре ==
+        #                локальному `equity`; берём атрибут явно). Мировой леджер в
+        #                режиме reward не ведётся и здесь не читается.
+        world_equity = self._world_cash if self._cb_uses_v7_ledger else self._equity
         # v7 оценивает cb ТОЛЬКО на плоском баре ВНЕ cooldown: в next() ранний
         # выход `if i <= _cooldown_until: return` (regimeb:306) стоит ДО проверки
         # cb (regimeb:318). Поэтому во время cooldown cb не трогаем.
@@ -383,11 +407,14 @@ class SpotFlipEnv(gym.Env):
         fee = self.config.world.fee_side
         self._qty = self._equity * (1.0 - fee) / float(price)
         self._equity = self._qty * float(price)
-        # Мировой леджер CB (конвенция v7): целые лоты по adjusted-цене входа.
-        # size = floor(cash*pct/adjusted); backtesting.py:898,937 (adjusted=892).
-        adjusted = float(price) * (1.0 + fee)
-        self._world_entry_adj = adjusted
-        self._world_size = int((self._world_cash * self._cb_pos_pct) // adjusted)
+        # ЛЕСА КОПИРОВАНИЯ — мировой леджер CB (конвенция v7): целые лоты по
+        # adjusted-цене входа. size = floor(cash*pct/adjusted); backtesting.py:
+        # 898,937 (adjusted=892). В режиме reward леджер не ведётся — не тратим
+        # шаг на него (CB его не читает).
+        if self._cb_uses_v7_ledger:
+            adjusted = float(price) * (1.0 + fee)
+            self._world_entry_adj = adjusted
+            self._world_size = int((self._world_cash * self._cb_pos_pct) // adjusted)
         self.book.open(bar, price, sl_frac=sl_frac, tp_frac=tp_frac,
                        entered_on_up=entered_on_up, pos_tag=pos_tag)
 
@@ -398,11 +425,13 @@ class SpotFlipEnv(gym.Env):
         fee = self.config.world.fee_side
         self._equity = self._qty * float(price) * (1.0 - fee)
         self._qty = 0.0
-        # Мировой леджер CB: выход по СЫРОЙ цене (комиссия односторонняя, взята
-        # на входе); pl = size*(exit − entry_adj), cash += pl (backtesting.py:
-        # 919 закрытие по сырой цене, 641 pl, 998 cash += pl).
-        self._world_cash += self._world_size * (float(price) - self._world_entry_adj)
-        self._world_size = 0
+        # ЛЕСА КОПИРОВАНИЯ — мировой леджер CB: выход по СЫРОЙ цене (комиссия
+        # односторонняя, взята на входе); pl = size*(exit − entry_adj), cash += pl
+        # (backtesting.py: 919 закрытие по сырой цене, 641 pl, 998 cash += pl).
+        # В режиме reward леджер не ведётся — не тратим шаг (CB его не читает).
+        if self._cb_uses_v7_ledger:
+            self._world_cash += self._world_size * (float(price) - self._world_entry_adj)
+            self._world_size = 0
         self.book.close(bar, price, reason)
 
 

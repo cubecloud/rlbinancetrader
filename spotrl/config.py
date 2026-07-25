@@ -44,6 +44,22 @@ class WorldConfig:
             (v7 P7 position_pct = 0.9999); целые лоты (floor). Комиссия мирового
             леджера — ОДНОсторонняя (вход ×(1+fee_side), выход по сырой цене),
             как движок backtesting.py (adjusted_price на входе, close по цене).
+        cb_equity_mode: ЛЕСА КОПИРОВАНИЯ (v7-clone scaffolding) — какой эквити
+            кормится circuit breaker.
+            * "v7_ledger" (дефолт, режим КОПИРОВАНИЯ): CB считается по МИРОВОЙ
+              эквити конвенции v7 (`_world_cash`, целые лоты, 0.9999, односторонняя
+              комиссия). Нужен, чтобы бар-в-бар повторять взвод/снятие CB движка v7
+              (паритет 6/6). См. spot_env, мировой леджер.
+            * "reward" (режим САМОСТОЯТЕЛЬНЫЙ, без клонирования): CB считается по
+              СОБСТВЕННОЙ наградной эквити среды (`_equity`, компаунд от 1.0,
+              двусторонняя комиссия). Мировой леджер `_world_cash` НЕ ведётся (шаг
+              на него не тратится) и на CB не влияет. В этом режиме конвенция v7 и
+              весь мировой леджер агенту не нужны.
+            И в том, и в другом режиме сама МАШИНА CB одна и та же (взвод по
+            просадке от собственного пика `_cb_peak`, снятие на следующий
+            календарный день с переякориванием пика); отличается только ИСТОЧНИК
+            эквити. Наблюдательный слот `equity_drawdown`/`breaker_armed` этим
+            флагом НЕ управляется (отдельное решение v2-упаковки).
     """
 
     world_version: str = "w1"
@@ -56,6 +72,7 @@ class WorldConfig:
     fee_side: float = FEE_SIDE
     cb_equity_cash: float = 10_000_000.0
     cb_position_pct: float = 0.9999
+    cb_equity_mode: str = "v7_ledger"
 
     def __post_init__(self) -> None:
         """Валидация на границе (PLAN 1.5.1, п.2)."""
@@ -75,6 +92,10 @@ class WorldConfig:
             raise ValueError("cb_equity_cash должен быть > 0")
         if not 0.0 < self.cb_position_pct <= 1.0:
             raise ValueError("cb_position_pct должен быть в (0, 1]")
+        if self.cb_equity_mode not in ("v7_ledger", "reward"):
+            raise ValueError(
+                "cb_equity_mode должен быть 'v7_ledger' или 'reward', "
+                f"получено {self.cb_equity_mode!r}")
 
     def describe(self) -> dict:
         """Сериализуемое описание для манифеста прогона."""

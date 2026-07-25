@@ -58,10 +58,12 @@ def _dataset(scenario_close, *, leg_dn=None, entry_signal=None,
     return from_frame(frame)
 
 
-def _env(dataset, *, sl=0.10, cooldown_bars=5, cb_dd=0.50, entry_own=True):
+def _env(dataset, *, sl=0.10, cooldown_bars=5, cb_dd=0.50, entry_own=True,
+         cb_equity_mode="v7_ledger"):
     """Среда на синтетическом наборе с управляемыми правилами; разогнана STAY."""
     world = WorldConfig(stop_loss_frac=sl, cooldown_bars=cooldown_bars,
-                        breaker_drawdown_frac=cb_dd, close_at_end=True)
+                        breaker_drawdown_frac=cb_dd, close_at_end=True,
+                        cb_equity_mode=cb_equity_mode)
     freedom = FreedomConfig(exit_own=True, entry_own=entry_own, params_own=False)
     # TP отключаем гигантским порогом: сценарии закрывают позицию только SL или
     # явным FLIP, чтобы рост цены не срабатывал дефолтным тейком (10%).
@@ -176,6 +178,55 @@ def test_circuit_breaker_trips_on_world_equity_drawdown():
     # мировая эквити просела, CB взведён; наградная эквити тут ни при чём
     assert env._world_cash < 7_000_000.0
     assert env.world_state().cb_active is True
+
+
+def test_reward_mode_cb_trips_on_reward_equity_not_ledger():
+    """Самостоятельный режим (cb_equity_mode='reward'): CB щёлкает по НАГРАДНОЙ
+    эквити, мировой леджер v7 НЕ ведётся и на CB не влияет.
+
+    Сценарий 100→60: наградная эквита среды проседает ~ -40% (за вычетом
+    двусторонней комиссии — глубже), порог 0.30 -> CB взводится. Мировой леджер
+    в этом режиме замирает на старте (10M) — доказательство, что взвод пришёл от
+    наградной эквити (у леджера просадка = 0), а не от конвенции v7.
+    """
+    scen = [100., 100., 60., 60., 60.]
+    env = _env(_dataset(scen, entry_signal=[True] * len(scen)),
+               sl=0.0, cooldown_bars=0, cb_dd=0.30, cb_equity_mode="reward")
+    assert env._cb_uses_v7_ledger is False
+    # пик CB стартует от НАГРАДНОЙ эквити (1.0), а не от мирового кэша
+    assert env._cb_peak == 1.0
+    env.step(_FLIP)                           # вход по open(WARMUP+1)=100
+    # мировой леджер НЕ ведётся: size остаётся 0, кэш заморожен
+    assert env._world_size == 0
+    assert env._world_cash == 10_000_000.0
+    assert env.world_state().cb_active is False
+    env.step(_STAY)                           # в позиции, close=60
+    env.step(_FLIP)                           # выход по 60 -> наградная эквита −40%
+    assert env._world_cash == 10_000_000.0    # леджер так и не тронут
+    assert env.world_state().cb_active is True
+
+
+def test_reward_mode_ignores_world_ledger():
+    """Прямая проверка «леджер не влияет»: наградная эквити здорова, но мировой
+    кэш аварийно уронен вручную ниже порога — CB НЕ взводится, значит `_world_cash`
+    в режиме reward вообще не читается CB-машиной."""
+    env = _env(_dataset([100.] * 8, entry_signal=[True] * 8),
+               sl=0.0, cooldown_bars=0, cb_dd=0.30, cb_equity_mode="reward")
+    env._world_cash = 1.0                     # авария мирового леджера
+    env.step(_STAY)                           # плоский бар, наградная эквита цела
+    assert env.world_state().cb_active is False
+
+
+def test_reward_mode_small_drawdown_does_not_trip():
+    """Контроль: в режиме reward мелкая просадка наградной эквити (< порога) НЕ
+    взводит CB (иначе tripping-тест проходил бы и на тривиально-всегда-True)."""
+    scen = [100., 100., 95., 95., 95.]        # ~ -5% валово, < порога 30%
+    env = _env(_dataset(scen, entry_signal=[True] * len(scen)),
+               sl=0.0, cooldown_bars=0, cb_dd=0.30, cb_equity_mode="reward")
+    env.step(_FLIP)
+    env.step(_STAY)
+    env.step(_FLIP)
+    assert env.world_state().cb_active is False
 
 
 def test_circuit_breaker_clears_next_calendar_day():

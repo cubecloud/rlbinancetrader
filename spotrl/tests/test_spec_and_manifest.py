@@ -97,6 +97,12 @@ def test_world_config_validation():
         WorldConfig(stop_loss_frac=1.5)
     with pytest.raises(ValueError):
         WorldConfig(max_data_age_bars=0)
+    # cb_equity_mode принимает только два режима (леса копирования); опечатка
+    # не должна тихо уйти в ветку копирования.
+    with pytest.raises(ValueError):
+        WorldConfig(cb_equity_mode="rewrad")
+    assert WorldConfig(cb_equity_mode="reward").cb_equity_mode == "reward"
+    assert WorldConfig().describe()["cb_equity_mode"] == "v7_ledger"
 
 
 def test_manifest_carries_world_version(tmp_path):
