@@ -167,19 +167,25 @@ class SpotFlipEnv(gym.Env):
                 self._close_position(nxt, close_next, "end")
                 trade, exit_reason = None, "end"
 
+        fee = self.config.world.fee_side
+        roundtrip = (1.0 - fee) ** 2  # двусторонняя комиссия (вход+выход)
         if trade is not None:
-            unreal = close_next / trade.entry_price - 1.0
+            unreal = close_next / trade.entry_price - 1.0   # валовое движение цены
             if unreal > trade.peak_unreal:
                 trade.peak_unreal = unreal
             equity = self._qty * close_next
             self._equity = equity
-            in_position, peak_unreal = 1.0, trade.peak_unreal
+            in_position = 1.0
+            # в наблюдение — ЧИСТАЯ нереализованная прибыль (что агент реально
+            # получит при выходе сейчас), согласованная с equity/наградой (реш. «а»)
+            obs_unreal = roundtrip * (1.0 + unreal) - 1.0
+            obs_peak = roundtrip * (1.0 + trade.peak_unreal) - 1.0
             bars_in_trade = float(nxt - trade.entry_bar)
-            dist_to_sl = unreal + trade.sl_frac
-            dist_to_tp = trade.tp_frac - unreal
+            dist_to_sl = unreal + trade.sl_frac   # расстояние до цены стопа — валовое
+            dist_to_tp = trade.tp_frac - unreal   # расстояние до цены тейка — валовое
         else:
             equity = self._equity
-            unreal = peak_unreal = dist_to_sl = dist_to_tp = 0.0
+            obs_unreal = obs_peak = dist_to_sl = dist_to_tp = 0.0
             in_position = bars_in_trade = 0.0
 
         if equity > self._peak_equity:
@@ -196,7 +202,7 @@ class SpotFlipEnv(gym.Env):
         layout = self._layout
         obs = write_observation(
             np.empty(layout.size, dtype=np.float32) if truncated else self._obs_buf,
-            self._market[nxt], in_position, unreal, peak_unreal, bars_in_trade,
+            self._market[nxt], in_position, obs_unreal, obs_peak, bars_in_trade,
             dist_to_sl, dist_to_tp, 1.0, float(-equity_drawdown >= self._breaker_dd),
             equity_drawdown, layout, truncated)
         # terminated всегда False: эпизод не имеет поглощающего состояния,
@@ -209,12 +215,15 @@ class SpotFlipEnv(gym.Env):
         if trade is None:
             return AgentState()
         price = float(self._close[self._t])
-        unreal = price / trade.entry_price - 1.0
-        return AgentState(in_position=True, unreal_pnl=unreal,
-                          peak_unreal=trade.peak_unreal,
+        unreal = price / trade.entry_price - 1.0            # валовое движение цены
+        roundtrip = (1.0 - self.config.world.fee_side) ** 2  # двусторонняя комиссия
+        return AgentState(in_position=True,
+                          # ЧИСТАЯ нереализованная прибыль (реш. «а»), как в step
+                          unreal_pnl=roundtrip * (1.0 + unreal) - 1.0,
+                          peak_unreal=roundtrip * (1.0 + trade.peak_unreal) - 1.0,
                           bars_in_trade=self._t - trade.entry_bar,
-                          dist_to_sl=unreal + trade.sl_frac,
-                          dist_to_tp=trade.tp_frac - unreal)
+                          dist_to_sl=unreal + trade.sl_frac,   # валовое расстояние до стопа
+                          dist_to_tp=trade.tp_frac - unreal)   # валовое расстояние до тейка
 
     def world_state(self) -> WorldState:
         """Наблюдаемая часть правил мира на текущем баре."""
