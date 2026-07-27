@@ -1,9 +1,10 @@
 """Slow интеграционные тесты BC-пайплайна на синтетических parquet.
 
-Прогоняют реальные пути обучения (logsumexp + hard-negative mining, сборка
-sb3-PPO), teacher-forced гейта и closed-loop диагностики на крошечных данных —
-проверяют, что код исполняется end-to-end и метрики согласованы. Под slow-маркером
-(в быстрый набор не входят). Полный прогон на реальных ~2.9М строках — через CLI.
+Прогоняют реальные пути обучения (регуляризованная взвешенная BCE + label
+smoothing, сборка sb3-PPO), teacher-forced гейта, closed-loop диагностики и
+кросс-эпохового AUC-стража на крошечных данных — проверяют, что код исполняется
+end-to-end и метрики согласованы. Под slow-маркером (в быстрый набор не входят).
+Полный прогон на реальных ~2.9М строках — через CLI.
 """
 from __future__ import annotations
 
@@ -55,7 +56,6 @@ def test_bc_pipeline_end_to_end(tiny_data, monkeypatch):
     from spotrl.bc import closed_loop, eval_gate
 
     monkeypatch.setattr(T, "N_EPOCHS", 4)
-    monkeypatch.setattr(T, "HN_SIZE", 128)
     monkeypatch.setattr(T, "BATCH", 1024)
     monkeypatch.setattr(T, "HIDDEN", (32, 32))
 
@@ -97,7 +97,6 @@ def test_cli_entrypoints(tiny_data, monkeypatch):
     from spotrl.bc import eval_gate, exit_collision
 
     monkeypatch.setattr(T, "N_EPOCHS", 3)
-    monkeypatch.setattr(T, "HN_SIZE", 128)
     monkeypatch.setattr(T, "BATCH", 1024)
     monkeypatch.setattr(T, "HIDDEN", (32, 32))
     # train() читает N_EPOCHS через default аргумента, связанный при def → передаём явно.
@@ -130,19 +129,39 @@ def test_cross_epoch_generalization_runs(tiny_data):
     res = run_cross_epoch(str(tiny_data), n_epochs=3)
     assert {r.train_epoch for r in res} == {"2021", "2024"}
     for r in res:
-        assert np.isfinite(r.gap_in) and np.isfinite(r.gap_out)
         assert isinstance(r.generalizes, bool)
-        assert set(r.describe()) >= {"gap_in", "gap_out", "generalizes"}
+        assert set(r.describe()) >= {"auc_entry_out", "auc_exit_out", "generalizes"}
 
 
 @pytest.mark.slow
-def test_cross_epoch_cli(tiny_data, monkeypatch):
-    """CLI main() кросс-эпоховой проверки исполняется на синтетике."""
+def test_cross_epoch_cli_with_collision(tiny_data, monkeypatch):
+    """CLI main() кросс-эпоховой проверки с --collision (страж + d-распределение)."""
     import sys
+    import spotrl.bc.train_clone as T
     from spotrl.bc import generalization
+    monkeypatch.setattr(T, "N_EPOCHS", 3)
+    monkeypatch.setattr(T, "BATCH", 1024)
+    monkeypatch.setattr(T, "HIDDEN", (32, 32))
     orig = generalization.run_cross_epoch
     monkeypatch.setattr(generalization, "run_cross_epoch",
                         lambda data, **k: orig(data, n_epochs=3))
     out = str(tiny_data / "gen.json")
-    monkeypatch.setattr(sys, "argv", ["gen", "--data", str(tiny_data), "--out", out])
+    monkeypatch.setattr(sys, "argv",
+                        ["gen", "--data", str(tiny_data), "--out", out,
+                         "--collision"])
     generalization.main()
+
+
+@pytest.mark.slow
+def test_collision_d_dist_direct(tiny_data):
+    """collision_d_dist возвращает d-распределение held/exited на своротных барах."""
+    import spotrl.bc.train_clone as T
+    from spotrl.bc import generalization
+    generalization.collision_d_dist.data_dir = str(tiny_data)
+    X_raw, y, w, meta = T.load_pooled(str(tiny_data))
+    mu, sd = T.fit_scaler(X_raw)
+    Xn = T.apply_scaler(X_raw, mu, sd)
+    _, policy = T.build_policy(Xn.shape[1], 0)
+    c = generalization.collision_d_dist(policy, Xn, meta, "2021")
+    assert set(c) == {"n_held", "n_exited", "d_held", "d_exited"}
+    assert len(c["d_held"]) == 3 and len(c["d_exited"]) == 3

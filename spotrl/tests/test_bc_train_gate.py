@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from spotrl.bc.exit_collision import run_epoch
+from spotrl.bc.generalization import _auc, _recall_fpr_at_train_thr
 from spotrl.bc.train_clone import apply_scaler, calibrate_shift, fit_scaler
 
 
@@ -82,3 +83,25 @@ def test_calibrate_shift_infeasible_when_overlap():
     d = {"e": {"stay": rng.normal(0, 5, 10000), "flip_all": rng.normal(2, 5, 400)}}
     cal = calibrate_shift(d)
     assert not cal.feasible
+    # s* (FPR-anchored) ВСЕГДА определён, даже при infeasible интервале.
+    assert np.isfinite(cal.s_star)
+
+
+def test_generalization_auc_helper_edges():
+    """_auc: NaN при одном классе, идеальный порядок → 1.0."""
+    assert np.isnan(_auc(np.array([1.0, 2.0]), np.array([0, 0])))
+    assert np.isnan(_auc(np.array([1.0, 2.0]), np.array([1, 1])))
+    assert _auc(np.array([0.1, 0.2, 0.9, 1.0]),
+                np.array([0, 0, 1, 1])) == 1.0
+
+
+def test_generalization_recall_fpr_helper():
+    """_recall_fpr_at_train_thr: порог по train, recall/FPR на test; NaN без pos."""
+    # 2 train-позитива, target=0.995 → k=1 → порог = верхний позитив (1.0).
+    tr_s = np.array([0.0, 0.1, 0.9, 1.0]); tr_y = np.array([0, 0, 1, 1])
+    te_s = np.array([0.05, 1.5]); te_y = np.array([0, 1])
+    rec, fpr = _recall_fpr_at_train_thr(tr_s, tr_y, te_s, te_y, target=0.995)
+    assert rec == 1.0 and fpr == 0.0
+    # нет позитивов в train → NaN.
+    r2, f2 = _recall_fpr_at_train_thr(tr_s, np.zeros(4, int), te_s, te_y)
+    assert np.isnan(r2) and np.isnan(f2)

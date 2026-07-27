@@ -1,0 +1,28 @@
+[
+  {
+    "train_epoch": "2021",
+    "test_epoch": "2024",
+    "auc_entry_in": 0.9999976753349852,
+    "auc_entry_out": 0.9999993146964608,
+    "auc_exit_in": 0.9999979262962918,
+    "auc_exit_out": 0.9999686736225076,
+    "recall_entry_out": 0.9814814814814815,
+    "fpr_entry_out": 8.673372918607334e-06,
+    "recall_exit_out": 0.96,
+    "fpr_exit_out": 0.00011442508920640178,
+    "generalizes": true
+  },
+  {
+    "train_epoch": "2024",
+    "test_epoch": "2021",
+    "auc_entry_in": 0.9999977834713653,
+    "auc_entry_out": 0.9997986076646214,
+    "auc_exit_in": 0.999990494687765,
+    "auc_exit_out": 0.9912374558388424,
+    "recall_entry_out": 0.9044117647058824,
+    "fpr_entry_out": 0.0006533080720878793,
+    "recall_exit_out": 0.8303571428571429,
+    "fpr_exit_out": 0.00012712895154064397,
+    "generalizes": true
+  }
+]

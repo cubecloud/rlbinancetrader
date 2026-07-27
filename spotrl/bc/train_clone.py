@@ -1,32 +1,44 @@
 """Обучение клона v7 (BC, supervised) головы 0 (STAY/FLIP) на наблюдении v2.
 
-Что делает (ШАГ 2 pre-reg BC). Обучает сеть политики sb3-PPO (`MlpPolicy`,
-пространство действий копи-спека `MultiDiscrete([2,1,1])`) предсказывать действие
-головы 0 по наблюдению v2 взвешенным CE. Головы SL/TP в копировании ВЫРОЖДЕНЫ
-(nvec=1 → log_prob≡0, entropy≡0) и дополнительно занулены loss-маской
-(`algo/head_masking`), поэтому в BC не учатся — как и требует pre-reg.
+ЗАХОД «b» (2026-07-27): наблюдение v2 ДОСТАТОЧНО (диагностика
+`diag_obs_sufficiency_2026-07-26.md`: семантика правила v7 разделяет классы
+out-of-epoch, LR AUC вход ~0.98, выход ~0.94). Прежний провал клона был не
+MDP-недостаточностью, а ОБЪЕКТИВОМ: ±80 logsumexp/hard-negative max-margin
+мемоизировал шум (зазор 87 nat при нужных 20.3, логиты ±80, FPR≈1e-23,
+out-of-epoch зазор −110/−158). Этот модуль заменяет тот объектив на НОРМАЛЬНЫЙ
+регуляризованный.
 
-Почему именно сеть sb3-PPO, а не выкидной sklearn: обучается ТА сеть, что засеет
-PPO на этапе RL (`model.save`). Голова 0 = первые 2 логита `action_net`
-(MultiDiscrete split [2,1,1]).
+Что делает. Обучает сеть политики sb3-PPO (`MlpPolicy`, копи-спек
+`MultiDiscrete([2,1,1])`) предсказывать действие головы 0 по наблюдению v2
+ВЗВЕШЕННОЙ кросс-энтропией с label smoothing. Головы SL/TP в копировании
+ВЫРОЖДЕНЫ (nvec=1 → log_prob≡0) и loss-маскированы — в BC не учатся (pre-reg §7).
 
-Дисциплина сдвига логита (pre-reg §2, редакция 2026-07-27). Сдвиг s добавляется к
-логиту FLIP: p(FLIP)=sigmoid(d+s), d=logit_FLIP−logit_STAY. ПРАВИЛО выбора s
-зафиксировано ДО замера гейта как детерминированная функция train-распределения:
-  s_lo = min s: recall_flip (per-epoch min, ОБЕ стороны) >= 0.995;
-  s_hi = max s: FPR (per-epoch max) <= 3e-7;
-  s* = (s_lo + s_hi)/2, если s_lo<=s_hi (иначе скалярный сдвиг НЕ существует).
+Регуляризация (всё ФИКСИРУЕТСЯ ДО обучения, pre-reg):
+  * взвешенная BCE-with-logits на d=z_FLIP−z_STAY: класс FLIP редок (~2.5e-4),
+    вес w_pos=n_stay/n_flip выравнивает вклад классов (иначе коллапс в «всегда
+    STAY»);
+  * label smoothing eps=1e-5 → мягкий КАП уверенного логита |d|≈ln((1−eps)/eps)
+    ≈11.5 nat. Это (i) не даёт гиперуверенности (p(ложн.FLIP)≈6e-6, а НЕ 1e-23 —
+    политика годна под PPO: разведка жива, градиент не мёртв), (ii) оставляет
+    сэмплированный гейт ДОСТИЖИМЫМ: 2·11.5=23 > нужных 20.3 nat, если данные
+    разделимы in-sample. eps выбран по PPO-безопасности ДО замера гейта, НЕ под
+    его прохождение; после обучения печатается max|d| — КАП обязан связывать;
+  * реальный weight_decay=1e-4 (прежний 1e-6 был no-op → логиты уходили в ±80);
+  * клип нормы градиента 5.0.
+
+Дисциплина сдвига логита (pre-reg §2, редакция 2026-07-27, FPR-anchored). Сдвиг s
+добавляется к d: p(FLIP)=sigmoid(d+s). ПРАВИЛО (детерминированное, ДО замера):
+  s_hi = max s: FPR (per-epoch max, ожидание sigmoid(stay+s)) <= FPR_TARGET;
+  s_lo = min s: recall (per-epoch min, вход и выход) >= RECALL_FLOOR;
+  s* = s_hi  (ЯКОРЬ на цель FPR — всегда определён; recall — ИСХОД, не подгон).
+  feasible = s_lo <= s_hi (существует s с ОБОИМИ порогами одновременно).
 Калибровочная выборка = обучающая (эпохи смешаны для BC, истинного holdout нет —
-честно помечено; этот гейт = воспроизведение v7 на ТОЙ ЖЕ ленте, что и есть
-бар-в-бар гейт). s НЕ сканируется под прохождение гейта — это середина
-допустимого интервала.
-
-Дисбаланс FLIP (~2.5e-4): все FLIP-бары (их 808) включаются в каждый шаг, STAY —
-миничанками + глобальные hard-negatives. Обучение детерминированное по сиду.
+честно; это воспроизведение v7 на ТОЙ ЖЕ ленте = операционный копировальный гейт).
+s НЕ сканируется под прохождение гейта.
 
 Run (env rlbinancetrader):
   python -m spotrl.bc.train_clone --data /home/cubecloud/Data/rlbinancetrader \
-      --out /home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy
+      --out /home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy_reg
 """
 from __future__ import annotations
 
@@ -41,26 +53,23 @@ import numpy as np
 # --- ФИКСИРУЕТСЯ ДО ОБУЧЕНИЯ (pre-reg) ---
 FPR_TARGET = 3e-7           # порог ложного FLIP на бар (обе эпохи)
 RECALL_FLOOR = 0.995        # recall_flip per-epoch, вход и выход раздельно
-N_EPOCHS = 25               # проходов обучения (зазор>=20 nat достигается к ~15)
+N_EPOCHS = 40               # проходов обучения
 LR = 5e-4
-BATCH = 65536               # размер STAY-миничанка
+BATCH = 65536               # размер STAY-миничанка на шаг
 HIDDEN = (256, 256)         # архитектура MLP политики (net_arch pi)
 TRAIN_SEED = 0
 
-# --- WORST-CASE (max-margin) лосс на d = logit_FLIP − logit_STAY (ФИКС. ДО обуч.)
-# ГЛАВНОЕ (эмпирика 2026-07-27): гейт определяется ХУДШИМ баром (min_FLIP, max_STAY),
-# т.е. это L∞/max-margin задача, НЕ средняя. Взвешенный BCE и СРЕДНИЙ маржинальный
-# лосс дают пересекающиеся хвосты (зазор −7…−10 nat при отделимых данных, L2-маржа
-# 0.95, argmax при этом ИДЕАЛЕН). Worst-case лосс через logsumexp (гладкий max) +
-# глобальный hard-negative mining прямо максимизирует зазор:
-#   L = logsumexp_FLIP(M − d) + logsumexp_STAY∪HN(M + d)
-# logsumexp≈max → минимизирует (M − min_FLIP d) и (M + max_STAY d) → тянет
-# min_FLIP(d) вверх и max_STAY(d) вниз. HN = HN_SIZE глобально худших STAY-баров
-# (пересчёт каждую эпоху), включаются в КАЖДЫЙ шаг — иначе per-minibatch max играет
-# в whack-a-mole и глобальный max_STAY не давится. Достигнутый зазор ~28 nat >
-# нужных 20.3 (обе эпохи). M/HN_SIZE фиксируются ДО обучения.
-MARGIN_M = 12.0
-HN_SIZE = 16384             # глобально худших STAY на шаг (hard-negative mining)
+# --- РЕГУЛЯРИЗАЦИЯ (взамен ±80 logsumexp/hard-negative; ФИКС. ДО обучения) ---
+LABEL_SMOOTH = 1e-5         # eps: мягкий кап |d|≈ln((1-eps)/eps)≈11.5 nat
+WEIGHT_DECAY = 1e-4         # реальный L2 (прежний 1e-6 был no-op)
+GRAD_CLIP = 5.0             # клип нормы градиента
+# Баланс классов = МАКРО-усреднение: loss = FLIP_WEIGHT*mean_FLIP + mean_STAY.
+# Термы уже НОРМИРОВАНЫ на размер класса (mean), поэтому при FLIP_WEIGHT=1 оба
+# класса дают равный вклад — это и есть баланс редкого FLIP (2.5e-4) без коллапса
+# в «всегда STAY». Домножать ещё на n_stay/n_flip (~3600) НЕЛЬЗЯ — это двойной
+# учёт баланса и коллапс в «всегда FLIP». FLIP_WEIGHT фиксируется ДО обучения.
+FLIP_WEIGHT = 1.0
+CAP_D = float(np.log((1.0 - LABEL_SMOOTH) / LABEL_SMOOTH))  # ~11.51 nat
 
 OBS_PREFIXES = ("m_", "a_", "w_", "rule_")
 CLIP_STD = 10.0             # клип стандартизованного входа
@@ -75,9 +84,9 @@ def fit_scaler(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Статистики стандартизации входа (mu, sd) по пулу train. sd-пол 1e-6.
 
     Стандартизация обязательна: сырые признаки разного масштаба (m_leg_age до
-    ~1158 против булевых) иначе доминируют первый слой и душат маржу логита.
-    Статистики ФИКСИРУЮТСЯ и сохраняются в манифест — на serve/RL применять те же
-    (иначе разрыв train/serve). Константные признаки (rule_slot) → sd=1 (нейтраль).
+    ~1158 против булевых) иначе доминируют первый слой. Статистики ФИКСИРУЮТСЯ и
+    сохраняются в манифест — на serve/RL применять те же (иначе разрыв
+    train/serve). Константные признаки → sd=1 (нейтраль).
     """
     mu = X.mean(axis=0)
     sd = X.std(axis=0)
@@ -92,12 +101,12 @@ def apply_scaler(X: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarray:
 
 @dataclass
 class ShiftCalibration:
-    """Результат калибровки скалярного сдвига логита (pre-reg §2)."""
+    """Результат FPR-anchored калибровки скалярного сдвига логита (pre-reg §2)."""
 
-    s_lo: float
-    s_hi: float
-    s_star: float
-    feasible: bool
+    s_lo: float                  # min s: recall >= RECALL_FLOOR (per-epoch)
+    s_hi: float                  # max s: FPR <= FPR_TARGET (per-epoch)
+    s_star: float                # = s_hi (якорь на FPR, всегда определён)
+    feasible: bool               # s_lo <= s_hi (оба порога сразу достижимы)
     gap_nat: float               # min_FLIP(d) − max_STAY(d), пул обеих эпох
     gap_needed: float            # logit(recall)−logit(FPR) ≈ 20.3 nat
 
@@ -111,7 +120,8 @@ def load_pooled(data_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict
 
     Returns:
         X (N,38) float32, y (N,) int (голова 0), w (N,) веса bc_weight,
-        per_epoch: словарь эпоха -> индексы/маски для раздельного замера гейта.
+        meta: per_epoch словарь эпоха -> индексы/маски (is_entry/is_exit/is_stay/
+        in_pos) для раздельного замера гейта и кросс-эпоховой AUC.
     """
     import pandas as pd
     frames = []
@@ -126,11 +136,15 @@ def load_pooled(data_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict
         y = df["bc_action"].to_numpy().astype(np.int64)
         w = df["bc_weight"].to_numpy(np.float32)
         idx = np.arange(off, off + len(df))
+        in_pos = (df["a_in_position"].to_numpy() > 0.5
+                  if "a_in_position" in df.columns
+                  else np.zeros(len(df), bool))
         meta[epoch] = {
             "idx": idx,
             "is_entry": df["is_flip_entry"].to_numpy().astype(bool),
             "is_exit": df["is_flip_exit"].to_numpy().astype(bool),
             "is_stay": (y == 0),
+            "in_pos": in_pos,
         }
         Xs.append(X); ys.append(y); ws.append(w); off += len(df)
     return (np.concatenate(Xs), np.concatenate(ys),
@@ -140,7 +154,6 @@ def load_pooled(data_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict
 def build_policy(obs_dim: int, seed: int):
     """Собрать sb3-PPO политику копи-спека; вернуть (model, policy)."""
     import gymnasium as gym
-    import torch as th
     from stable_baselines3 import PPO
     from stable_baselines3.common.env_util import make_vec_env
 
@@ -194,70 +207,88 @@ def _d_of(policy, xb):
     return logits[:, 1] - logits[:, 0]
 
 
-def _all_stay_d(policy, Xt, stay_idx) -> np.ndarray:
-    """Логит-разница d по ВСЕМ STAY-барам (для выбора глобальных hard-negatives)."""
-    import torch as th
-    policy.set_training_mode(False)
-    out = np.empty(len(stay_idx), dtype=np.float32)
-    with th.no_grad():
-        for i in range(0, len(stay_idx), 200000):
-            b = stay_idx[i:i + 200000]
-            out[i:i + len(b)] = _d_of(policy, Xt[b]).cpu().numpy()
-    return out
-
-
 def train(policy, X, y, w, seed: int, n_epochs: int = N_EPOCHS,
           lr: float = LR) -> Dict:
-    """Worst-case (max-margin) обучение головы 0 через logsumexp + hard-neg mining.
+    """Регуляризованное обучение головы 0: взвешенная BCE(d) + label smoothing.
 
-    Головы SL/TP вырождены (nvec=1 → log_prob≡0) и loss-маскированы (no-op) — в BC
-    не учатся. Бары с bc_weight=0 (анти-каузальный forced_eod STAY, 1 строка)
-    исключаются из обучения.
+    Объектив (взамен ±80 logsumexp): BCE-with-logits на d=z_FLIP−z_STAY с
+    целью t = y*(1−eps) + (1−y)*eps (label smoothing) и весом класса FLIP
+    w_pos=n_stay/n_flip. Label smoothing даёт мягкий кап |d|≈CAP_D. Каждый шаг =
+    ВСЕ FLIP-бары + случайный STAY-чанк (гарантирует FLIP-градиент, балансирует
+    редкий класс). Реальный weight_decay + клип нормы градиента.
+
+    Головы SL/TP вырождены (nvec=1) и loss-маскированы (no-op). Бары с
+    bc_weight=0 (анти-каузальный forced_eod STAY) исключаются.
     """
     import torch as th
+    import torch.nn.functional as F
     th.manual_seed(seed)
     np.random.seed(seed)
     dev = policy.device
-    opt = th.optim.Adam(policy.parameters(), lr=lr, weight_decay=1e-6)
+    opt = th.optim.Adam(policy.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
     Xt = th.as_tensor(X, device=dev)
     keep = w > 0.0
     flip_idx = np.where((y == 1) & keep)[0]
     stay_idx = np.where((y == 0) & keep)[0]
+    if len(flip_idx) == 0 or len(stay_idx) == 0:
+        return {"loss_hist": [], "final_loss": float("nan"), "w_pos": 0.0}
+    w_pos = float(len(stay_idx) / len(flip_idx))   # ДИАГНОСТИКА (не множитель)
     Xf = Xt[flip_idx]
+    tgt_flip = th.full((len(flip_idx),), 1.0 - LABEL_SMOOTH, device=dev)
     hist = []
-    for epoch in range(n_epochs):
-        sd_all = _all_stay_d(policy, Xt, stay_idx)
-        hard = stay_idx[np.argsort(sd_all)[-HN_SIZE:]]      # глобально худшие STAY
+    for _ in range(n_epochs):
         policy.set_training_mode(True)
         perm = np.random.permutation(stay_idx)
         tot = 0.0
         for i in range(0, len(perm), BATCH):
             b = perm[i:i + BATCH]
-            d_flip = _d_of(policy, Xf)                       # все FLIP
-            d_stay = _d_of(policy, Xt[np.concatenate([b, hard])])
-            loss = (th.logsumexp(MARGIN_M - d_flip, 0)
-                    + th.logsumexp(MARGIN_M + d_stay, 0))
-            opt.zero_grad(); loss.backward(); opt.step()
+            d_flip = _d_of(policy, Xf)
+            d_stay = _d_of(policy, Xt[b])
+            tgt_stay = th.full((len(b),), LABEL_SMOOTH, device=dev)
+            # макро-баланс: каждый класс = один mean-BCE терм (равный вклад).
+            loss_flip = F.binary_cross_entropy_with_logits(
+                d_flip, tgt_flip, reduction="mean") * FLIP_WEIGHT
+            loss_stay = F.binary_cross_entropy_with_logits(
+                d_stay, tgt_stay, reduction="mean")
+            loss = loss_flip + loss_stay
+            opt.zero_grad(); loss.backward()
+            th.nn.utils.clip_grad_norm_(policy.parameters(), GRAD_CLIP)
+            opt.step()
             tot += float(loss)
         hist.append(tot)
-    return {"loss_hist": hist, "final_loss": hist[-1]}
+    return {"loss_hist": hist, "final_loss": hist[-1], "w_pos": w_pos}
+
+
+def entropy_stats(logits2: np.ndarray) -> Dict[str, float]:
+    """Энтропия головы 0 (nat) по логитам (N,2): mean/max + max|d|.
+
+    Health-чек для PPO-handoff: гиперуверенность (энтропия≈0, |d|≈±80) =
+    отравленная инициализация. Здесь печатается ПО КЛАССАМ (STAY/FLIP) в main.
+    """
+    z = logits2 - logits2.max(axis=1, keepdims=True)
+    p = np.exp(z); p /= p.sum(axis=1, keepdims=True)
+    ent = -(p * np.log(np.clip(p, 1e-30, 1.0))).sum(axis=1)
+    d = logits2[:, 1] - logits2[:, 0]
+    return {"ent_mean": float(ent.mean()), "ent_max": float(ent.max()),
+            "abs_d_max": float(np.abs(d).max())}
 
 
 def calibrate_shift(d_by_epoch: Dict[str, Dict[str, np.ndarray]]) -> ShiftCalibration:
-    """Найти s-интервал и s* по ПРАВИЛУ pre-reg (детерминированно).
+    """FPR-anchored калибровка сдвига s* по ПРАВИЛУ pre-reg (детерминированно).
 
     d_by_epoch[epoch] = {"stay": d[stay], "flip_all": d[entry|exit]}.
-    recall/FPR при сдвиге s считаются как средние sigmoid(d+s) (ожидание доли
-    сэмплированных FLIP — точный per-decision предел при бесконечных сидах).
+    recall/FPR при сдвиге s = ожидание доли сэмплированных FLIP (средние
+    sigmoid(d+s)) — точный per-decision предел при бесконечных сидах.
+    s* = s_hi (максимальный s с FPR<=цели, обе эпохи) — ЯКОРЬ на цель FPR,
+    всегда определён; recall при s* — ИСХОД (репортится гейтом), не подгоняется.
     """
     def sig(x):
         """Сигмоида (вероятность FLIP при сдвиге логита)."""
         return 1.0 / (1.0 + np.exp(-np.clip(x, -60, 60)))
 
-    # Сетка s: достаточно плотная в диапазоне, покрывающем оба порога.
     all_d = np.concatenate([np.concatenate([v["stay"], v["flip_all"]])
                             for v in d_by_epoch.values()])
-    grid = np.linspace(all_d.min() - 40, all_d.max() + 40, 20001)
+    grid = np.linspace(all_d.min() - 40, all_d.max() + 40, 40001)
 
     recall_ok = np.ones_like(grid, dtype=bool)
     fpr_ok = np.ones_like(grid, dtype=bool)
@@ -268,9 +299,9 @@ def calibrate_shift(d_by_epoch: Dict[str, Dict[str, np.ndarray]]) -> ShiftCalibr
         fpr_ok &= (fpr <= FPR_TARGET)
     # recall растёт с s, FPR тоже растёт с s → recall_ok = s>=s_lo, fpr_ok = s<=s_hi.
     s_lo = float(grid[recall_ok][0]) if recall_ok.any() else float("inf")
-    s_hi = float(grid[fpr_ok][-1]) if fpr_ok.any() else float("-inf")
+    s_hi = float(grid[fpr_ok][-1]) if fpr_ok.any() else float(grid[0])
     feasible = s_lo <= s_hi
-    s_star = (s_lo + s_hi) / 2 if feasible else float("nan")
+    s_star = s_hi                        # FPR-anchored, всегда определён
 
     gap = min(v["flip_all"].min() - v["stay"].max() for v in d_by_epoch.values())
     return ShiftCalibration(s_lo=s_lo, s_hi=s_hi, s_star=s_star, feasible=feasible,
@@ -282,20 +313,32 @@ def main() -> None:
     """CLI: обучить клон BC на пуле обеих эпох, сохранить политику + манифест."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="/home/cubecloud/Data/rlbinancetrader")
-    ap.add_argument("--out", default="/home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy")
+    ap.add_argument(
+        "--out",
+        default="/home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy_reg")
     ap.add_argument("--seed", type=int, default=TRAIN_SEED)
     args = ap.parse_args()
 
     X_raw, y, w, meta = load_pooled(args.data)
     mu, sd = fit_scaler(X_raw)
     X = apply_scaler(X_raw, mu, sd)
-    print(f"пул: {X.shape}, FLIP={int((y == 1).sum())}, M={MARGIN_M} HN={HN_SIZE}")
+    print(f"пул: {X.shape}, FLIP={int((y == 1).sum())}, "
+          f"eps={LABEL_SMOOTH} cap|d|~{CAP_D:.2f} wd={WEIGHT_DECAY}")
     model, policy = build_policy(X.shape[1], args.seed)
     tr = train(policy, X, y, w, args.seed)
-    print(f"обучение: final_loss={tr['final_loss']:.4e}")
+    print(f"обучение: final_loss={tr['final_loss']:.4e} w_pos={tr['w_pos']:.1f}")
 
     logits = head0_logits(policy, X)
     d = logits[:, 1] - logits[:, 0]
+    # энтропия ПО КЛАССАМ (health для PPO).
+    is_stay = (y == 0)
+    is_flip = (y == 1)
+    es = entropy_stats(logits[is_stay])
+    ef = entropy_stats(logits[is_flip])
+    print(f"энтропия head0: STAY mean={es['ent_mean']:.4f} | "
+          f"FLIP mean={ef['ent_mean']:.4f} | max|d|={es['abs_d_max']:.2f} "
+          f"(cap {CAP_D:.2f})")
+
     d_by_epoch = {}
     for epoch, m in meta["per_epoch"].items():
         di = d[m["idx"]]
@@ -311,10 +354,15 @@ def main() -> None:
     out = Path(args.out)
     model.save(str(out))
     manifest = {
-        "seed": args.seed, "margin_m": MARGIN_M, "hn_size": HN_SIZE,
+        "objective": "weighted_BCE_label_smooth",
+        "seed": args.seed, "label_smooth": LABEL_SMOOTH,
+        "weight_decay": WEIGHT_DECAY, "grad_clip": GRAD_CLIP, "cap_d": CAP_D,
+        "flip_weight": FLIP_WEIGHT, "w_pos_diag": tr["w_pos"],
         "fpr_target": FPR_TARGET,
         "recall_floor": RECALL_FLOOR, "n_epochs": N_EPOCHS, "lr": LR,
         "hidden": list(HIDDEN), "final_loss": tr["final_loss"],
+        "abs_d_max": es["abs_d_max"],
+        "entropy_stay_mean": es["ent_mean"], "entropy_flip_mean": ef["ent_mean"],
         "shift": cal.__dict__, "obs_cols": meta["cols"],
         "clip_std": CLIP_STD,
         "scaler_mu": [float(x) for x in mu],

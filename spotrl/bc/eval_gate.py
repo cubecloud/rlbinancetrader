@@ -138,9 +138,12 @@ def main() -> None:
     mf = json.loads(Path(args.model + ".manifest.json").read_text())
     mu = np.array(mf["scaler_mu"], np.float32)
     sd = np.array(mf["scaler_sd"], np.float32)
-    s_star = float(mf["shift"]["s_star"]) if mf["shift"]["feasible"] else 0.0
+    # s* — FPR-anchored (s_hi), всегда определён; НЕ падаем на 0 (это ломало бы
+    # порог). feasible печатается отдельно как признак одновременной достижимости.
+    s_star = float(mf["shift"]["s_star"])
     print(f"s* = {s_star} (feasible={mf['shift']['feasible']}, "
-          f"gap_train={mf['shift']['gap_nat']:.2f})")
+          f"gap_train={mf['shift']['gap_nat']:.2f}, "
+          f"max|d|={mf.get('abs_d_max', float('nan')):.2f})")
     model = PPO.load(args.model, device="cpu")
 
     tf = teacher_forced(model.policy, args.data, s_star, mu, sd, args.seeds)

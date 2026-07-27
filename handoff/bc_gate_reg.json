@@ -1,0 +1,65 @@
+{
+  "s_star": -11.715701259756088,
+  "seeds": 100,
+  "teacher_forced": {
+    "2021": {
+      "epoch": "2021",
+      "n_stay": 1675243,
+      "n_entry": 272,
+      "n_exit": 224,
+      "gap_nat": -5.35435676574707,
+      "fpr_mean": 2.686177467985241e-07,
+      "fpr_max": 1.1938566524378851e-06,
+      "recall_entry_mean": 0.09981617647058823,
+      "recall_exit_mean": 0.2608035714285714,
+      "recall_entry_min": 0.058823529411764705,
+      "recall_exit_min": 0.20535714285714285,
+      "argmax_entry": 0,
+      "argmax_exit": 43,
+      "argmax_false_flip": 0,
+      "passed": false
+    },
+    "2024": {
+      "epoch": "2024",
+      "n_stay": 1240667,
+      "n_entry": 162,
+      "n_exit": 150,
+      "gap_nat": -3.895077705383301,
+      "fpr_mean": 6.448144425538843e-08,
+      "fpr_max": 8.060180531923554e-07,
+      "recall_entry_mean": 0.0911111111111111,
+      "recall_exit_mean": 0.23079999999999998,
+      "recall_entry_min": 0.043209876543209874,
+      "recall_exit_min": 0.18,
+      "argmax_entry": 0,
+      "argmax_exit": 28,
+      "argmax_false_flip": 0,
+      "passed": false
+    }
+  },
+  "closed_loop": {
+    "2021": {
+      "seeds": 100,
+      "clean_runs": 0,
+      "clean_frac": 0.0,
+      "clean_frac_analytic": 0.0,
+      "false_flip_per_run_max": 2,
+      "resid_min": 0.000272,
+      "resid_med": 0.000272,
+      "resid_max": 0.000272,
+      "resid_note": "чистый прогон = эксперт бар-в-бар → residual = валидированное pre-reg §3 значение; грязные прогоны имеют иной набор сделок (см. false_flip_per_run_max)"
+    },
+    "2024": {
+      "seeds": 100,
+      "clean_runs": 0,
+      "clean_frac": 0.0,
+      "clean_frac_analytic": 0.0,
+      "false_flip_per_run_max": 1,
+      "resid_min": 0.000304,
+      "resid_med": 0.000304,
+      "resid_max": 0.000304,
+      "resid_note": "чистый прогон = эксперт бар-в-бар → residual = валидированное pre-reg §3 значение; грязные прогоны имеют иной набор сделок (см. false_flip_per_run_max)"
+    }
+  },
+  "verdict_clone_ready": false
+}

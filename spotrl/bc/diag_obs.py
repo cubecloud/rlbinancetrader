@@ -28,16 +28,19 @@ EXIT_DECISION = ["m_exit_flag"]
 ENTRY_DECISION = ["m_entry_signal","m_trans_entry_signal"]
 
 def load():
+    """Загрузить обе эпохи bc_clone в словарь {эпоха: DataFrame}."""
     d={}
     for ep in ("2021","2024"):
         d[ep]=pd.read_parquet(f"{DATA}/bc_clone_v7_{ep}.parquet")
     return d
 
 def std(Xtr,Xte):
+    """Стандартизовать train/test по статистикам train (sd-пол 1e-9)."""
     mu=Xtr.mean(0); sd=Xtr.std(0); sd=np.where(sd<1e-9,1.0,sd)
     return (Xtr-mu)/sd,(Xte-mu)/sd
 
 def recall_at_train_thr(str_tr,ytr,str_te,yte,target_recall=0.995):
+    """Порог по train (recall>=target на позитивах), затем recall/FPR на test."""
     # порог по train: минимальный t, дающий recall>=target на train позитивах
     pos=np.sort(str_tr[ytr==1])
     if len(pos)==0: return np.nan,np.nan
@@ -49,6 +52,7 @@ def recall_at_train_thr(str_tr,ytr,str_te,yte,target_recall=0.995):
     return rec,fpr
 
 def run_task(d, feats, mask_fn, pos_fn, name):
+    """Обучить LR L2 + неглубокое дерево на срезе, печать AUC/AP/recall обе стороны."""
     print(f"\n===== {name} | признаков={len(feats)} =====")
     for tr,te in (("2024","2021"),("2021","2024")):
         dtr,dte=d[tr],d[te]
@@ -75,6 +79,7 @@ def run_task(d, feats, mask_fn, pos_fn, name):
         print(f"   TREE AUC in={tauc_in:.4f} out={tauc_out:.4f}")
 
 def main():
+    """CLI: прогнать диагностику достаточности obs (вход/выход, ±pos_tag, шум)."""
     d=load()
     inpos=lambda df:(df.a_in_position>0.5).to_numpy()
     flat =lambda df:(df.a_in_position<0.5).to_numpy()
