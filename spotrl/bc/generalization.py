@@ -31,8 +31,11 @@ from spotrl.bc.train_clone import (apply_scaler, build_policy, fit_scaler,
 # Пороги-полы AUC из диагностики obs (diag_obs_sufficiency_2026-07-26.md):
 # LR L2 out-of-epoch — вход 0.979/0.985, выход 0.941/0.936. Клон обязан быть не
 # хуже (он мощнее LR). Пол консервативный (минус запас на шум малой выборки).
-AUC_FLOOR_ENTRY = 0.95
-AUC_FLOOR_EXIT = 0.90
+# Пороги подняты (честный гейт v2, pre-reg 2026-07-27, пункт 5): вход 0.98,
+# выход 0.94 out-of-epoch. Прежние 0.95/0.90 — SUPERSEDED (были заниженным полом
+# по маломощной LR-диагностике; MLP-клон дал 0.991-1.0, запас есть).
+AUC_FLOOR_ENTRY = 0.98
+AUC_FLOOR_EXIT = 0.94
 
 
 def _auc(score: np.ndarray, y: np.ndarray) -> float:
