@@ -74,10 +74,38 @@ CAP_D = float(np.log((1.0 - LABEL_SMOOTH) / LABEL_SMOOTH))  # ~11.51 nat
 OBS_PREFIXES = ("m_", "a_", "w_", "rule_")
 CLIP_STD = 10.0             # клип стандартизованного входа
 
+# --- ПРОИЗВОДНЫЕ ВХОДНЫЕ ПРИЗНАКИ КЛОНА (input-pipeline, НЕ состав obs-спеки) ---
+# Фикс 2026-07-27 «остаток паузы»: решающий для входа сигнал — ПОРОГ РОВНО В НУЛЕ
+# признака `a_cooldown_remain` (все 434 истинных входа cd==0 ровно; все 28 спорных
+# gate-баров cd в [0.0024,0.0165] — дозревающая пауза, кратная 1/423≈0.00236). При
+# глобальной стандартизации (mu≈0.0061, sd≈0.0636) активный хвост сжимается до
+# ~0.1–0.3σ и тонет среди unit-масштабного шума 37 других осей; при сырой подаче
+# резкий порог у нуля требует веса первого слоя ~5500 (штраф weight_decay
+# 1e-4·5500²≈3e3 — обучение туда не идёт). Явный БУЛЕВ флаг делает порог линейно
+# разделимым: вклад CAP_D≈11.5 при входе 1 требует веса ~O(11), штраф wd≈0.012 —
+# ничтожен. Флаг — ЧИСТАЯ детерминированная функция уже наблюдаемого
+# `a_cooldown_remain` (тот же код на serve), НОВОЙ информации/утечки нет. Сам
+# остаток `a_cooldown_remain` при этом СОХРАНЯЕТСЯ (флаг + остаток = вариант Б).
+# Флаг ≡0 на всех входах без паузы и на in-position с cd==0 → выходная сторона и
+# ёмкость не затрагиваются.
+EXTRA_COLS = ("a_cooldown_active",)
+
 
 def obs_columns(df) -> list:
     """38 колонок наблюдения в порядке spec (префиксы m_/a_/w_/rule_)."""
     return [c for c in df.columns if c.startswith(OBS_PREFIXES)]
+
+
+def derive_extra(df) -> np.ndarray:
+    """Производные клон-признаки (N, len(EXTRA_COLS)); порядок = EXTRA_COLS.
+
+    Сейчас единственный — `a_cooldown_active = (a_cooldown_remain > 0)`: булев
+    индикатор активной паузы. Тест `>0` точен — активные значения кратны
+    1/423≈0.00236 (>0 строго), неактивные ровно 0.0, float-шума у нуля нет.
+    """
+    cd = df["a_cooldown_remain"].to_numpy(np.float32)
+    cd_active = (cd > 0.0).astype(np.float32)
+    return cd_active.reshape(-1, 1)
 
 
 def fit_scaler(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -129,10 +157,12 @@ def load_pooled(data_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict
         df = pd.read_parquet(Path(data_dir) / f"bc_clone_v7_{epoch}.parquet")
         frames.append(df)
     cols = obs_columns(frames[0])
+    cols_out = list(cols) + list(EXTRA_COLS)   # 38 spec + производные клона
     Xs, ys, ws, meta = [], [], [], {}
     off = 0
     for epoch, df in zip(("2021", "2024"), frames):
-        X = df[cols].to_numpy(np.float32)
+        X = np.concatenate([df[cols].to_numpy(np.float32), derive_extra(df)],
+                           axis=1)
         y = df["bc_action"].to_numpy().astype(np.int64)
         w = df["bc_weight"].to_numpy(np.float32)
         idx = np.arange(off, off + len(df))
@@ -148,7 +178,7 @@ def load_pooled(data_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict
         }
         Xs.append(X); ys.append(y); ws.append(w); off += len(df)
     return (np.concatenate(Xs), np.concatenate(ys),
-            np.concatenate(ws), {"per_epoch": meta, "cols": cols})
+            np.concatenate(ws), {"per_epoch": meta, "cols": cols_out})
 
 
 def build_policy(obs_dim: int, seed: int):
@@ -315,7 +345,7 @@ def main() -> None:
     ap.add_argument("--data", default="/home/cubecloud/Data/rlbinancetrader")
     ap.add_argument(
         "--out",
-        default="/home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy_reg")
+        default="/home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy_reg_cd")
     ap.add_argument("--seed", type=int, default=TRAIN_SEED)
     args = ap.parse_args()
 

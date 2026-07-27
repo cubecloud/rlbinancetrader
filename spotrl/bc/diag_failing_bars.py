@@ -32,10 +32,12 @@ EPOCHS = ("2021", "2024")
 
 
 def load_frames():
+    """DataFrame по эпохам EPOCHS (сырые колонки v7/obs для диагностики)."""
     return {e: pd.read_parquet(Path(DATA) / f"bc_clone_v7_{e}.parquet") for e in EPOCHS}
 
 
 def compute_d(frames, cols, mu, sd):
+    """d = logit_FLIP−logit_STAY клона по эпохам (scaler mu/sd из манифеста)."""
     from stable_baselines3 import PPO
     policy = PPO.load(MODEL, device="cpu").policy
     d = {}
@@ -83,6 +85,7 @@ def nn_collision(Xneg, Xpos):
 
 
 def main():
+    """CLI-диагностика природы провальных gate-баров (training vs obs-дыра)."""
     frames = load_frames()
     cols = obs_columns(frames["2021"])
     X_raw, y, w, meta = load_pooled(DATA)

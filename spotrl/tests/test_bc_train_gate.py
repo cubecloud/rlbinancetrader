@@ -11,7 +11,8 @@ import pandas as pd
 
 from spotrl.bc.exit_collision import run_epoch
 from spotrl.bc.generalization import _auc, _recall_fpr_at_train_thr
-from spotrl.bc.train_clone import apply_scaler, calibrate_shift, fit_scaler
+from spotrl.bc.train_clone import (EXTRA_COLS, apply_scaler, calibrate_shift,
+                                   derive_extra, fit_scaler)
 
 
 def _synthetic_epoch(tp_collision: bool) -> pd.DataFrame:
@@ -85,6 +86,40 @@ def test_calibrate_shift_infeasible_when_overlap():
     assert not cal.feasible
     # s* (FPR-anchored) ВСЕГДА определён, даже при infeasible интервале.
     assert np.isfinite(cal.s_star)
+
+
+def test_derive_extra_cooldown_active_threshold_at_zero():
+    """`a_cooldown_active` = (cd>0): 0 ровно при cd==0, 1 при любом cd>0.
+
+    Фикс «остаток паузы»: истинные входы cd==0 → флаг 0; дозревающая пауза
+    (кратна 1/423) → флаг 1. Порог у нуля точен, без float-шума.
+    """
+    cd = np.array([0.0, 1.0 / 423.0, 0.0165, 0.5, 1.0, 0.0], dtype=np.float32)
+    df = pd.DataFrame({"a_cooldown_remain": cd})
+    extra = derive_extra(df)
+    assert extra.shape == (len(cd), len(EXTRA_COLS))
+    np.testing.assert_array_equal(
+        extra[:, 0], np.array([0, 1, 1, 1, 1, 0], dtype=np.float32))
+    # флаг идеально делит cd==0 (истинные входы) от cd>0 (пауза активна).
+    assert (extra[cd == 0.0, 0] == 0.0).all()
+    assert (extra[cd > 0.0, 0] == 1.0).all()
+
+
+def test_derive_extra_survives_standardization():
+    """Редкий булев флаг после стандартизации даёт хорошо разделённый z.
+
+    Активная пауза редка (~0.6%): flag=1 после (x-mu)/sd уходит в большой +z,
+    flag=0 — в малый -z. Разделяющий сигнал НЕ тонет (в отличие от сырого cd).
+    """
+    cd = np.zeros(10000, dtype=np.float32)
+    cd[:60] = 0.005                      # ~0.6% активной паузы
+    df = pd.DataFrame({"a_cooldown_remain": cd})
+    flag = derive_extra(df)
+    mu, sd = fit_scaler(flag)
+    z = apply_scaler(flag, mu, sd)
+    z_active = z[flag[:, 0] > 0.5].mean()
+    z_idle = z[flag[:, 0] < 0.5].mean()
+    assert z_active - z_idle > 10.0     # разнос классов флага велик
 
 
 def test_generalization_auc_helper_edges():
