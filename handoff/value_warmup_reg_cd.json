@@ -1,0 +1,26 @@
+{
+  "ev_before": -82.71894065437867,
+  "ev_after": -0.06842530079802223,
+  "ev_train_after": 0.08835321811700403,
+  "ev_floor": 0.2,
+  "ev_gate_passes": false,
+  "ev_all_before": -272.43827853517007,
+  "ev_all_after": 0.021828706021295496,
+  "ev_episode_window_val_diag": -0.0310648878425841,
+  "logits_bitexact": true,
+  "max_logit_delta": 0.0,
+  "n_train": 2576542,
+  "n_val": 340176,
+  "n_trades_total": 434,
+  "val_trade_every": 5,
+  "target": "trade_close_return_to_go_gamma1",
+  "split": "trade_level",
+  "G_stats": {
+    "mean": 0.004414042457938194,
+    "std": 0.03130823001265526,
+    "min": -0.1330232471227646,
+    "max": 0.15711568295955658
+  },
+  "final_loss": 0.029340130160562694,
+  "saved": "/home/cubecloud/Data/rlbinancetrader/bc_clone_v7_policy_reg_cd_vw"
+}
