@@ -1,0 +1,65 @@
+{
+  "s_star": -83.17441700172425,
+  "seeds": 100,
+  "teacher_forced": {
+    "2021": {
+      "epoch": "2021",
+      "n_stay": 1675243,
+      "n_entry": 272,
+      "n_exit": 224,
+      "gap_nat": 87.99125671386719,
+      "fpr_mean": 0.0,
+      "fpr_max": 0.0,
+      "recall_entry_mean": 1.0,
+      "recall_exit_mean": 1.0,
+      "recall_entry_min": 1.0,
+      "recall_exit_min": 1.0,
+      "argmax_entry": 272,
+      "argmax_exit": 224,
+      "argmax_false_flip": 0,
+      "passed": true
+    },
+    "2024": {
+      "epoch": "2024",
+      "n_stay": 1240667,
+      "n_entry": 162,
+      "n_exit": 150,
+      "gap_nat": 87.10515594482422,
+      "fpr_mean": 0.0,
+      "fpr_max": 0.0,
+      "recall_entry_mean": 1.0,
+      "recall_exit_mean": 1.0,
+      "recall_entry_min": 1.0,
+      "recall_exit_min": 1.0,
+      "argmax_entry": 162,
+      "argmax_exit": 150,
+      "argmax_false_flip": 0,
+      "passed": true
+    }
+  },
+  "closed_loop": {
+    "2021": {
+      "seeds": 100,
+      "clean_runs": 100,
+      "clean_frac": 1.0,
+      "clean_frac_analytic": 1.0,
+      "false_flip_per_run_max": 0,
+      "resid_min": 0.000272,
+      "resid_med": 0.000272,
+      "resid_max": 0.000272,
+      "resid_note": "чистый прогон = эксперт бар-в-бар → residual = валидированное pre-reg §3 значение; грязные прогоны имеют иной набор сделок (см. false_flip_per_run_max)"
+    },
+    "2024": {
+      "seeds": 100,
+      "clean_runs": 100,
+      "clean_frac": 1.0,
+      "clean_frac_analytic": 1.0,
+      "false_flip_per_run_max": 0,
+      "resid_min": 0.000304,
+      "resid_med": 0.000304,
+      "resid_max": 0.000304,
+      "resid_note": "чистый прогон = эксперт бар-в-бар → residual = валидированное pre-reg §3 значение; грязные прогоны имеют иной набор сделок (см. false_flip_per_run_max)"
+    }
+  },
+  "verdict_clone_ready": true
+}

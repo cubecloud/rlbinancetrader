@@ -1,0 +1,46 @@
+{
+  "2024": {
+    "epoch": "2024",
+    "n_in_position": 664340,
+    "n_stay_in_pos": 664190,
+    "n_flip_exit": 150,
+    "k_tp": 0,
+    "upper_signal_b2b": 874,
+    "upper_legflip": 317191,
+    "exact_obs_conflict": 0,
+    "exact_is_vacuous": true,
+    "tp_thresholds": {
+      "dip": 0.11919014155864716,
+      "transition": 0.05915325507521629
+    },
+    "per_pos_tag_tp": {
+      "dip": 0,
+      "transition": 0
+    },
+    "max_recall_exit": 1.0,
+    "k_allowed": 0,
+    "verdict": "A=0 на выходе разрешён (0 коллизий по семантическим ключам)"
+  },
+  "2021": {
+    "epoch": "2021",
+    "n_in_position": 818291,
+    "n_stay_in_pos": 818067,
+    "n_flip_exit": 224,
+    "k_tp": 0,
+    "upper_signal_b2b": 1329,
+    "upper_legflip": 475202,
+    "exact_obs_conflict": 0,
+    "exact_is_vacuous": true,
+    "tp_thresholds": {
+      "dip": 0.11925408244132996,
+      "transition": 0.05912479758262634
+    },
+    "per_pos_tag_tp": {
+      "dip": 0,
+      "transition": 0
+    },
+    "max_recall_exit": 1.0,
+    "k_allowed": 1,
+    "verdict": "A=0 на выходе разрешён (0 коллизий по семантическим ключам)"
+  }
+}
