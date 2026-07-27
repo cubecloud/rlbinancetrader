@@ -1,0 +1,152 @@
+{
+  "s_global": -11.715701259756088,
+  "seeds": 100,
+  "sides": {
+    "entry": {
+      "s_lo": -3.47437023493432,
+      "s_hi": -12.214798996350227,
+      "s_star": -12.214798996350227,
+      "feasible_expectation": false,
+      "recall_ok_expectation": false,
+      "achievable": false,
+      "gap_needed": 20.312787887014657,
+      "per_epoch": {
+        "2021": {
+          "gap_nat": -3.356632709503174,
+          "fpr_mean": 3.6165268276293316e-07,
+          "fpr_max": 2.3332431145995687e-06,
+          "fpr_expect": 2.9999999999999967e-07,
+          "recall_expect": 0.06443242573493924,
+          "recall_mean": 0.06323529411764704,
+          "recall_min": 0.03308823529411765,
+          "n_stay": 857176,
+          "n_flip": 272
+        },
+        "2024": {
+          "gap_nat": -0.48665618896484375,
+          "fpr_mean": 8.673372918607334e-08,
+          "fpr_max": 1.7346745837214668e-06,
+          "fpr_expect": 7.389066415738573e-08,
+          "recall_expect": 0.05708889663668838,
+          "recall_mean": 0.05598765432098766,
+          "recall_min": 0.018518518518518517,
+          "n_stay": 576477,
+          "n_flip": 162
+        }
+      }
+    },
+    "exit": {
+      "s_lo": -2.0384999705430715,
+      "s_hi": -10.607034014762872,
+      "s_star": -10.607034014762872,
+      "feasible_expectation": false,
+      "recall_ok_expectation": false,
+      "achievable": false,
+      "gap_needed": 20.312787887014657,
+      "per_epoch": {
+        "2021": {
+          "gap_nat": -4.381718158721924,
+          "fpr_mean": 3.055984412034711e-07,
+          "fpr_max": 2.444787529627769e-06,
+          "fpr_expect": 2.999999999999996e-07,
+          "recall_expect": 0.39064067875727104,
+          "recall_mean": 0.39254464285714286,
+          "recall_min": 0.3482142857142857,
+          "n_stay": 818067,
+          "n_flip": 224
+        },
+        "2024": {
+          "gap_nat": -2.842806339263916,
+          "fpr_mean": 1.9572712627410833e-07,
+          "fpr_max": 3.011186558063205e-06,
+          "fpr_expect": 2.1251661993669836e-07,
+          "recall_expect": 0.35942023976533033,
+          "recall_mean": 0.3557333333333333,
+          "recall_min": 0.2733333333333333,
+          "n_stay": 664190,
+          "n_flip": 150
+        }
+      }
+    }
+  },
+  "sanity": {
+    "2021": {
+      "entry_all_flat": true,
+      "exit_all_inpos": true,
+      "stay_partition_ok": true,
+      "n_stay": 1675243,
+      "n_flat_stay": 857176,
+      "n_inpos_stay": 818067,
+      "n_entry": 272,
+      "n_exit": 224
+    },
+    "2024": {
+      "entry_all_flat": true,
+      "exit_all_inpos": true,
+      "stay_partition_ok": true,
+      "n_stay": 1240667,
+      "n_flat_stay": 576477,
+      "n_inpos_stay": 664190,
+      "n_entry": 162,
+      "n_exit": 150
+    }
+  },
+  "argmax_false_flip_by_side": {
+    "2021": {
+      "total": 0,
+      "in_pos": 0,
+      "flat": 0
+    },
+    "2024": {
+      "total": 0,
+      "in_pos": 0,
+      "flat": 0
+    }
+  },
+  "overlap": {
+    "entry": {
+      "2021": {
+        "min_flip_d": 5.615297794342041,
+        "max_stay_d": 8.971930503845215,
+        "n_stay_overlap": 26
+      },
+      "2024": {
+        "min_flip_d": 7.282090663909912,
+        "max_stay_d": 7.768746852874756,
+        "n_stay_overlap": 2
+      }
+    },
+    "exit": {
+      "2021": {
+        "min_flip_d": 3.6175737380981445,
+        "max_stay_d": 7.999291896820068,
+        "n_stay_overlap": 38
+      },
+      "2024": {
+        "min_flip_d": 3.873669147491455,
+        "max_stay_d": 6.716475486755371,
+        "n_stay_overlap": 22
+      }
+    }
+  },
+  "nature": {
+    "2021": {
+      "regime_cols": [
+        "m_regime_code"
+      ],
+      "exit_n_overlap": 38,
+      "exit_n_overlap_transition": 15,
+      "entry_n_overlap": 26,
+      "entry_n_overlap_transition": 0
+    },
+    "2024": {
+      "regime_cols": [
+        "m_regime_code"
+      ],
+      "exit_n_overlap": 22,
+      "exit_n_overlap_transition": 20,
+      "entry_n_overlap": 2,
+      "entry_n_overlap_transition": 0
+    }
+  }
+}
