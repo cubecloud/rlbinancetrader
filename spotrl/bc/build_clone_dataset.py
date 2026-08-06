@@ -103,8 +103,14 @@ def _file_id(path: str) -> dict:
     return {"path": str(p), "bytes": st.st_size, "mtime": int(st.st_mtime)}
 
 
-def _make_env(state_path: str, signals_path: str) -> SpotFlipEnv:
-    """Собрать среду копирования на v7-параметрах (как гейт паритета 6/6)."""
+def _make_env(state_path: str, signals_path: str,
+              episode_len: int = None) -> SpotFlipEnv:
+    """Собрать среду копирования на v7-параметрах (как гейт паритета 6/6).
+
+    episode_len: None → n+10 (старт с бара 0, полный проход — режим
+    копирования/гейтов/оценки). Число → окно для RL-обучения с джиттером
+    стартов (rl_stack_baseline Этап 0; вместе с env.allowed_starts).
+    """
     dataset = attach_signals(load_state(state_path), signals_path)
     n = len(dataset)
     world = WorldConfig(stop_loss_frac=V7_SL, cooldown_bars=V7_COOLDOWN_BARS,
@@ -128,7 +134,8 @@ def _make_env(state_path: str, signals_path: str) -> SpotFlipEnv:
     COPY_TP_SENTINEL = 0.20
     action_spec = ActionSpec(tp_buckets=(COPY_TP_SENTINEL,), expert_tp_index=0)
     config = EnvConfig(world=world, freedom=freedom, action_spec=action_spec,
-                       episode_len=n + 10)   # старт с бара 0, полный проход
+                       episode_len=(n + 10 if episode_len is None
+                                    else int(episode_len)))
     return SpotFlipEnv(dataset, config)
 
 

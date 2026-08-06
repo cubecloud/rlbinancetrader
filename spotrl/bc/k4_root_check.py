@@ -185,6 +185,7 @@ def eval_b2_ckpt(ckpt_path):
 
 
 def main():
+    """CLI: seed-режим (T7+клас.сид+B2' init) или eval-режим (B2' после)."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["seed", "eval"], default="seed")
     ap.add_argument("--ckpt", default=None)

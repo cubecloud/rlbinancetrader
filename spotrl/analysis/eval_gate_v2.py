@@ -247,6 +247,7 @@ def k2_tagged(v7, rl, op, postag, reason_map, oracle_delta_by_eb):
             rl_acted_on[rkey] += 1
 
     def summ(name):
+        """Сводка группы: n, acted, сумма/среднее дельт (пп)."""
         a = np.asarray(groups[name], float)
         nz = a[a != 0]
         return {"n": int(len(a)), "rl_acted": rl_acted_on[name],

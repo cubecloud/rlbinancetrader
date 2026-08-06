@@ -172,11 +172,26 @@ class SpotFlipEnv(gym.Env):
 
     def reset(self, *, seed: Optional[int] = None,
               options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
-        """Начать эпизод. Стартовый бар выбирается случайно по сиду."""
+        """Начать эпизод. Стартовый бар выбирается случайно по сиду.
+
+        ДЖИТТЕР СТАРТОВ (Этап 0 аудита, rl_stack_baseline): если у среды задан
+        `allowed_starts` (массив баров, обычно flat-бары v7 — чтобы не начинать
+        посреди позиции эксперта), старт выбирается случайно ИЗ НИХ по
+        сид-генератору. Иначе — прежнее поведение: равномерный старт в
+        [0, n−horizon−2] (при episode_len ≥ n это детерминированный бар 0 —
+        режим полного прохода для копирования/гейтов). Вариативность касается
+        только ТОЧКИ ВХОДА в историю; цены/сделки не искажаются.
+        """
         super().reset(seed=seed)
         horizon = min(self.config.episode_len, self._n_bars - 2)
-        last_start = max(0, self._n_bars - horizon - 2)
-        self._start = int(self.np_random.integers(0, last_start + 1))
+        allowed = getattr(self, "allowed_starts", None)
+        if allowed is not None and len(allowed) > 0:
+            ok = allowed[allowed <= max(0, self._n_bars - 2 - horizon)]
+            pool = ok if len(ok) > 0 else allowed
+            self._start = int(pool[self.np_random.integers(0, len(pool))])
+        else:
+            last_start = max(0, self._n_bars - horizon - 2)
+            self._start = int(self.np_random.integers(0, last_start + 1))
         self._t = self._start
         self.book = TradeBook(fee_side=self.config.world.fee_side)
         self._equity = 1.0

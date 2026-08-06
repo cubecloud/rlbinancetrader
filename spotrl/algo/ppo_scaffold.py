@@ -230,7 +230,9 @@ def build_scaffold(env, seed_model_path: str, manifest_path: str,
                    kl_coef: float, ent_coef: float, kl_dip_coef: float = 0.0,
                    gamma: float = 1.0, params_own: bool = False,
                    seed: int = 0, apply_seed_scaler: bool = True,
-                   min_hold_days: float = 0.0, **ppo_kwargs):
+                   min_hold_days: float = 0.0, weight_decay: float = 0.0,
+                   psl_w=None, psl_b: float = 0.0, psl_alpha: float = 0.0,
+                   **ppo_kwargs):
     """Построить каркас PPO: gamma=1.0, семя reg_cd_vw2, маска dip, KL-якорь.
 
     Args:
@@ -262,13 +264,25 @@ def build_scaffold(env, seed_model_path: str, manifest_path: str,
     if apply_seed_scaler:
         env = make_seed_scaler_vecenv(env, mu, sd)
 
-    model = PPO("MlpPolicy", env, gamma=gamma, ent_coef=ent_coef, seed=seed,
-                device="cpu",
-                policy_kwargs=dict(net_arch=dict(pi=[256, 256], vf=[256, 256])),
-                **ppo_kwargs)
-    # загрузить веса семени (политика reg_cd + масштабный критик).
+    # weight_decay (PoC-регуляризация против переобучения на 37 SL-сделках):
+    # L2 на policy+value через optimizer_kwargs единого Adam SB3.
+    pol_kwargs = dict(net_arch=dict(pi=[256, 256], vf=[256, 256]))
+    if weight_decay > 0.0:
+        pol_kwargs["optimizer_kwargs"] = dict(weight_decay=weight_decay)
+    # amend5 путь 1: приор p_SL на FLIP-логит через PSLPriorPolicy (механизм B).
+    use_psl = psl_w is not None and psl_alpha != 0.0
+    if use_psl:
+        from spotrl.algo.psl_prior_policy import PSLPriorPolicy
+        pol_kwargs.update(psl_w=psl_w, psl_b=psl_b, psl_alpha=psl_alpha)
+        policy_arg = PSLPriorPolicy
+    else:
+        policy_arg = "MlpPolicy"
+    model = PPO(policy_arg, env, gamma=gamma, ent_coef=ent_coef, seed=seed,
+                device="cpu", policy_kwargs=pol_kwargs, **ppo_kwargs)
+    # загрузить веса семени (политика reg_cd + масштабный критик); strict=False
+    # для PSLPrior — psl_w/psl_b буферы отсутствуют в семени и сохраняют своё.
     seed_model = PPO.load(seed_model_path, device="cpu")
-    model.policy.load_state_dict(seed_model.policy.state_dict())
+    model.policy.load_state_dict(seed_model.policy.state_dict(), strict=not use_psl)
 
     model._kl_dip_coef = float(kl_dip_coef)   # слабый адаптивный якорь на dip
     train_fn, clone = _make_masked_kl_train(

@@ -77,6 +77,7 @@ class _OneRollout(BaseCallback):
     """Захватить буфер на первом rollout_end (ДО train) и остановить learn."""
 
     def __init__(self, mu, sd, col_index):
+        """Замыкание на скейлер/индексы; result заполняется на rollout_end."""
         super().__init__()
         self.mu, self.sd, self.col_index = mu, sd, col_index
         self.done = False
@@ -130,6 +131,7 @@ class _OneRollout(BaseCallback):
         samp = actions[:, HEAD_POSITION]
 
         def grp_stats(gid, name):
+            """Статистика advantage/V/p_flip по группе dip-баров (sl/rec)."""
             gm = dip & (grp == gid)
             stay = gm & (exec_pos == 0)
             return {
@@ -175,6 +177,7 @@ def run(probe_steps=262144, ent_coef=0.03, beta=0.369, bdip=0.10, seed=0):
     df_ds = pd.read_parquet(DS)
 
     def make_env():
+        """Среда+драйвер первой свободы для пробы (log_bars=True)."""
         env = _make_env(STATE, SIG)
         expert, is_sig = load_expert_arrays(df_ds, env._n_bars)
         drv = FirstFreedomDriver(env, expert, is_sig, honor_dip=True,
@@ -192,6 +195,7 @@ def run(probe_steps=262144, ent_coef=0.03, beta=0.369, bdip=0.10, seed=0):
 
 
 def main():
+    """CLI: один rollout, печать B1/B2-диагностики."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=262144)
     ap.add_argument("--out", default=None)

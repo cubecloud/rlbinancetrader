@@ -164,6 +164,7 @@ def run():
 
 
 def main():
+    """CLI: warmup критика и печать B2'-ранжирования."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
